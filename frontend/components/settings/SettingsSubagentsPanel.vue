@@ -575,7 +575,7 @@ async function saveSubagentModel(value: string) {
                   {{ h.name }}
                   <span class="font-mono opacity-70">{{ h.command }}</span>
                   <span
-                    class="px-1 py-px text-[9px] leading-none border rounded"
+                    class="px-1 py-px text-[10px] leading-none border rounded"
                     :class="acpBadge(h).cls"
                     :title="h.acpDetail"
                     :data-testid="`acp-badge-${h.id}`"

@@ -91,7 +91,7 @@ function iconFor(file: SkillFile | undefined) {
         @click="node.file ? emit('select', node.file) : undefined"
       >
         <span
-          class="text-[9px] font-mono px-1 py-0.5 rounded shrink-0"
+          class="text-[10px] font-mono px-1 py-0.5 rounded shrink-0"
           :class="node.file?.isText ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-fg-muted'"
         >
           {{ iconFor(node.file) }}

@@ -256,7 +256,7 @@ async function doImport(mode: 'merge' | 'replace') {
           : 'bg-surface-elevated border-border text-fg-muted hover:text-fg-primary hover:border-input'"
         @click="activeCategory = 'All'"
       >
-        All <span class="tabular-nums opacity-60">({{ categoryCounts.All }})</span>
+        All <span class="tabular-nums text-fg-muted">({{ categoryCounts.All }})</span>
       </button>
       <button
         v-for="c in categories"
@@ -274,7 +274,7 @@ async function doImport(mode: 'merge' | 'replace') {
           class="w-3.5 h-3.5"
           aria-hidden="true"
         />
-        {{ c.label }} <span class="tabular-nums opacity-60">({{ categoryCounts[c.value] ?? 0 }})</span>
+        {{ c.label }} <span class="tabular-nums text-fg-muted">({{ categoryCounts[c.value] ?? 0 }})</span>
       </button>
     </div>
 
@@ -354,7 +354,7 @@ async function doImport(mode: 'merge' | 'replace') {
             aria-hidden="true"
           />
           {{ section.label }}
-          <span class="tabular-nums opacity-60">({{ section.prompts.length }})</span>
+          <span class="tabular-nums text-fg-muted">({{ section.prompts.length }})</span>
         </h2>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <PromptCard

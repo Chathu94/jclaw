@@ -233,7 +233,7 @@ function toggleAllExpanded() {
             : 'bg-surface-elevated border-border text-fg-muted hover:text-fg-primary hover:border-input'"
           @click="activeCategory = cat"
         >
-          {{ cat }} <span class="tabular-nums opacity-60">({{ categoryCounts[cat] }})</span>
+          {{ cat }} <span class="tabular-nums text-fg-muted">({{ categoryCounts[cat] }})</span>
         </button>
       </div>
 
@@ -263,7 +263,7 @@ function toggleAllExpanded() {
           class="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-muted"
         >
           {{ section.category }}
-          <span class="tabular-nums opacity-60">({{ section.cards.length }})</span>
+          <span class="tabular-nums text-fg-muted">({{ section.cards.length }})</span>
         </h2>
 
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

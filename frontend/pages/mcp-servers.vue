@@ -602,7 +602,7 @@ function removeHeaderRow(i: number) {
                   type="button"
                   class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
                   :title="expandedToolsRowId === server.id ? 'Hide tool list' : 'Show tool list'"
-                  :aria-label="expandedToolsRowId === server.id ? `Hide tools for ${server.name}` : `Show tools for ${server.name}`"
+                  :aria-label="expandedToolsRowId === server.id ? `Hide ${server.toolCount} tools for ${server.name}` : `Show ${server.toolCount} tools for ${server.name}`"
                   :aria-expanded="expandedToolsRowId === server.id"
                   @click="toggleToolsExpand(server.id)"
                 >

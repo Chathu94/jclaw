@@ -551,7 +551,7 @@ const navGroups: NavGroup[] = [
           >
             <NuxtLink
               to="/"
-              class="text-fg-muted hover:text-fg-strong transition-colors"
+              class="text-fg-muted hover:text-fg-strong underline underline-offset-2 transition-colors"
               @click="onCrumbClick('/')"
             >JClaw</NuxtLink>
             <template
@@ -562,7 +562,7 @@ const navGroups: NavGroup[] = [
               <NuxtLink
                 v-if="crumb.to"
                 :to="crumb.to"
-                class="text-fg-muted hover:text-fg-strong transition-colors"
+                class="text-fg-muted hover:text-fg-strong underline underline-offset-2 transition-colors"
                 @click="onCrumbClick(crumb.to)"
               >{{ crumb.label }}</NuxtLink>
               <span

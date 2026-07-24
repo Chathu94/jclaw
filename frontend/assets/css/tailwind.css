@@ -48,7 +48,7 @@
     --accent-foreground: hsl(0 0% 9%);
     --destructive: hsl(0 72% 45%);         /* JCLAW-691 #5: darkened so white --destructive-foreground ≥4.5:1 (was 60.2% ≈3.6:1) */
     --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 80%);               /* JCLAW-691 #4: 89.8%→80% — moderate lift for decorative dividers (full 3:1 is a heavier global change to confirm visually) */
+    --border: hsl(0 0% 57%);               /* WCAG-2026-07 #8: 80%→57% so borders meet 3:1 non-text on the near-white surface (was 1.6:1). Heavier chrome — see audit note. */
     --input: hsl(0 0% 55%);                /* JCLAW-691 #4: 89.8%→55% so form-field borders ≥3:1 non-text on the near-white surface */
     --ring: hsl(0 0% 3.9%);
     --radius: 0.5rem;
@@ -106,7 +106,7 @@
        intentional-invisibility uses of `dark:border-border` in
        layouts/default.vue have been switched to `dark:border-transparent`
        to preserve their structural-spacer behavior. */
-    --border: hsl(0 0% 32%);               /* JCLAW-691 #4: 22%→32% — more-visible decorative dividers (full 3:1 is a heavier global change to confirm) */
+    --border: hsl(0 0% 43%);               /* WCAG-2026-07 #8: 32%→43% so borders meet 3:1 non-text on the elevated dark surface (was 2.0:1). Heavier chrome — see audit note. */
     --input: hsl(0 0% 45%);                /* JCLAW-691 #4: 22%→45% so form-field borders ≥3:1 non-text on the elevated dark surface */
     --ring: hsl(0 0% 83.1%);
 
@@ -117,9 +117,9 @@
     --fg-muted: hsl(0 0% 56%);             /* secondary text — ~4.8:1 on elevated surface (WCAG AA; was 50%≈3.93:1) */
     --fg-strong: hsl(0 0% 100%);           /* emphasis/hover — white */
     --ok: hsl(160 84% 39%);                /* success — emerald-500 */
-    --danger: hsl(0 84% 60%);              /* error — red-500 */
+    --danger: hsl(0 84% 64%);              /* error — WCAG-2026-07 #6: 60%→64% so error text ≥4.5:1 on --surface-elevated (#222427); was 4.11:1 */
     --warning: hsl(38 92% 50%);            /* warning — amber-500 */
-    --info: hsl(217 91% 60%);              /* informational — blue-500 */
+    --info: hsl(217 91% 62%);              /* informational — WCAG-2026-07 #7: 60%→62% so info text ≥4.5:1 on --surface-elevated; was 4.29:1 */
   }
 
   /* Preserve v3 defaults that changed in v4 */

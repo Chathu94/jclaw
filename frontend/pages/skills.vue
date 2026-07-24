@@ -1761,15 +1761,15 @@ function totalSkillCount(agentId: number) {
 .prose-skill h1 { font-size: 1.4em; }
 .prose-skill h2 { font-size: 1.2em; }
 .prose-skill h3 { font-size: 1.05em; }
-.prose-skill pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; background: rgb(255,255,255,4%); border: 1px solid rgb(255,255,255,8%); border-radius: 0.375rem; }
+.prose-skill pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; background: var(--color-muted); border: 1px solid var(--color-border); border-radius: 0.375rem; }
 .prose-skill pre code { background: none; padding: 0; font-size: 0.85em; }
-.prose-skill code { background: rgb(255,255,255,8%); padding: 0.15em 0.35em; border-radius: 0.25rem; font-size: 0.85em; }
+.prose-skill code { background: var(--color-muted); padding: 0.15em 0.35em; border-radius: 0.25rem; font-size: 0.85em; }
 .prose-skill a { color: var(--color-fg-muted); text-decoration: underline; }
 .prose-skill a:hover { color: var(--color-fg-strong); }
-.prose-skill blockquote { border-left: 2px solid rgb(255,255,255,15%); padding-left: 1em; margin: 0.5em 0; color: var(--color-fg-muted); }
-.prose-skill hr { border: none; border-top: 1px solid rgb(255,255,255,10%); margin: 1em 0; }
+.prose-skill blockquote { border-left: 2px solid var(--color-border); padding-left: 1em; margin: 0.5em 0; color: var(--color-fg-muted); }
+.prose-skill hr { border: none; border-top: 1px solid var(--color-border); margin: 1em 0; }
 .prose-skill strong { font-weight: 600; color: var(--color-fg-strong); }
 .prose-skill table { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 0.9em; }
-.prose-skill th, .prose-skill td { padding: 0.4em 0.75em; text-align: left; border-bottom: 1px solid rgb(255,255,255,8%); }
+.prose-skill th, .prose-skill td { padding: 0.4em 0.75em; text-align: left; border-bottom: 1px solid var(--color-border); }
 .prose-skill th { font-weight: 600; color: var(--color-fg-strong); border-bottom-width: 2px; }
 </style>
