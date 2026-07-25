@@ -467,16 +467,24 @@ const promptBreakdownView = ref<'table' | 'chart'>('table')
  * two. Skills are deliberately excluded: they live inside the Skills section
  * already, so including them would double-count.
  *
- * Tool names carry a prefix so the legend says which half a slice came from, and
- * so a tool that happens to share a name with a section can't collide on the
- * slice key.
+ * Tool schemas roll up into a single slice rather than one per tool. Individually
+ * they are ~30 entries, nearly all under 2%, which turned the donut into a band
+ * of slivers and buried the sections it exists to compare. Rolled up, the chart
+ * answers the question it is actually read for — how the input splits between
+ * standing prompt and tool surface — and the table below keeps the per-tool
+ * numbers for when that is the question instead.
  */
 const promptChartEntries = computed<PromptBreakdownEntry[]>(() => {
   const data = promptBreakdownData.value
   if (!data) return []
+  if (!data.tools.length) return [...data.sections]
   return [
     ...data.sections,
-    ...data.tools.map(t => ({ ...t, name: `Tool: ${t.name}` })),
+    {
+      name: `Tool schemas (${data.tools.length})`,
+      chars: data.tools.reduce((n, t) => n + t.chars, 0),
+      tokens: data.tools.reduce((n, t) => n + t.tokens, 0),
+    },
   ]
 })
 

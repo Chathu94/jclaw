@@ -722,7 +722,11 @@ describe('Agents page — Inspect prompt dialog', () => {
       // Skills live inside the Identity/Skills section already — the chart must
       // not merge them in on top, or the shares would exceed the whole.
       skills: [{ name: 'deploy', chars: 40, tokens: 10 }],
-      tools: [{ name: 'Bash', chars: 100, tokens: 25 }],
+      // Two tools that must arrive as ONE slice summing to 25%.
+      tools: [
+        { name: 'Bash', chars: 60, tokens: 15 },
+        { name: 'Read', chars: 40, tokens: 10 },
+      ],
     }))
     setupAgentsApi()
     const component = await mountSuspended(Agents)
@@ -743,11 +747,13 @@ describe('Agents page — Inspect prompt dialog', () => {
     expect(component.findAll('table').length).toBe(0)
     expect(component.findAll('svg[role="img"]')).toHaveLength(1)
 
-    // Its legend carries slices from both series, tools marked by origin.
+    // Sections stay individual; the tool schemas arrive as one rolled-up slice
+    // carrying their count, so ~30 sub-2% tools can't bury the sections.
     const legend = component.find('svg[role="img"]').attributes('aria-label')!
     expect(legend).toContain('Identity 50.0%')
     expect(legend).toContain('Safety 25.0%')
-    expect(legend).toContain('Tool: Bash 25.0%')
+    expect(legend).toContain('Tool schemas (2) 25.0%')
+    expect(legend).not.toContain('Bash')
     // Skills are not a third series: 50 + 25 + 25 already closes the circle.
     expect(legend).not.toContain('deploy')
   })

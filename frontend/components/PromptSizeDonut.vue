@@ -124,7 +124,7 @@ const summary = computed(() =>
     <div class="flex flex-col lg:flex-row items-center lg:items-start gap-6">
       <svg
         :viewBox="`0 0 ${(RADIUS + STROKE) * 2} ${(RADIUS + STROKE) * 2}`"
-        class="w-40 h-40 shrink-0 -rotate-90 order-1 lg:order-2 lg:self-center"
+        class="w-56 h-56 lg:w-72 lg:h-72 shrink-0 -rotate-90 order-1 lg:order-2 lg:self-center"
         role="img"
         :aria-label="summary"
       >
