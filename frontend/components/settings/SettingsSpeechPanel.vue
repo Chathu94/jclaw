@@ -74,10 +74,13 @@ const supportsCloning = computed(() => activeModelStatus.value?.supportsCloning 
 const referenceVoice = computed(() => ttsState.value?.referenceVoice ?? null)
 const refError = ref('')
 
-async function uploadReferenceVoice(event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
+/** Prefer the server's reason (wrong format, too large) over a generic failure —
+ *  it is actionable, and the operator still has the clip to hand. */
+function reasonFor(e: unknown, fallback: string) {
+  return (e as { data?: { message?: string } })?.data?.message || (e as Error)?.message || fallback
+}
+
+async function postReferenceVoice(file: File) {
   refError.value = ''
   saving.value = true
   try {
@@ -87,15 +90,51 @@ async function uploadReferenceVoice(event: Event) {
     refreshTtsState()
   }
   catch (e) {
-    // Surface the server's reason (wrong format, too large) rather than a generic
-    // failure — it is actionable, and the operator still has the file to hand.
-    refError.value = (e as { data?: { message?: string } })?.data?.message
-      || (e as Error)?.message || 'upload failed'
+    refError.value = reasonFor(e, 'upload failed')
   }
   finally {
     saving.value = false
+  }
+}
+
+async function uploadReferenceVoice(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    await postReferenceVoice(file)
+  }
+  finally {
     input.value = '' // let the same file be re-picked after a rejection
   }
+}
+
+// JCLAW-868: record a clip here instead of making the operator find or make one
+// elsewhere first. Posts to the same endpoint — the recording is just a file.
+const { recording, seconds, maxSeconds, start: startCapture, stop: stopCapture }
+  = useVoiceClipRecorder({ onLimit: () => void finishRecording() })
+
+async function toggleRecording() {
+  if (recording.value) {
+    await finishRecording()
+    return
+  }
+  refError.value = ''
+  try {
+    await startCapture()
+  }
+  catch (e) {
+    refError.value = reasonFor(e, 'could not start recording (mic permission?)')
+  }
+}
+
+async function finishRecording() {
+  const clip = stopCapture()
+  if (!clip) {
+    refError.value = 'nothing was recorded'
+    return
+  }
+  await postReferenceVoice(new File([clip], 'recording.wav', { type: 'audio/wav' }))
 }
 
 async function clearReferenceVoice() {
@@ -329,14 +368,29 @@ onUnmounted(() => stopTtsPolling())
         >
           <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Voice clip</span>
           <span
-            v-if="referenceVoice"
+            v-if="recording"
+            role="status"
+            aria-live="polite"
+            class="flex-1 text-sm font-mono text-red-600 dark:text-red-400"
+          >Recording… {{ seconds }}s / {{ maxSeconds }}s</span>
+          <span
+            v-else-if="referenceVoice"
             class="flex-1 text-sm text-fg-strong font-mono truncate"
           >{{ referenceVoice }}</span>
           <span
             v-else
             class="flex-1 text-sm text-fg-muted italic"
-          >model default — upload a clip to clone a voice</span>
+          >model default — record or upload a clip to clone a voice</span>
+          <button
+            type="button"
+            class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0"
+            :disabled="saving"
+            @click="toggleRecording"
+          >
+            {{ recording ? 'Stop' : 'Record' }}
+          </button>
           <label
+            v-if="!recording"
             for="tts-reference-voice"
             class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0 cursor-pointer"
           >
@@ -352,7 +406,7 @@ onUnmounted(() => stopTtsPolling())
             >
           </label>
           <button
-            v-if="referenceVoice"
+            v-if="referenceVoice && !recording"
             type="button"
             class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-muted transition-colors shrink-0"
             :disabled="saving"

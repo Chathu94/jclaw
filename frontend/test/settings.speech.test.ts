@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { readBody } from 'h3'
@@ -254,5 +254,94 @@ describe('Settings page — Speech (JCLAW-789/793)', () => {
     const c = await mountSettingsSection('speech')
 
     expect(c.find('input[aria-label="Reference voice clip"]').exists()).toBe(false)
+  })
+
+  // JCLAW-868 — recording a clip from the mic, alongside uploading one.
+  describe('reference clip recording', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+      Reflect.deleteProperty(navigator, 'mediaDevices')
+    })
+
+    const findButton = (c: Awaited<ReturnType<typeof mountSettingsSection>>, label: string) =>
+      c.findAll('button').find(b => b.text() === label)
+
+    it('offers Record wherever it offers Upload', async () => {
+      setupApi({ engine: 'sidecar', sidecarModel: 'chatterbox' })
+      const c = await mountSettingsSection('speech')
+
+      expect(findButton(c, 'Record')).toBeTruthy()
+    })
+
+    it('offers no Record button for a model that cannot clone', async () => {
+      setupApi({ engine: 'sidecar', sidecarModel: 'kokoro' })
+      const c = await mountSettingsSection('speech')
+
+      expect(findButton(c, 'Record')).toBeFalsy()
+    })
+
+    it('surfaces a reason when the browser exposes no microphone', async () => {
+      // No mediaDevices in the test environment, which is also the real
+      // behaviour on an insecure origin — it must not fail silently.
+      setupApi({ engine: 'sidecar', sidecarModel: 'chatterbox' })
+      const c = await mountSettingsSection('speech')
+
+      await findButton(c, 'Record')!.trigger('click')
+      await flushPromises()
+
+      expect(c.text()).toContain('microphone capture is not available in this browser')
+    })
+
+    it('encodes the recording and posts it as recording.wav', async () => {
+      const nodes: Array<{ port: { onmessage: ((e: { data: Float32Array }) => void) | null } }> = []
+      const stopTrack = vi.fn()
+
+      class FakeWorkletNode {
+        port: { onmessage: ((e: { data: Float32Array }) => void) | null } = { onmessage: null }
+        connect = vi.fn()
+        disconnect = vi.fn()
+        constructor() {
+          nodes.push(this)
+        }
+      }
+      class FakeAudioContext {
+        sampleRate = 48000
+        destination = {}
+        audioWorklet = { addModule: vi.fn().mockResolvedValue(undefined) }
+        createMediaStreamSource = vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() }))
+        close = vi.fn().mockResolvedValue(undefined)
+      }
+      vi.stubGlobal('AudioContext', FakeAudioContext)
+      vi.stubGlobal('AudioWorkletNode', FakeWorkletNode)
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] }) },
+      })
+
+      let posted = 0
+      registerEndpoint('/api/tts/reference-voice', {
+        method: 'POST',
+        handler: () => {
+          posted++
+          return { status: 'ok', filename: 'recording.wav' }
+        },
+      })
+      setupApi({ engine: 'sidecar', sidecarModel: 'chatterbox' })
+      const c = await mountSettingsSection('speech')
+
+      await findButton(c, 'Record')!.trigger('click')
+      await flushPromises()
+      expect(findButton(c, 'Stop')).toBeTruthy()
+
+      nodes[0]!.port.onmessage!({ data: new Float32Array(4096) })
+      await flushPromises()
+
+      await findButton(c, 'Stop')!.trigger('click')
+      await flushPromises()
+
+      expect(posted).toBe(1)
+      // The mic must not outlive the recording.
+      expect(stopTrack).toHaveBeenCalled()
+    })
   })
 })
