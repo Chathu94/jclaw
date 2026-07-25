@@ -31,7 +31,7 @@ class OpenRouterProviderTest extends UnitTest {
         var details = List.of(
                 new ReasoningDetail("reasoning.text", "first thought"),
                 new ReasoningDetail("reasoning.text", " plus more"));
-        var delta = new ChunkDelta(null, null, null, "fallback", details);
+        var delta = new ChunkDelta(null, null, null, "fallback", null, details);
         var result = extractReasoning(delta);
         assertEquals("first thought plus more", result,
                 "non-null reasoningDetails must concatenate text fields and win over reasoning string");
@@ -44,20 +44,20 @@ class OpenRouterProviderTest extends UnitTest {
         var details = List.of(
                 new ReasoningDetail("reasoning.signature", null),
                 new ReasoningDetail("reasoning.text", null));
-        var delta = new ChunkDelta(null, null, null, "ignored-fallback", details);
+        var delta = new ChunkDelta(null, null, null, "ignored-fallback", null, details);
         assertNull(extractReasoning(delta),
                 "all-null detail texts must yield null, not empty string");
     }
 
     @Test
     void extractReasoningFallsBackToReasoningStringWhenDetailsAbsent() throws Exception {
-        var delta = new ChunkDelta(null, null, null, "from string field", null);
+        var delta = new ChunkDelta(null, null, null, "from string field", null, null);
         assertEquals("from string field", extractReasoning(delta));
     }
 
     @Test
     void extractReasoningReturnsNullWhenBothFieldsAbsent() throws Exception {
-        var delta = new ChunkDelta(null, null, null, null, null);
+        var delta = new ChunkDelta(null, null, null, null, null, null);
         assertNull(extractReasoning(delta));
     }
 

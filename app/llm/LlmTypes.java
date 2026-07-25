@@ -153,11 +153,25 @@ public final class LlmTypes {
             String finishReason
     ) {}
 
+    /**
+     * One streamed delta. Three different reasoning shapes exist in the wild and
+     * each provider picks the one its server emits via
+     * {@code LlmProvider.extractReasoningFromDelta}:
+     *
+     * <ul>
+     *   <li>{@code reasoning} — plain string (Ollama, Together)</li>
+     *   <li>{@code reasoningContent} — deserialized from {@code reasoning_content}
+     *       by the LOWER_CASE_WITH_UNDERSCORES naming policy. What
+     *       OpenAI-compatible servers emit: LM Studio, vLLM, SGLang (JCLAW-850)</li>
+     *   <li>{@code reasoningDetails} — structured array (OpenRouter)</li>
+     * </ul>
+     */
     public record ChunkDelta(
             String role,
             String content,
             List<ToolCallChunk> toolCalls,
             String reasoning,
+            String reasoningContent,
             List<ReasoningDetail> reasoningDetails
     ) {}
 

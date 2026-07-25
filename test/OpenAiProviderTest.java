@@ -3,6 +3,7 @@ import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatRequest;
+import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
 import org.junit.jupiter.api.Test;
@@ -150,5 +151,65 @@ class OpenAiProviderTest extends UnitTest {
         assertEquals(11, usage.promptTokens());
         assertEquals(7, usage.completionTokens());
         assertEquals(18, usage.totalTokens());
+    }
+
+    // =====================
+    // extractReasoningFromDelta — JCLAW-850
+    //
+    // ProviderRegistry routes every unrecognized provider to OpenAiProvider, so
+    // this class serves LM Studio, vLLM, SGLang and Groq. They stream thinking
+    // as `reasoning_content`; before JCLAW-850 the base returned null, so
+    // onReasoning never fired and a reasoning model rendered a silent gap then a
+    // bare answer.
+    // =====================
+
+    @Test
+    void extractReasoningFromDeltaReadsReasoningContent() throws Exception {
+        // Shape verified against a live LM Studio capture:
+        //   "delta":{"role":"assistant","reasoning_content":"Thinking"}
+        var delta = new ChunkDelta("assistant", null, null, null, "Thinking", null);
+        assertEquals("Thinking", extractReasoning(provider(), delta));
+    }
+
+    @Test
+    void extractReasoningFromDeltaFallsBackToPlainReasoningString() throws Exception {
+        // Some OpenAI-compatible servers emit the plain `reasoning` string instead.
+        var delta = new ChunkDelta("assistant", null, null, "plain form", null, null);
+        assertEquals("plain form", extractReasoning(provider(), delta));
+    }
+
+    @Test
+    void extractReasoningFromDeltaPrefersReasoningContentOverPlainString() throws Exception {
+        var delta = new ChunkDelta("assistant", null, null, "ignored", "preferred", null);
+        assertEquals("preferred", extractReasoning(provider(), delta));
+    }
+
+    @Test
+    void extractReasoningFromDeltaReturnsNullWhenAbsent() throws Exception {
+        // OpenAI proper never streams reasoning, so both fields stay absent and
+        // the extractor must report that as null rather than an empty string.
+        var delta = new ChunkDelta("assistant", "visible content", null, null, null, null);
+        assertNull(extractReasoning(provider(), delta),
+                "absence of reasoning must surface as null");
+    }
+
+    @Test
+    void chunkDeltaDeserializesReasoningContentFromSnakeCase() {
+        // The field only reaches ChunkDelta because the SSE parser uses
+        // LOWER_CASE_WITH_UNDERSCORES. Pin that: a naming-policy change would
+        // silently drop reasoning again with every unit test still green.
+        var gson = new com.google.gson.GsonBuilder()
+                .setFieldNamingPolicy(com.google.gson.FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+                .create();
+        var delta = gson.fromJson("""
+                {"role":"assistant","reasoning_content":"step one"}
+                """, ChunkDelta.class);
+        assertEquals("step one", delta.reasoningContent());
+    }
+
+    private static String extractReasoning(LlmProvider p, ChunkDelta delta) throws Exception {
+        Method m = LlmProvider.class.getDeclaredMethod("extractReasoningFromDelta", ChunkDelta.class);
+        m.setAccessible(true);
+        return (String) m.invoke(p, delta);
     }
 }

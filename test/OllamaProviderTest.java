@@ -138,14 +138,14 @@ class OllamaProviderTest extends UnitTest {
     @Test
     void extractReasoningFromDeltaReadsTopLevelReasoningString() throws Exception {
         var p = provider();
-        var delta = new ChunkDelta("assistant", null, null, "thinking step 1", null);
+        var delta = new ChunkDelta("assistant", null, null, "thinking step 1", null, null);
         assertEquals("thinking step 1", extractReasoning(p, delta));
     }
 
     @Test
     void extractReasoningFromDeltaReturnsNullWhenAbsent() throws Exception {
         var p = provider();
-        var delta = new ChunkDelta("assistant", "regular content", null, null, null);
+        var delta = new ChunkDelta("assistant", "regular content", null, null, null, null);
         assertNull(extractReasoning(p, delta),
                 "extractor must surface the absence of reasoning as null");
     }
