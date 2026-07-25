@@ -34,6 +34,28 @@ export function effectiveThinkingLevels(model: ProviderModel | null | undefined)
   return model.supportsThinking ? [...DEFAULT_THINKING_LEVELS] : []
 }
 
+/**
+ * Providers that run on the operator's own hardware — the "Local" subsection of
+ * Settings → LLM Providers (JCLAW-182). Unknown providers default to remote.
+ *
+ * This is declared identity, not something inferred from {@code baseUrl}: a
+ * remote provider can perfectly well sit behind a loopback or LAN address (a
+ * local proxy or gateway fronting a cloud API), so the host tells you where the
+ * socket goes, not where the model runs. Settings is where the operator states
+ * which is which, so Settings is the source of truth.
+ */
+const LOCAL_PROVIDERS = new Set(['ollama-local', 'lm-studio', 'vllm', 'llama-cpp'])
+
+/**
+ * Whether a provider is self-hosted, per {@link LOCAL_PROVIDERS}. Gates the
+ * "Prefilling…" status label: prompt prefill / model load is only a long,
+ * visible window on a local model — on a remote provider the pre-first-token
+ * gap is a sub-second network/queue hop, not a prefill worth surfacing.
+ */
+export function isLocalProvider(name: string | null | undefined): boolean {
+  return !!name && LOCAL_PROVIDERS.has(name)
+}
+
 /** Find a model's metadata by provider name + model id, or null if not found. */
 export function findProviderModel(
   providers: Provider[],

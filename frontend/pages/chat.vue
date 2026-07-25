@@ -41,6 +41,8 @@ import { useChatAnnouncePoller } from '~/composables/useChatAnnouncePoller'
 import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
+import { useStreamProgress } from '~/composables/useStreamProgress'
+import { isLocalProvider } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 
@@ -450,6 +452,27 @@ const {
   refreshAgents,
 })
 
+// Live "Prefilling… / Generating…" indicator with a running elapsed timer for
+// the in-flight turn (useStreamProgress). `producing` flips true on the model's
+// first sign of output — a reasoning or content delta, OR a tool call — which
+// is exactly when the pre-first-token (prompt-prefill / model-load) window
+// ends. Including tool calls matters for the tool-heavy `main` agent: a
+// tool-first turn would otherwise sit on "Prefilling…" while a tool visibly
+// executes above. Once producing latches, the label reads "Generating…" for
+// the rest of the turn; the timer keeps slow local turns from looking hung.
+const streamingMessage = computed(() => messages.value.find(m => m._key === streamingMessageKey.value) ?? null)
+const streamProducing = computed(() =>
+  !!streamContent.value || !!streamReasoning.value || !!streamingMessage.value?.toolCalls?.length,
+)
+// "Prefilling…" is meaningful only on a self-hosted model (a long, visible
+// prompt-prefill / model-load window). Locality is the provider's declared
+// classification — the Local subsection of Settings → LLM Providers — not
+// something read off its baseUrl, which can point at loopback for a remote
+// provider too. Remote turns show "Generating…" from the first frame.
+// selectedModelKey is "<provider>::<modelId>".
+const streamIsLocal = computed(() => isLocalProvider(selectedModelKey.value.split('::')[0]))
+const { label: streamProgressLabel, elapsed: streamProgressElapsed } = useStreamProgress(streaming, streamProducing, streamIsLocal)
+
 // Composer-local interaction glue (/model autocomplete, textarea keyboard +
 // resize handlers, drop/paste/file-input routing, and the empty↔active FLIP
 // animation) lives in useChatComposer. The composer <form> template stays in
@@ -778,22 +801,32 @@ function exportConversation() {
               @set-tok-stats-hover-key="tokStatsHoverKey = $event"
             />
             <!--
-              Pre-first-byte placeholder. Visible only during the gap between
-              "user sent the request" and "the first stream event (reasoning
-              OR content) arrived." Once either signal lands, displayMessages
-              starts rendering the real bubble (reasoning card and/or
-              markdown body) and this placeholder yields. Without the
-              streamReasoning guard, JCLAW-75 regression: reasoning-mode
-              turns would show this pill for the entire thinking phase.
-
-              Rendered as plain "Generating..." text — no bubble, no
-              "assistant" label — matching Unsloth Studio's landing.
+              In-flight turn progress. Shown for the whole stream (send →
+              done) with a running elapsed timer, so a slow turn no longer
+              looks hung. Two phases off client-observable stream state:
+                • "Prefilling…" — stream open, no token yet (prompt prefill /
+                  model load; the GPU-busy-but-blank window, esp. on local
+                  models). This is the gap the old pre-first-byte placeholder
+                  covered.
+                • "Generating…" — the first reasoning or content delta landed.
+              The reasoning card / markdown body render independently in the
+              message above; this line only adds the phase + elapsed affordance.
+              a11y: only the phase label is a live region (role="status") — the
+              per-second timer is aria-hidden so it doesn't spam announcements.
             -->
             <div
-              v-if="streaming && !streamContent && !streamReasoning"
-              class="text-base text-fg-muted animate-pulse"
+              v-if="streaming"
+              class="flex items-center gap-2 text-base text-fg-muted"
+              data-testid="stream-progress"
             >
-              Generating...
+              <span
+                class="animate-pulse"
+                role="status"
+              >{{ streamProgressLabel }}</span>
+              <span
+                class="text-sm tabular-nums opacity-80"
+                aria-hidden="true"
+              >{{ streamProgressElapsed }}</span>
             </div>
           </div>
         </div>

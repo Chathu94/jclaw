@@ -18,6 +18,7 @@ import {
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+import { isLocalProvider } from '~/composables/useProviders'
 import type { Agent, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 
 const { configData, saving, refresh, getProviderModels, editingKey, editValue, startEdit, updateEntry, providersData } = useSettingsConfig()
@@ -506,21 +507,6 @@ function closeDiscovery() {
 // are set in the Image Generation section, so skip them when grouping LLM Providers.
 const IMAGE_ONLY_PROVIDERS = new Set(['bfl', 'replicate'])
 
-// JCLAW-182: split LLM Providers into Remote and Local subsections in the
-// Settings UI. Encoded as a static map rather than a backend field — only
-// four providers, names are stable, no need for a generic "is this a local
-// provider" property on Config. Unknown providers default to remote.
-const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
-  'ollama-cloud': 'remote',
-  'openrouter': 'remote',
-  'openai': 'remote',
-  'together': 'remote',
-  'ollama-local': 'local',
-  'lm-studio': 'local',
-  'vllm': 'local',
-  'llama-cpp': 'local',
-}
-
 const PROVIDER_LABELS: Record<string, string> = {
   'ollama-cloud': 'Ollama Cloud',
   'openrouter': 'OpenRouter',
@@ -532,8 +518,13 @@ const PROVIDER_LABELS: Record<string, string> = {
   'llama-cpp': 'llama.cpp',
 }
 
+// JCLAW-182: split LLM Providers into Remote and Local subsections in the
+// Settings UI. Which providers are self-hosted lives in useProviders as
+// isLocalProvider — this section is where the operator sees that classification,
+// but the chat page's "Prefilling…" gate reads the same predicate, so it can't
+// be a map private to this panel.
 function providerGroup(name: string): 'remote' | 'local' {
-  return PROVIDER_GROUPS[name] ?? 'remote'
+  return isLocalProvider(name) ? 'local' : 'remote'
 }
 
 function providerLabel(name: string): string {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref, type Ref } from 'vue'
 import { useConfirm } from '~/composables/useConfirm'
-import { useProviders, type ConfigData } from '~/composables/useProviders'
+import { useProviders, isLocalProvider, type ConfigData } from '~/composables/useProviders'
 
 // ---------------------------------------------------------------------------
 // useConfirm
@@ -337,5 +337,38 @@ describe('useProviders', () => {
 
     const { providers } = useProviders(configData)
     expect(providers.value).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isLocalProvider
+// ---------------------------------------------------------------------------
+
+describe('isLocalProvider', () => {
+  it('matches the Local subsection of Settings → LLM Providers', () => {
+    expect(isLocalProvider('ollama-local')).toBe(true)
+    expect(isLocalProvider('lm-studio')).toBe(true)
+    expect(isLocalProvider('vllm')).toBe(true)
+    expect(isLocalProvider('llama-cpp')).toBe(true)
+  })
+
+  it('treats remote providers as non-local', () => {
+    expect(isLocalProvider('ollama-cloud')).toBe(false)
+    expect(isLocalProvider('openai')).toBe(false)
+    expect(isLocalProvider('openrouter')).toBe(false)
+    expect(isLocalProvider('together')).toBe(false)
+  })
+
+  it('defaults an unknown provider to remote', () => {
+    // Mirrors the Settings grouping: an operator-added provider lands under
+    // Remote until it is declared local, so it never claims a prefill window.
+    expect(isLocalProvider('some-new-provider')).toBe(false)
+  })
+
+  it('is false for a missing provider name', () => {
+    expect(isLocalProvider(null)).toBe(false)
+    expect(isLocalProvider(undefined)).toBe(false)
+    // selectedModelKey is "" before a model resolves, so split('::')[0] is "".
+    expect(isLocalProvider('')).toBe(false)
   })
 })

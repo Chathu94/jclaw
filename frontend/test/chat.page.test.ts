@@ -46,10 +46,14 @@ describe('Chat page — streaming state machine', () => {
     await flushPromises()
 
     // The streaming badge no longer lives in the header — it moved to the
-    // in-body pre-first-byte placeholder ('Generating...') that only
-    // renders while streaming && !streamContent && !streamReasoning.
-    // Guard against either indicator leaking into the idle render.
+    // in-body progress line (data-testid="stream-progress"), which renders
+    // for the whole turn while `streaming` is true and carries the phase
+    // label ("Prefilling…" on a local model / "Generating…") plus an elapsed
+    // timer. Guard against any of those indicators leaking into the idle
+    // render, including the legacy header/placeholder strings.
     const html = component.html()
+    expect(html).not.toContain('stream-progress')
+    expect(html).not.toContain('Prefilling')
     expect(html).not.toContain('streaming...')
     expect(html).not.toContain('Thinking...')
     expect(html).not.toContain('Generating...')
