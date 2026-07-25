@@ -10,6 +10,7 @@ import models.Agent;
 import models.Conversation;
 import models.MessageAttachment;
 import play.Logger;
+import play.db.jpa.NoTransaction;
 import play.mvc.Http;
 import play.mvc.WebSocketController;
 import services.AgentService;
@@ -123,6 +124,29 @@ public class VoiceController extends WebSocketController {
     private static final String KEY_MESSAGE = "message";
     private static final String KEY_AGENT_ID = "agentId";
 
+    /**
+     * JCLAW-862 follow-up: {@code @NoTransaction} is load-bearing here, for two
+     * reasons discovered when the session conversation went invisible.
+     *
+     * <p><b>Correctness.</b> Play otherwise wraps this method in a per-request JPA
+     * transaction that lives for the whole WebSocket session. The conversation
+     * created at init then joined that transaction and stayed uncommitted until
+     * the socket closed, so the per-turn threads — which get transactions of their
+     * own — could not see it, aborted with "session conversation is gone", and
+     * left the client waiting in Thinking forever. Opting out means the
+     * {@code Tx.run} at init owns and commits its own transaction, which is what
+     * every other DB touch on this path already assumed.
+     *
+     * <p><b>Resource.</b> The same wrapper pinned a HikariCP connection for the
+     * entire conversation — minutes of idle mic time holding a pooled connection.
+     * That is exactly what JCLAW-199 opted the SSE endpoints out of; the voice
+     * socket is longer-lived than any of them and was never opted out.
+     *
+     * <p>Safe because every DB access reachable from here already goes through
+     * {@code Tx.run}: {@link #resolveAgent}, the per-turn plan,
+     * {@link #modelHearsAudioAtInit}, and {@link #discardSessionConversation}.
+     */
+    @NoTransaction
     public static void socket() {
         // CSWSH defense — a WebSocket handshake is NOT bound by the Same-Origin
         // Policy, so the browser attaches the session cookie even on a cross-site
