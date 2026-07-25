@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.mvc.Http;
 import play.test.FunctionalTest;
 
 class AuthTest extends FunctionalTest {
@@ -197,5 +198,39 @@ class AuthTest extends FunctionalTest {
                 "expected password_unset code so the SPA can distinguish "
                         + "'DB has no admin' from generic 'needs login'; got: "
                         + getContent(afterWipe));
+    }
+
+    @Test
+    void bearerAuthSucceedsOnNoTransactionRoute() {
+        // JCLAW-849: ApiChatController.streamChat carries @NoTransaction, so the
+        // AuthCheck @Before interceptor runs with no EntityManager open. The
+        // bearer lookup used to throw JPAException and EVERY token-authenticated
+        // call to the SSE routes returned 500 — on ApiChatController,
+        // ApiAppInvokeController and ApiEventsController alike.
+        //
+        // A nonexistent agent id is the probe: reaching the controller at all
+        // means authentication passed, so 404 is success here. A 500 is the
+        // regression coming back.
+        var token = AuthFixture.seedBearerToken();
+        var request = newRequest();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer " + token));
+
+        var response = POST(request, "/api/chat/stream", "application/json",
+                "{\"agentId\": 99999999, \"message\": \"hi\"}");
+
+        assertStatus(404, response);
+    }
+
+    @Test
+    void invalidBearerTokenIsRejectedNotCrashed() {
+        // Same route, bad credential: must be a clean 401 from the interceptor
+        // rather than a 500 from the transaction-less lookup path.
+        var request = newRequest();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer jcl_not-a-real-token"));
+
+        var response = POST(request, "/api/chat/stream", "application/json",
+                "{\"agentId\": 99999999, \"message\": \"hi\"}");
+
+        assertStatus(401, response);
     }
 }

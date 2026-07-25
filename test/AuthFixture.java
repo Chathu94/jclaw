@@ -1,5 +1,8 @@
 import controllers.ApiAuthController;
+import models.ApiToken;
 import services.ConfigService;
+import services.InternalApiTokenService;
+import utils.TokenHasher;
 import services.Tx;
 import utils.PasswordHasher;
 
@@ -28,6 +31,29 @@ public final class AuthFixture {
      *  empty Config row from the HTTP-handler side. */
     public static void clearAdminPassword() {
         runInFreshTx(() -> ConfigService.delete(ApiAuthController.PASSWORD_HASH_KEY));
+    }
+
+    /** Mint a dedicated bearer token row and commit it, returning the plaintext.
+     *
+     *  <p>Deliberately does NOT go through {@link InternalApiTokenService#token()}:
+     *  that caches the plaintext in a static field and only re-verifies the
+     *  backing row on a cache miss. play1 runs test classes concurrently and
+     *  several call {@code Fixtures.deleteDatabase()}, so the cached token can
+     *  outlive its row and authenticate against nothing. Minting our own row
+     *  keeps the fixture self-contained.
+     *
+     *  <p>Committed on a fresh virtual thread for the same reason as
+     *  {@link #seedAdminPassword} — written inline it would sit uncommitted in
+     *  the carrier thread's transaction, invisible to the HTTP handler. */
+    public static String seedBearerToken() {
+        var plaintext = TokenHasher.mint();
+        runInFreshTx(() -> {
+            var row = new ApiToken();
+            row.ownerUsername = InternalApiTokenService.SYSTEM_OWNER;
+            row.secretHash = TokenHasher.hash(plaintext);
+            row.save();
+        });
+        return plaintext;
     }
 
     private static void runInFreshTx(Runnable block) {

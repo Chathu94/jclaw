@@ -5,6 +5,7 @@ import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.ConfigService;
+import services.Tx;
 
 /**
  * Auth interceptor. Use @With(AuthCheck.class) on controllers that require authentication.
@@ -105,8 +106,32 @@ public class AuthCheck extends Controller {
      *  downstream code reads identity the same way it does after a
      *  cookie login. Renders 401 directly on rejection. */
     private static void authenticateByBearer(String plaintext) {
-        var token = ApiToken.findActiveByPlaintext(plaintext);
-        if (token == null) {
+        // JCLAW-849: this interceptor runs before actions that opt out of
+        // Play's per-request transaction with @NoTransaction — streamChat and
+        // the other SSE endpoints on ApiChatController, ApiAppInvokeController
+        // and ApiEventsController. Without an explicit transaction the lookup
+        // below threw "No active EntityManager" and every bearer-authenticated
+        // call to those routes 500'd. Tx.run opens one only when none is
+        // already open, so transactional routes keep sharing the request's tx
+        // exactly as before.
+        //
+        // The lookup, the usage audit and the save must sit inside the SAME
+        // block: markUsed()/save() need `token` to still be managed. Only the
+        // owner name escapes, so nothing is read off a detached entity. The 60s
+        // throttle in ApiToken.markUsed() keeps most calls in a burst no-ops at
+        // the Hibernate dirty-check level, which is what keeps the
+        // findActiveByPlaintext query-cache entry valid across the burst.
+        var ownerUsername = Tx.run(() -> {
+            var token = ApiToken.findActiveByPlaintext(plaintext);
+            if (token == null) return null;
+            token.markUsed();
+            token.save();
+            return token.ownerUsername;
+        });
+
+        // Rejection renders outside the block — a Result thrown from inside
+        // would unwind through the transaction on its way out.
+        if (ownerUsername == null) {
             response.status = 401;
             renderJSON("{\"error\":\"Invalid token\",\"code\":\"invalid_token\"}");
             return;
@@ -119,15 +144,6 @@ public class AuthCheck extends Controller {
         // cheapest way to avoid sprinkling "bearer or cookie?" branches
         // everywhere.
         session.put("authenticated", "true");
-        session.put("username", token.ownerUsername);
-
-        // Audit the usage in the same JPA tx as the request. The 60s
-        // throttle in ApiToken.markUsed() means most calls within a
-        // burst are no-ops at the Hibernate dirty-check level — that's
-        // what keeps the ApiToken.findActiveByPlaintext query-cache
-        // entry valid across the burst. Skip the re-fetch — `token` is
-        // already the managed entity from the lookup above.
-        token.markUsed();
-        token.save();
+        session.put("username", ownerUsername);
     }
 }
