@@ -20,8 +20,10 @@ import services.ConversationService;
 import services.Tx;
 import services.transcription.AsrSidecarClient;
 import services.transcription.WhisperTranscriber;
+import services.tts.TtsEngine;
 import services.tts.TtsException;
 import services.tts.TtsRouter;
+import services.tts.TtsSidecarManager;
 import services.tts.TtsText;
 import services.voice.TextTurnConfirmer;
 import services.voice.TurnEndpointer;
@@ -278,6 +280,14 @@ public class VoiceController extends WebSocketController {
             // JCLAW-862: one conversation per voice session, created here rather
             // than resolved per turn. create() not findOrCreate() — the latter
             // would hand back the previous session's row and defeat the reset.
+            // JCLAW-863: warm the TTS model now, while the operator is still
+            // speaking their first sentence. This is the only moment in the voice
+            // flow where nothing is waiting on audio — by the time the first turn
+            // needs synthesis, a cold load (up to ~52s for Chatterbox) is either
+            // done or well underway instead of starting from scratch.
+            if (TtsRouter.currentEngine() == TtsEngine.SIDECAR) {
+                TtsSidecarManager.prewarmModelAsync();
+            }
             var binding = newSessionBinding(boundAgent, username);
             // A re-init on the same socket replaces the binding; discard the
             // superseded conversation rather than orphaning it.

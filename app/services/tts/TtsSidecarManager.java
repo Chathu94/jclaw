@@ -51,10 +51,13 @@ public final class TtsSidecarManager {
             }
             DAEMON.spawn(IDENTITY, null);
             DAEMON.awaitHealthy();
-            // Only on a fresh spawn — the daemon self-evicts when idle, so a
-            // respawn correctly warms again, while ordinary calls that find it
-            // already healthy short-circuit above and never re-trigger this.
-            prewarmModelAsync();
+            // Deliberately NOT prewarming here. ensureRunning is only reachable
+            // from synthesizeLocked, which already holds the sidecar lock — so
+            // the request that triggered this spawn is ahead of any warm we start,
+            // pays the cold load itself, and leaves the warm a no-op. Measured:
+            // 18.0s for the triggering synthesis, then 2.0s for the warm behind
+            // it. Prewarming has to happen where no request is waiting; see
+            // prewarmModelAsync's callers.
             return DAEMON.baseUrl();
         });
     }
@@ -80,11 +83,19 @@ public final class TtsSidecarManager {
      * step cold. Warming through the same path the first real request takes is
      * the only way to be sure nothing is left lazy.
      *
-     * <p>Detached and best-effort. It must not delay {@code awaitHealthy}, and a
-     * model that cannot load is a problem for the request that needs it, not a
-     * reason to fail the spawn. The synthesis takes the normal sidecar lock, so a
-     * real request arriving mid-warm queues behind it rather than racing — which
-     * is the same wait it would have paid loading the model itself.
+     * <p>Detached and best-effort — a model that cannot load is a problem for the
+     * request that needs it, not for whoever triggered the warm. The synthesis
+     * takes the normal sidecar lock, so a real request arriving mid-warm queues
+     * behind it rather than racing, which is the same wait it would have paid
+     * loading the model itself.
+     *
+     * <p><b>Where this is worth calling.</b> Only from a point where no synthesis
+     * is already waiting, because the lock is FIFO. Calling it right after a spawn
+     * is useless: {@code ensureRunning} is reachable only from inside
+     * {@code TtsSidecarClient}'s locked section, so the request that caused the
+     * spawn is always ahead of the warm and absorbs the cold load itself. The two
+     * useful moments are the operator selecting a model in Settings, and a voice
+     * session opening — both leave a gap before anything needs audio.
      */
     public static void prewarmModelAsync() {
         Thread.ofVirtual().name("tts-prewarm").start(() -> {
