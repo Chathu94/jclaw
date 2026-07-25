@@ -48,16 +48,38 @@ public class TtsSidecarClient extends SidecarHttpClient {
      * optional (null/blank omitted, letting the sidecar default).
      */
     public byte[] synthesize(String text, String model, String voice, String format) {
-        return withSidecarLock(() -> synthesizeLocked(text, model, voice, format));
+        return synthesize(text, model, voice, format, null, null);
     }
 
-    private byte[] synthesizeLocked(String text, String model, String voice, String format) {
+    /**
+     * Cloning-aware overload (JCLAW-865). {@code refAudio} is a filesystem path to
+     * a short reference clip the engine clones its speaker from — Chatterbox takes
+     * it as {@code audio_prompt_path}, Qwen3-TTS as {@code ref_audio}. It is the
+     * only way to choose a voice on those models, which have no named presets.
+     *
+     * <p>{@code refText} is the reference clip's transcript, used only by
+     * Qwen3-TTS; Chatterbox clones from audio alone and ignores it. Both are
+     * omitted from the request when null or blank, leaving the model's default
+     * speaker in place.
+     *
+     * <p>The path is read by the sidecar process, not this one, so it must be
+     * absolute — the sidecar runs with its own working directory.
+     */
+    public byte[] synthesize(String text, String model, String voice, String format,
+                             String refAudio, String refText) {
+        return withSidecarLock(() -> synthesizeLocked(text, model, voice, format, refAudio, refText));
+    }
+
+    private byte[] synthesizeLocked(String text, String model, String voice, String format,
+                                    String refAudio, String refText) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : TtsSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("text", text);
         if (model != null && !model.isBlank()) body.addProperty("model", model);
         if (voice != null && !voice.isBlank()) body.addProperty("voice", voice);
         if (format != null && !format.isBlank()) body.addProperty("format", format);
+        if (refAudio != null && !refAudio.isBlank()) body.addProperty("ref_audio", refAudio);
+        if (refText != null && !refText.isBlank()) body.addProperty("ref_text", refText);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/synthesize")
                 .post(RequestBody.create(body.toString(), JSON))

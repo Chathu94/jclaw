@@ -45,6 +45,25 @@ public enum TtsModel {
     public String displayName() { return displayName; }
     public int approxSizeMb() { return approxSizeMb; }
 
+    /**
+     * Whether this model picks its speaker from a reference clip rather than a
+     * named preset (JCLAW-865).
+     *
+     * <p>These are exactly the models {@link TtsVoiceCatalog} returns no voices
+     * for, which is why their Voice picker renders empty: cloning IS their voice
+     * selection, and without a clip they are stuck on whatever speaker the model
+     * defaults to. Kokoro is the counterpart — it has eight curated voices and
+     * uses the {@code voice} field instead.
+     */
+    public boolean supportsCloning() {
+        return this == CHATTERBOX || this == QWEN3_06B || this == QWEN3_06B_4BIT;
+    }
+
+    /** Whether {@code modelId} names a cloning-capable model; false for unknown ids. */
+    public static boolean cloningById(String modelId) {
+        return byId(modelId).map(TtsModel::supportsCloning).orElse(false);
+    }
+
     public static Optional<TtsModel> byId(String id) {
         if (id == null) return Optional.empty();
         for (var m : values()) {

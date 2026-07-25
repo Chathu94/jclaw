@@ -13,6 +13,7 @@ import Settings from '~/pages/settings.vue'
  */
 
 interface Opts {
+  referenceVoice?: string | null
   engine?: string
   sidecarModel?: string
   jvmModel?: string
@@ -32,6 +33,7 @@ function configEntries(opts: Opts) {
 function ttsState(opts: Opts) {
   return {
     engine: opts.engine ?? 'sidecar',
+    referenceVoice: opts.referenceVoice ?? null,
     engines: [
       {
         id: 'sidecar',
@@ -40,8 +42,9 @@ function ttsState(opts: Opts) {
         status: (opts.sidecarAvailable ?? true) ? 'ready — starts on first use' : 'needs \'uv\' on PATH',
         model: opts.sidecarModel ?? 'qwen3-0.6b',
         models: [
-          { id: 'qwen3-0.6b', displayName: 'Qwen3-TTS 0.6B', approxSizeMb: 2500, present: false, downloading: false, voices: [{ id: '1', label: 'Voice 1' }, { id: '2', label: 'Voice 2' }] },
-          { id: 'kokoro', displayName: 'Kokoro-82M', approxSizeMb: 330, present: false, downloading: false, voices: [{ id: 'af_bella', label: 'Bella (American, female)' }, { id: 'bm_george', label: 'George (British, male)' }] },
+          { id: 'qwen3-0.6b', displayName: 'Qwen3-TTS 0.6B', approxSizeMb: 2500, present: false, downloading: false, voices: [{ id: '1', label: 'Voice 1' }, { id: '2', label: 'Voice 2' }], supportsCloning: true },
+          { id: 'kokoro', displayName: 'Kokoro-82M', approxSizeMb: 330, present: false, downloading: false, voices: [{ id: 'af_bella', label: 'Bella (American, female)' }, { id: 'bm_george', label: 'George (British, male)' }], supportsCloning: false },
+          { id: 'chatterbox', displayName: 'Chatterbox (PyTorch, MPS/CUDA)', approxSizeMb: 1000, present: false, downloading: false, voices: [], supportsCloning: true },
         ],
       },
       {
@@ -204,5 +207,52 @@ describe('Settings page — Speech (JCLAW-789/793)', () => {
 
     const hit = captured.find(b => b.key === 'tts.local.idleTimeoutMinutes')
     expect(hit!.value).toBe('0')
+  })
+
+  // ===== Reference voice clip (JCLAW-865) =====
+  //
+  // Chatterbox and Qwen3-TTS have no named speakers, so the voice picker renders
+  // empty for them and a clip is the only way to choose a voice. The control
+  // therefore appears exactly where that picker would be, and only for models
+  // that can actually use it.
+
+  it('offers a reference clip upload for a cloning model', async () => {
+    setupApi({ engine: 'sidecar', sidecarModel: 'chatterbox' })
+    const c = await mountSettingsSection('speech')
+
+    expect(c.find('input[aria-label="Reference voice clip"]').exists()).toBe(true)
+    expect(c.text()).toContain('model default')
+  })
+
+  it('does not offer a clip for a model with named voices', async () => {
+    // Kokoro selects by name; a clip would be meaningless and the picker is enough.
+    setupApi({ engine: 'sidecar', sidecarModel: 'kokoro' })
+    const c = await mountSettingsSection('speech')
+
+    expect(c.find('input[aria-label="Reference voice clip"]').exists()).toBe(false)
+  })
+
+  it('shows the active clip filename and a way to remove it', async () => {
+    setupApi({ engine: 'sidecar', sidecarModel: 'chatterbox', referenceVoice: 'reference.wav' })
+    const c = await mountSettingsSection('speech')
+
+    expect(c.text()).toContain('reference.wav')
+    const clear = c.findAll('button').find(b => b.text() === 'Clear')
+    expect(clear).toBeTruthy()
+  })
+
+  it('offers no Clear button when no clip is set', async () => {
+    setupApi({ engine: 'sidecar', sidecarModel: 'chatterbox', referenceVoice: null })
+    const c = await mountSettingsSection('speech')
+
+    const clear = c.findAll('button').find(b => b.text() === 'Clear')
+    expect(clear).toBeFalsy()
+  })
+
+  it('hides the clip control for the JVM engine entirely', async () => {
+    setupApi({ engine: 'jvm' })
+    const c = await mountSettingsSection('speech')
+
+    expect(c.find('input[aria-label="Reference voice clip"]').exists()).toBe(false)
   })
 })

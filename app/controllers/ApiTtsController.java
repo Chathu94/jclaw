@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import play.data.Upload;
 import play.mvc.Controller;
 import play.mvc.SseStream;
 import play.mvc.With;
@@ -15,6 +16,7 @@ import services.tts.TtsEngine;
 import services.tts.TtsException;
 import services.tts.TtsJvmEngine;
 import services.tts.TtsModel;
+import services.tts.TtsReferenceVoice;
 import services.tts.TtsRouter;
 import services.tts.TtsSentenceChunker;
 import services.tts.TtsSidecarManager;
@@ -23,6 +25,7 @@ import services.tts.TtsVoiceCatalog;
 import utils.ApiResponses;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -56,14 +59,29 @@ public class ApiTtsController extends Controller {
 
     private static final Gson gson = GSON;
 
+    /**
+     * @param supportsCloning true for models that pick their speaker from a
+     *                        reference clip rather than a named preset (JCLAW-865).
+     *                        These are exactly the models with an empty
+     *                        {@code voices} list, so the UI shows a clip upload
+     *                        where it would otherwise show nothing at all.
+     */
     public record TtsModelEntry(String id, String displayName, int approxSizeMb,
                                 boolean present, boolean downloading,
-                                List<TtsVoiceCatalog.Voice> voices) {}
+                                List<TtsVoiceCatalog.Voice> voices,
+                                boolean supportsCloning) {}
 
     public record TtsEngineEntry(String id, String displayName, boolean available,
                                  String status, String model, List<TtsModelEntry> models) {}
 
-    public record TtsStateResponse(String engine, List<TtsEngineEntry> engines) {}
+    /**
+     * @param referenceVoice filename of the active cloning clip, or null. Only the
+     *                       basename is exposed — the absolute path is a local
+     *                       filesystem detail the browser has no use for.
+     */
+    public record TtsStateResponse(String engine, List<TtsEngineEntry> engines, String referenceVoice) {}
+
+    public record ReferenceVoiceResponse(String status, String filename) {}
 
     public record DownloadStartedResponse(String status, String modelId) {}
 
@@ -74,7 +92,9 @@ public class ApiTtsController extends Controller {
         var engines = new ArrayList<TtsEngineEntry>();
         engines.add(sidecarEntry());
         engines.add(jvmEntry());
-        renderJSON(gson.toJson(new TtsStateResponse(TtsRouter.currentEngine().id(), engines)));
+        var refPath = TtsReferenceVoice.activePath(TtsEngine.SIDECAR);
+        var refName = refPath == null ? null : java.nio.file.Path.of(refPath).getFileName().toString();
+        renderJSON(gson.toJson(new TtsStateResponse(TtsRouter.currentEngine().id(), engines, refName)));
     }
 
     private static TtsEngineEntry sidecarEntry() {
@@ -93,7 +113,7 @@ public class ApiTtsController extends Controller {
             // Sidecar weights live in the sidecar's HF cache, pulled on first use —
             // not disk-tracked here, so "present" tracks whether the sidecar is up.
             models.add(new TtsModelEntry(m.id(), m.displayName(), m.approxSizeMb(), running, false,
-                    TtsVoiceCatalog.voicesFor(m.id())));
+                    TtsVoiceCatalog.voicesFor(m.id()), m.supportsCloning()));
         }
         return new TtsEngineEntry(TtsEngine.SIDECAR.id(), TtsEngine.SIDECAR.displayName(),
                 uv, status, TtsRouter.modelFor(TtsEngine.SIDECAR), models);
@@ -112,9 +132,11 @@ public class ApiTtsController extends Controller {
         }
         var models = new ArrayList<TtsModelEntry>();
         for (var m : TtsModel.forEngine(TtsEngine.JVM)) {
+            // JVM models never clone — sherpa-onnx selects a speaker by index, and
+            // the two shipped voices are single-speaker or named.
             models.add(new TtsModelEntry(m.id(), m.displayName(), m.approxSizeMb(),
                     TtsJvmEngine.isModelPresent(m.id()), TtsJvmEngine.isDownloading(m.id()),
-                    TtsVoiceCatalog.voicesFor(m.id())));
+                    TtsVoiceCatalog.voicesFor(m.id()), m.supportsCloning()));
         }
         // The JVM engine is always "available" — its native lib is bundled by the
         // build; only the weights need provisioning (present/downloading above).
@@ -220,5 +242,54 @@ public class ApiTtsController extends Controller {
         });
         EventLogger.info("tts", "TTS model download requested: %s".formatted(id));
         renderJSON(gson.toJson(new DownloadStartedResponse("downloading", id)));
+    }
+
+    /**
+     * POST /api/tts/reference-voice — set the clip a cloning model copies its
+     * speaker from (JCLAW-865).
+     *
+     * <p>Validated here rather than at synthesis time. A clip the engine cannot
+     * read fails deep inside Python, on a later read-aloud, with no obvious link
+     * back to the upload — whereas at this moment the operator is holding the file
+     * and can pick another.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReferenceVoiceResponse.class)))
+    public static void uploadReferenceVoice(Upload file) {
+        if (file == null || file.asFile() == null || !file.asFile().exists()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No reference clip supplied");
+            return;
+        }
+        var f = file.asFile();
+        var name = file.getFileName() != null ? file.getFileName() : f.getName();
+        var rejection = TtsReferenceVoice.validate(name, f.length());
+        if (rejection != null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, rejection);
+            return;
+        }
+        try {
+            TtsReferenceVoice.store(f, name, TtsEngine.SIDECAR);
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Could not store reference clip: " + e.getMessage());
+            return;
+        }
+        EventLogger.info("tts", "Reference voice set from '%s'".formatted(name));
+        // Load it now rather than on the operator's first read-aloud: cloning adds
+        // state on top of the model, and they are not waiting on a turn right now.
+        TtsSidecarManager.prewarmModelAsync();
+        renderJSON(gson.toJson(new ReferenceVoiceResponse("ok", name)));
+    }
+
+    /** DELETE /api/tts/reference-voice — drop the clip and return to the model's
+     *  default speaker. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReferenceVoiceResponse.class)))
+    public static void clearReferenceVoice() {
+        try {
+            TtsReferenceVoice.clear(TtsEngine.SIDECAR);
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Could not clear reference clip: " + e.getMessage());
+            return;
+        }
+        EventLogger.info("tts", "Reference voice cleared");
+        renderJSON(gson.toJson(new ReferenceVoiceResponse("cleared", null)));
     }
 }

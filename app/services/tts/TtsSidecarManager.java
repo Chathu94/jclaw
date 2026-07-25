@@ -108,7 +108,12 @@ public final class TtsSidecarManager {
                 if (model == null || model.isBlank()) return;
 
                 long t0 = System.nanoTime();
-                new TtsSidecarClient().synthesize(PREWARM_TEXT, model, voice, "wav");
+                // Warm through the same shape a real request takes, reference clip
+                // included: cloning loads extra state, so warming without it would
+                // leave that work for the first real utterance.
+                var refAudio = Tx.run(() -> TtsRouter.refAudioFor(TtsEngine.SIDECAR));
+                var refText = Tx.run(() -> TtsRouter.refTextFor(TtsEngine.SIDECAR));
+                new TtsSidecarClient().synthesize(PREWARM_TEXT, model, voice, "wav", refAudio, refText);
                 Logger.info("TtsSidecarManager: prewarmed sidecar model '%s' in %.1fs",
                         model, (System.nanoTime() - t0) / 1e9);
             } catch (RuntimeException e) {

@@ -17,6 +17,8 @@ type TtsModelEntry = {
   present: boolean
   downloading: boolean
   voices: TtsVoiceEntry[]
+  /** Picks its speaker from a reference clip rather than a preset (JCLAW-865). */
+  supportsCloning: boolean
 }
 type TtsEngineEntry = {
   id: string
@@ -26,7 +28,7 @@ type TtsEngineEntry = {
   model: string
   models: TtsModelEntry[]
 }
-type TtsState = { engine: string, engines: TtsEngineEntry[] }
+type TtsState = { engine: string, engines: TtsEngineEntry[], referenceVoice?: string | null }
 
 const { data: ttsState, refresh: refreshTtsState, status: ttsStateStatus }
   = useLazyFetch<TtsState>('/api/tts/state')
@@ -63,6 +65,47 @@ async function setModel(engine: string, value: string) {
 }
 async function setVoice(value: string) {
   await saveField(`tts.${selectedEngine.value}.voice`, value)
+}
+
+// JCLAW-865: Chatterbox and Qwen3-TTS have no named voices — cloning from a short
+// reference clip IS their voice selection. Without one they are stuck on whatever
+// speaker the model ships with, which is why their Voice picker renders empty.
+const supportsCloning = computed(() => activeModelStatus.value?.supportsCloning === true)
+const referenceVoice = computed(() => ttsState.value?.referenceVoice ?? null)
+const refError = ref('')
+
+async function uploadReferenceVoice(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  refError.value = ''
+  saving.value = true
+  try {
+    const body = new FormData()
+    body.append('file', file)
+    await $fetch('/api/tts/reference-voice', { method: 'POST', body })
+    refreshTtsState()
+  }
+  catch (e) {
+    // Surface the server's reason (wrong format, too large) rather than a generic
+    // failure — it is actionable, and the operator still has the file to hand.
+    refError.value = (e as { data?: { message?: string } })?.data?.message
+      || (e as Error)?.message || 'upload failed'
+  }
+  finally {
+    saving.value = false
+    input.value = '' // let the same file be re-picked after a rejection
+  }
+}
+
+async function clearReferenceVoice() {
+  refError.value = ''
+  saving.value = true
+  try {
+    await $fetch('/api/tts/reference-voice', { method: 'DELETE' })
+    refreshTtsState()
+  }
+  finally { saving.value = false }
 }
 
 // JCLAW-863: how long the sidecar keeps the model loaded while idle. The key has
@@ -273,6 +316,64 @@ onUnmounted(() => stopTtsPolling())
             </option>
           </select>
         </div>
+
+        <!--
+          Reference voice (JCLAW-865). Shown INSTEAD of the voice picker, not
+          beside it: these models have no named speakers, so the picker above
+          renders nothing and a clip is the only way to choose a voice. Without
+          one the model is fixed on whatever speaker it ships with.
+        -->
+        <div
+          v-if="!ttsStateLoading && supportsCloning"
+          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+        >
+          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Voice clip</span>
+          <span
+            v-if="referenceVoice"
+            class="flex-1 text-sm text-fg-strong font-mono truncate"
+          >{{ referenceVoice }}</span>
+          <span
+            v-else
+            class="flex-1 text-sm text-fg-muted italic"
+          >model default — upload a clip to clone a voice</span>
+          <label
+            for="tts-reference-voice"
+            class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors shrink-0 cursor-pointer"
+          >
+            {{ referenceVoice ? 'Replace' : 'Upload' }}
+            <input
+              id="tts-reference-voice"
+              type="file"
+              accept=".wav,.mp3,.flac,.m4a,.ogg,audio/*"
+              aria-label="Reference voice clip"
+              class="hidden"
+              :disabled="saving"
+              @change="uploadReferenceVoice"
+            >
+          </label>
+          <button
+            v-if="referenceVoice"
+            type="button"
+            class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-muted transition-colors shrink-0"
+            :disabled="saving"
+            @click="clearReferenceVoice"
+          >
+            Clear
+          </button>
+        </div>
+        <p
+          v-if="!ttsStateLoading && supportsCloning && refError"
+          class="px-4 pb-2.5 -mt-1 text-[11px] text-red-600 dark:text-red-400"
+        >
+          {{ refError }}
+        </p>
+        <p
+          v-else-if="!ttsStateLoading && supportsCloning"
+          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+        >
+          A few seconds of clean speech works best — this model clones the speaker
+          rather than offering named voices. WAV, MP3, FLAC, M4A or OGG, under 10&nbsp;MB.
+        </p>
 
         <!--
           Keep-warm window (JCLAW-863). The sidecar unloads its model after this

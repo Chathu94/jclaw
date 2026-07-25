@@ -36,6 +36,9 @@ GET     /api/tts/state                          ApiTtsController.state
 POST    /api/tts/synthesize                     ApiTtsController.synthesize
 POST    /api/tts/stream                          ApiTtsController.stream
 POST    /api/tts/models/{id}/download           ApiTtsController.download
+# Reference clip for cloning models (Chatterbox / Qwen3-TTS) — their voice picker
+POST    /api/tts/reference-voice                ApiTtsController.uploadReferenceVoice
+DELETE  /api/tts/reference-voice                ApiTtsController.clearReferenceVoice
 
 # Real-time voice mode WebSocket (JCLAW-791) — cascade: mic → local STT → agent → streaming TTS.
 WS      /api/voice                              VoiceController.socket

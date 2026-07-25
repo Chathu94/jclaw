@@ -38,6 +38,28 @@ public final class TtsRouter {
     }
 
     /**
+     * Reference clip the engine clones its speaker from, or null (JCLAW-865).
+     *
+     * <p>Only meaningful for models with no named presets — Chatterbox and
+     * Qwen3-TTS — where cloning IS the voice picker. Gated on
+     * {@link TtsModel#supportsCloning} rather than sent blindly, so a clip left
+     * configured from a previous model cannot leak into Kokoro, which selects its
+     * speaker by name and would be confused by both.
+     */
+    public static String refAudioFor(TtsEngine engine) {
+        if (!TtsModel.cloningById(modelFor(engine))) return null;
+        return TtsReferenceVoice.activePath(engine);
+    }
+
+    /** Transcript of the reference clip, or null. Qwen3-TTS uses it; Chatterbox
+     *  clones from audio alone and ignores it. Same cloning gate as
+     *  {@link #refAudioFor}. */
+    public static String refTextFor(TtsEngine engine) {
+        if (!TtsModel.cloningById(modelFor(engine))) return null;
+        return ConfigService.get("tts." + engine.id() + ".refText");
+    }
+
+    /**
      * Synthesize {@code text} to WAV bytes using the selected engine + its
      * configured model. Throws {@link TtsException} if the chosen engine can't
      * satisfy the request (sidecar unreachable, model download failed, …).
@@ -118,7 +140,8 @@ public final class TtsRouter {
         var model = modelFor(engine);
         var voice = voiceFor(engine);
         return switch (engine) {
-            case SIDECAR -> SIDECAR.synthesize(text, model, voice, "wav");
+            case SIDECAR -> SIDECAR.synthesize(text, model, voice, "wav",
+                    refAudioFor(engine), refTextFor(engine));
             case JVM -> TtsJvmEngine.synthesize(text, model, voice, null);
         };
     }
