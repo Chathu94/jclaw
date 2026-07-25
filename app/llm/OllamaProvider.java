@@ -65,7 +65,16 @@ public final class OllamaProvider extends LlmProvider {
         // controls how long the model (and its KV cache) stays resident between requests.
         // Pass it as an extra top-level field; Ollama's OpenAI-compat shim forwards unknown
         // fields to the native scheduler.
+        //
+        // The default matches Ollama's own OLLAMA_KEEP_ALIVE (5m) rather than overriding it.
+        // A longer pin does improve prefix reuse on a warm model, but it applies to every
+        // model JClaw touches — so with OLLAMA_MAX_LOADED_MODELS unset (unlimited), each
+        // one holds GPU memory for the full window and they accumulate. On a local box
+        // that co-residency costs more (eviction pressure, swap, contention with other
+        // Ollama clients sharing the daemon) than the reuse it buys. Operators who want a
+        // longer pin can still set ollama.keepAlive; the point is not to override Ollama's
+        // memory policy by default. Inert for ollama-cloud, whose residency is server-side.
         var keepAlive = ConfigService.get("ollama.keepAlive");
-        request.addProperty("keep_alive", keepAlive != null && !keepAlive.isBlank() ? keepAlive : "30m");
+        request.addProperty("keep_alive", keepAlive != null && !keepAlive.isBlank() ? keepAlive : "5m");
     }
 }

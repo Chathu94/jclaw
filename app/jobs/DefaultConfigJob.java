@@ -277,8 +277,11 @@ public class DefaultConfigJob extends Job<Void> {
 
         // Ollama: how long the model + KV cache stays resident between requests.
         // Passed through as the top-level keep_alive field on every chat request.
-        // Longer values improve prefix-reuse hit rates at the cost of GPU memory.
-        seedIfAbsent("ollama.keepAlive", "30m");
+        // Longer values improve prefix-reuse hit rates at the cost of GPU memory —
+        // paid per model, so on a local box several can pin memory at once. Defaults
+        // to Ollama's own OLLAMA_KEEP_ALIVE (5m) so JClaw doesn't override the
+        // daemon's memory policy; see OllamaProvider.applyCacheDirectives.
+        seedIfAbsent("ollama.keepAlive", "5m");
 
         // JCLAW-172: playwright.enabled / playwright.headless / shell.enabled
         // are gone — the browser is always headless and both tools register

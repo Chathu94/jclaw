@@ -101,7 +101,8 @@ async function manuallyRefreshPrices() {
 // Ollama-specific settings (rendered inside the provider section when provider name contains "ollama")
 const ollamaKeepAlive = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find(e => e.key === 'ollama.keepAlive')?.value ?? '30m'
+  // Fallback mirrors the backend default (OllamaProvider.applyCacheDirectives).
+  return entries.find(e => e.key === 'ollama.keepAlive')?.value ?? '5m'
 })
 
 // JCLAW-110: per-provider enabled flag. A provider is considered enabled
@@ -911,7 +912,7 @@ const groupedProviders = computed(() => {
                   aria-hidden="true"
                 />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">30m</code> for 30 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever.
+                  How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">5m</code> for 5 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever. Longer values hold GPU memory per model.
                 </span>
               </span>
             </span>

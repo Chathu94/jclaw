@@ -179,18 +179,22 @@ class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    void applyCacheDirectivesEmitsKeepAliveDefaultThirtyMinutes() throws Exception {
-        // Config key absent → default to "30m" (constant inside the provider).
+    void applyCacheDirectivesEmitsKeepAliveDefaultFiveMinutes() throws Exception {
+        // Config key absent → default to "5m" (constant inside the provider),
+        // deliberately matching Ollama's own OLLAMA_KEEP_ALIVE default so JClaw
+        // doesn't pin every model it touches past the daemon's own policy.
         var body = serialize(provider(), withThinking("medium"));
-        assertEquals("30m", body.get("keep_alive").getAsString(),
-                "keep_alive must default to 30m when ollama.keepAlive config is unset");
+        assertEquals("5m", body.get("keep_alive").getAsString(),
+                "keep_alive must default to 5m when ollama.keepAlive config is unset");
     }
 
     @Test
     void applyCacheDirectivesHonorsConfigOverride() throws Exception {
-        ConfigService.set("ollama.keepAlive", "5m");
+        // Deliberately not the default value, so this asserts the config is read
+        // rather than passing on the fallback path.
+        ConfigService.set("ollama.keepAlive", "30m");
         var body = serialize(provider(), withThinking("medium"));
-        assertEquals("5m", body.get("keep_alive").getAsString(),
+        assertEquals("30m", body.get("keep_alive").getAsString(),
                 "keep_alive must follow the ollama.keepAlive config when set");
     }
 
@@ -200,7 +204,7 @@ class OllamaProviderTest extends UnitTest {
         // sending an empty string that the Ollama scheduler would reject.
         ConfigService.set("ollama.keepAlive", "   ");
         var body = serialize(provider(), withThinking("medium"));
-        assertEquals("30m", body.get("keep_alive").getAsString());
+        assertEquals("5m", body.get("keep_alive").getAsString());
     }
 
     // =====================
