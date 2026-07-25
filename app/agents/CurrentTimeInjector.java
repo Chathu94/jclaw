@@ -21,11 +21,22 @@ import java.util.Map;
  * conversation history in the token stream, and an LLM prefix cache had to
  * re-process all of that history whenever the minute ticked over.
  *
- * <p>Measured on a local 7B (6-turn conversation growing 2799→3294 prompt
- * tokens, 5 reps, per-turn medians): prefill grew +334 ms/turn with the clock in
- * the system message versus +12 ms/turn with it spliced into the last user
- * message — 2283 ms vs 748 ms by turn 6. The gap widens with conversation
- * length, because the region being re-processed is the history itself.
+ * <p>Verified on prompts captured off the shipped path. With the clock in the
+ * system message the cacheable prefix is pinned at a constant length — it can
+ * never extend past the clock's position — so the re-processed region grows
+ * every turn (247, 300, 351, 405 chars over four turns). With the clock on the
+ * last user message the cacheable prefix grows with the conversation and the
+ * re-processed tail stays constant (~346 chars). Flat versus linear is the
+ * verified property; the absolute numbers are small only because those captured
+ * turns carried very short messages.
+ *
+ * <p>A synthetic harness against a local 7B put the same effect in milliseconds
+ * (+334 ms/turn with the clock in the system message versus +12 ms/turn on the
+ * last user message, 5 reps, per-turn medians). Treat that as illustrative
+ * rather than a promise: it used simulated prompts on a contended machine, and
+ * the realized win depends on message sizes and how often turns cross a minute
+ * boundary. Both llama.cpp and MLX were separately confirmed to reuse a stable
+ * prefix incrementally, which is the engine behavior this relies on.
  *
  * <h2>Call-site contract</h2>
  * <p>Every path that finalizes a message list for an LLM call MUST end with

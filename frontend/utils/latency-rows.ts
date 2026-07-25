@@ -86,7 +86,6 @@ export const TOP_LEVEL_ORDER = [
   'queue_wait',
   'prologue',
   'dispatcher_wait',
-  'prefill',
   'ttft',
   'stream_body',
   'tool_exec',
@@ -100,11 +99,6 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   queue_wait: 'Queue wait',
   prologue: 'Prologue',
   dispatcher_wait: 'Dispatcher wait',
-  // Overlaps ttft rather than partitioning it: prefill runs request-sent →
-  // first streamed output, ttft runs prologue-done → first token written to the
-  // client. Sits directly above ttft so the provider-side share of that wait is
-  // readable at a glance. Absent on turns whose first round is a tool call.
-  prefill: 'Prefill (provider)',
   ttft: 'Time to first token',
   stream_body: 'Stream body',
   tool_exec: 'Tool execution',

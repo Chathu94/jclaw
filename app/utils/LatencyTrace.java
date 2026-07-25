@@ -25,8 +25,6 @@ public final class LatencyTrace {
     public static final String PROLOGUE_PROMPT_ASSEMBLED = "prologue_prompt_assembled";
     public static final String PROLOGUE_DONE = "prologue_done";
     public static final String FIRST_TOKEN = "first_token";
-    public static final String LLM_REQUEST_SENT = "llm_request_sent";
-    public static final String LLM_FIRST_OUTPUT = "llm_first_output";
     public static final String STREAM_BODY_END = "stream_body_end";
     public static final String PERSIST_DONE = "persist_done";
     public static final String TERMINAL_SENT = "terminal_sent";
@@ -194,30 +192,6 @@ public final class LatencyTrace {
         Long firstToken = marks.get(FIRST_TOKEN);
         if (firstToken != null) {
             emit("ttft", nsToMs(firstToken - prologueDone));
-        }
-
-        // prefill — the provider's own round-1 latency: from handing it the
-        // request to its first streamed output. Distinct from ttft, which runs
-        // from PROLOGUE_DONE to the first token written to the client and so
-        // also carries client-side request building.
-        //
-        // Two honest limits on this number:
-        //
-        // 1. It is a proxy, not the server's prompt-eval time. Nothing on the
-        //    OpenAI-compat path reports that — Ollama returns usage token counts
-        //    with no timings — so network and server queue are included.
-        // 2. Only text and reasoning deltas stream through a callback; tool-call
-        //    fragments are accumulated inside the provider. A round that opens
-        //    with a tool call therefore emits NO prefill sample rather than a
-        //    misleading one, since onToolCall does not fire until tool execution
-        //    starts, long after round 1 finished generating.
-        //
-        // What it is for: this is the segment that moves when the prompt prefix
-        // cache hits or misses, which ttft is too noisy to show.
-        Long requestSent = marks.get(LLM_REQUEST_SENT);
-        Long firstOutput = marks.get(LLM_FIRST_OUTPUT);
-        if (requestSent != null && firstOutput != null) {
-            emit("prefill", nsToMs(firstOutput - requestSent));
         }
 
         Long streamBodyEnd = marks.get(STREAM_BODY_END);
