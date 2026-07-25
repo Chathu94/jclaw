@@ -756,6 +756,27 @@ function editAgent(agent: Agent) {
   loadExecConfig(agent.name)
 }
 
+// Deep-link: /agents?edit=<id> opens that agent's form directly. The command
+// palette navigates here, and it can be opened from /agents itself — where the
+// push only swaps the query and does NOT remount the page — so this is a
+// watcher with `immediate`, not an onMounted hook, to cover both entries.
+//
+// The param is stripped once consumed (same as chat's ?compose=): leaving it in
+// the URL would make re-picking the agent you just closed a same-URL push, which
+// the watcher never sees, so the palette would look dead for that one agent.
+// Deep-link from the command palette: it stashes the agent id and navigates
+// here. `immediate` covers the arrival-from-another-page case (the id is
+// already set when this page mounts); the watcher proper covers being picked
+// while already on /agents, where nothing remounts. Consuming it — resetting to
+// null — is what lets the same agent be picked twice in a row.
+const pendingAgentEdit = usePendingAgentEdit()
+watch(pendingAgentEdit, (id) => {
+  if (id == null) return
+  const agent = (agents.value ?? []).find(a => a.id === id)
+  if (agent) editAgent(agent)
+  pendingAgentEdit.value = null
+}, { immediate: true })
+
 // When the selected model changes, drop a thinking mode the new model doesn't
 // advertise. Prevents submitting a stale level (e.g. "high" after swapping
 // to a non-thinking model) that would be silently normalized server-side.

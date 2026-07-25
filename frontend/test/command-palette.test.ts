@@ -154,6 +154,27 @@ describe('CommandPalette', () => {
     expect(convoHits).toBe(1)
   })
 
+  it('hands the picked agent to /agents instead of just opening the listing', async () => {
+    setupMockApi()
+    usePendingAgentEdit().value = null
+    const open = await mountWithOpen(false)
+    await flushPromises()
+    open.value = true
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+
+    const row = [...document.body.querySelectorAll('[role="dialog"] [role="option"]')]
+      .find(el => el.textContent?.includes('main'))
+    expect(row, 'the agents group should list "main"').toBeTruthy()
+    row!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+
+    // The id is what makes /agents open the edit form; navigating alone lands
+    // on the listing, which is the bug this covers.
+    expect(usePendingAgentEdit().value).toBe(1)
+  })
+
   it('silently survives an API failure (palette still shows static items)', async () => {
     registerEndpoint('/api/agents', () => {
       throw createError({ statusCode: 500 })

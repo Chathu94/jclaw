@@ -65,6 +65,7 @@ watch(() => props.open, async (isOpen) => {
 
 // ── Actions ─────────────────────────────────────────────────────────────────
 const { setTheme } = useTheme()
+const pendingAgentEdit = usePendingAgentEdit()
 
 function close() {
   emit('update:open', false)
@@ -77,7 +78,11 @@ function navigateTo(path: string) {
 
 function openAgent(id: number) {
   close()
-  router.push(`/agents?edit=${id}`)
+  // Hand the id over out-of-band and just navigate to the page — /agents edits
+  // in place, so the target is the page, not a distinct location. See
+  // usePendingAgentEdit for why this isn't a query param.
+  pendingAgentEdit.value = id
+  router.push('/agents')
 }
 
 function openConversation(id: number) {
