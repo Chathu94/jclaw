@@ -92,13 +92,25 @@ describe('PromptSizeDonut', () => {
   })
 
   it('sizes the donut off the legend height rather than a fixed box', () => {
-    // The wrapper stretches to the row height — set by the taller legend column
-    // — and the SVG fills it, so the graphic can't overhang the rows. A fixed
-    // height on either would put the overhang back.
+    // The wrapper stretches to the row height and the SVG fills it, so the
+    // graphic can't overhang the rows. A fixed height on either puts the
+    // overhang back.
     const w = mountDonut([entry('a', 300), entry('b', 100)])
-    expect(w.find('svg').classes()).toContain('h-full')
-    expect(w.find('svg').element.parentElement?.className).toContain('lg:h-auto')
-    expect(w.find('svg').classes()).not.toContain('lg:h-72')
+    const svg = w.find('svg')
+    expect(svg.classes()).toContain('h-full')
+    expect(svg.element.parentElement?.className).toContain('lg:h-auto')
+    expect(svg.classes()).not.toContain('lg:h-72')
+  })
+
+  it('keeps the donut out of flow at lg so it cannot set the row height', () => {
+    // An in-flow SVG with a viewBox and a definite width carries an intrinsic
+    // height, which would size the flex line and make the donut overhang the
+    // legend — the exact inversion of what the layout is for.
+    const w = mountDonut([entry('a', 300), entry('b', 100)])
+    const svg = w.find('svg')
+    expect(svg.classes()).toContain('lg:absolute')
+    expect(svg.classes()).toContain('lg:inset-0')
+    expect(svg.element.parentElement?.className).toContain('lg:relative')
   })
 
   it('skips zero-token entries so they do not render invisible arcs', () => {

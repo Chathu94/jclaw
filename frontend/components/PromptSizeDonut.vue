@@ -99,22 +99,30 @@ const summary = computed(() =>
 
 <template>
   <div class="py-4">
-    <!-- Donut centred between the two legend halves. `items-stretch` gives the
-         donut's wrapper the row's height — set by the taller legend column — and
-         the SVG fills it, so the graphic starts and ends on the same lines the
-         rows do instead of overhanging them. Stacked below lg, where three
+    <!-- Donut between the two legend halves, all three the same height:
+         `items-stretch` hands every item the row's height, which the legend
+         columns alone determine (see the wrapper below), so the three tops and
+         bottoms line up and nothing overhangs. Stacked below lg, where three
          columns can't hold their widths, and `order` floats the donut back above
          the legend so the graphic still leads. -->
     <div class="flex flex-col lg:flex-row items-center lg:items-stretch gap-6">
-      <!-- Definite width, stretched height: flexbox resolves the main axis
-           before the cross axis, so an auto-width SVG would have its width
-           pinned from an intrinsic default while its height stretched. The
-           SVG's own preserveAspectRatio keeps the circle round and centred
-           inside whatever box the row height gives it. -->
-      <div class="order-1 lg:order-2 shrink-0 w-56 h-56 lg:w-72 lg:h-auto">
+      <!--
+        The wrapper keeps a definite width because flexbox resolves the main
+        axis before the cross axis, so an auto-width SVG would have its width
+        pinned from an intrinsic default while its height stretched.
+
+        At lg the SVG is taken out of flow. An SVG with a viewBox and a definite
+        width has an intrinsic height from its aspect ratio, and in flow that
+        height sets the flex line's cross size — the donut would size the row
+        and overhang the legend rather than the other way round. Absolutely
+        positioned it contributes no height, so the row is measured from the
+        legend columns alone and the donut fills exactly that. Its own
+        preserveAspectRatio keeps the circle round and centred in the box.
+      -->
+      <div class="order-1 lg:order-2 shrink-0 w-56 h-56 lg:w-72 lg:h-auto lg:relative">
         <svg
           :viewBox="`0 0 ${(RADIUS + STROKE) * 2} ${(RADIUS + STROKE) * 2}`"
-          class="w-full h-full -rotate-90"
+          class="w-full h-full lg:absolute lg:inset-0 -rotate-90"
           role="img"
           :aria-label="summary"
         >
