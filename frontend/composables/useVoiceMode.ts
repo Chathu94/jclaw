@@ -17,6 +17,8 @@
 // `--dev` the Nitro proxy may not forward the WS upgrade to :9000, and the
 // Origin check may reject a mismatched proxy Origin — prod is the reference path.
 
+import { AudioPump } from '~/utils/audio-pump'
+
 export type VoiceState = 'idle' | 'connecting' | 'listening' | 'capturing' | 'thinking' | 'speaking' | 'error'
 
 const state = ref<VoiceState>('idle')
@@ -42,11 +44,8 @@ let bufferEmpty = true // mirrors the worklet ring buffer (drained = true)
  * audio far quicker than it plays out (JCLAW-845).
  */
 const PLAYBACK_BUFFER_SECONDS = 10
-/** Decoded chunks waiting for ring space. Unbounded on purpose — this is heap,
- *  and holding a whole reply here is what stops the ring from overrunning. */
-let pendingAudio: Float32Array[] = []
-/** Free sample slots in the worklet ring, per its last `level` report. */
-let ringFree = 0
+/** Backpressure queue in front of the worklet ring. Null until playback starts. */
+let pump: AudioPump | null = null
 let turnComplete = false
 let currentTurn = -1 // the turn whose audio we currently accept (-1 = none)
 let watchdog: ReturnType<typeof setTimeout> | null = null
@@ -105,8 +104,8 @@ function teardown() {
     }
     ws = null
   }
-  pendingAudio = []
-  ringFree = 0
+  pump?.reset()
+  pump = null
   bufferEmpty = true
   turnComplete = false
   currentTurn = -1
@@ -188,15 +187,19 @@ async function startPlayback() {
     outputChannelCount: [1],
     processorOptions: { bufferSeconds: PLAYBACK_BUFFER_SECONDS },
   })
-  pendingAudio = []
-  ringFree = 0
+  // Seeded with the capacity we just configured, so the pump can push
+  // immediately. Waiting for the worklet's first `level` message here would make
+  // that one message load-bearing, and losing it deadlocks playback silently.
+  pump = new AudioPump(
+    Math.max(1, Math.floor(playCtx.sampleRate * PLAYBACK_BUFFER_SECONDS)),
+    chunk => playNode?.port.postMessage({ type: 'push', data: chunk }, [chunk.buffer]),
+  )
   playNode.port.onmessage = (e) => {
     const msg = e.data as { type?: string, free?: number, dropped?: number }
     if (msg?.type === 'drained') onDrained()
     else if (msg?.type === 'level') {
       // The worklet is authoritative on free space; adopt its number and top up.
-      ringFree = msg.free ?? 0
-      pumpAudio()
+      pump?.setFree(msg.free ?? 0)
     }
     else if (msg?.type === 'overflow') {
       // Backpressure should make this unreachable; if it fires, audio was lost
@@ -277,28 +280,9 @@ async function onMessage(ev: MessageEvent) {
 }
 
 /**
- * Move queued audio into the worklet ring, never exceeding the free space it
- * last reported. A chunk bigger than the remaining space is split rather than
- * held back, so playback stays continuous instead of stalling on a large chunk.
+ * (queueing and splitting live in AudioPump so they can be tested without the
+ * Web Audio graph — this is the regression that broke playback outright.)
  */
-function pumpAudio() {
-  if (!playNode) return
-  while (pendingAudio.length > 0 && ringFree > 0) {
-    const head = pendingAudio[0]!
-    if (head.length <= ringFree) {
-      pendingAudio.shift()
-      ringFree -= head.length
-      playNode.port.postMessage({ type: 'push', data: head }, [head.buffer])
-    }
-    else {
-      const fit = head.slice(0, ringFree)
-      pendingAudio[0] = head.slice(ringFree)
-      ringFree = 0
-      playNode.port.postMessage({ type: 'push', data: fit }, [fit.buffer])
-    }
-  }
-}
-
 async function playChunk(b64: string) {
   if (!playCtx || !playNode || !b64) return
   try {
@@ -312,8 +296,7 @@ async function playChunk(b64: string) {
     bufferEmpty = false
     // Queue rather than push: the ring holds seconds and a reply can be
     // minutes, so the writer waits for space instead of overrunning it.
-    pendingAudio.push(mono)
-    pumpAudio()
+    pump?.enqueue(mono)
     armWatchdog()
   }
   catch (e) {
@@ -325,8 +308,7 @@ function stopPlayback() {
   if (playNode) playNode.port.postMessage({ type: 'flush' })
   // Barge-in drops queued audio too — otherwise the interrupted reply would
   // resume playing behind the user's new turn.
-  pendingAudio = []
-  ringFree = 0
+  pump?.reset()
   bufferEmpty = true
   turnComplete = false
 }
@@ -335,8 +317,7 @@ function onDrained() {
   // The ring emptying only ends playback when nothing is queued behind it —
   // otherwise a momentary underrun mid-reply would hand the floor back to the
   // mic while the rest of the answer was still waiting for space.
-  pumpAudio()
-  bufferEmpty = pendingAudio.length === 0
+  bufferEmpty = pump?.isEmpty ?? true
   if (bufferEmpty) maybeEndTurn()
   armWatchdog() // a chunk finishing is progress during a long reply
 }
