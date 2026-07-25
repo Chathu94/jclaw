@@ -4,7 +4,7 @@ import models.ApiToken;
 import utils.TokenHasher;
 
 /**
- * Bootstrap and cache the bearer token the in-process {@code jclaw_api}
+ * Bootstrap and resolve the bearer token the in-process {@code jclaw_api}
  * tool uses to call its own {@code /api/**} endpoints (JCLAW-282).
  *
  * <p>JClaw's bearer-auth path needs an {@link ApiToken} row to validate
@@ -50,40 +50,42 @@ public final class InternalApiTokenService {
      *  internal requests. */
     public static final String SYSTEM_OWNER = "system";
 
-    private static volatile String cachedToken;
-
     private InternalApiTokenService() {}
 
-    /** Return the plaintext bearer token, bootstrapping it on first call.
-     *  Thread-safe: the heavy path runs once under a class-monitor; later
-     *  callers see the cached value without locking. Token validity is
-     *  verified against the {@link ApiToken} table on cache miss so a
-     *  surviving config row whose matching ApiToken row was deleted
-     *  doesn't keep a broken token alive. */
+    /** Return the plaintext bearer token, bootstrapping it on first call and
+     *  re-minting if its backing row has gone.
+     *
+     *  <p>JCLAW-852: this used to memoize the plaintext in a static field and
+     *  verify the row only on a cache miss. Nothing missed after boot —
+     *  {@code DefaultConfigJob} warms it at startup and only tests ever cleared
+     *  it — so a deleted {@link ApiToken} row left the service handing out a
+     *  credential that authenticated against nothing for the life of the JVM,
+     *  breaking every {@code jclaw_api} tool call with a bare 401. The
+     *  self-healing branch in {@link #ensureToken} existed and was tested the
+     *  whole time; the cache simply made it unreachable.
+     *
+     *  <p>Verifying on every call closes that window outright rather than
+     *  narrowing it, and costs little: {@code ConfigService.get} is TTL-cached
+     *  and {@code findActiveByPlaintext} carries an L2 query cache sized for
+     *  exactly this pattern. {@code AuthCheck} already runs the same lookup on
+     *  every inbound request, so this is symmetric with the server side.
+     *
+     *  <p>{@link Tx#run} is what makes it safe to call from anywhere. The only
+     *  production caller outside boot is {@code JClawApiTool}, which runs in the
+     *  agent tool loop with no transaction open by design — reading the config
+     *  and the token row there would otherwise throw the same
+     *  "No active EntityManager" that JCLAW-849 fixed in the bearer filter. */
     public static String token() {
-        var cached = cachedToken;
-        if (cached != null) return cached;
-        synchronized (InternalApiTokenService.class) {
-            if (cachedToken != null) return cachedToken;
-            cachedToken = ensureToken();
-            return cachedToken;
-        }
-    }
-
-    /** Visible-for-tests: reset the cache so the next {@link #token()}
-     *  re-reads from the DB. Production code never needs this — left
-     *  public because the test lives in the default package, not in
-     *  {@code services}, so a package-private modifier would hide it. */
-    public static void invalidateCache() {
-        cachedToken = null;
+        return Tx.run(InternalApiTokenService::ensureToken);
     }
 
     private static String ensureToken() {
         var stored = ConfigService.get(INTERNAL_TOKEN_CONFIG_KEY);
         if (stored != null && !stored.isBlank()) {
-            // Verify the row still exists. If an operator manually
-            // revoked or deleted it, treat the cached plaintext as
-            // stale and re-mint.
+            // Verify the row still exists. A stored plaintext whose ApiToken
+            // row was revoked, deleted or restored away authenticates against
+            // nothing, so treat it as stale and re-mint rather than hand back a
+            // credential that will only ever produce 401s.
             var row = ApiToken.findActiveByPlaintext(stored);
             if (row != null) return stored;
             EventLogger.info("auth",

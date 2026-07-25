@@ -28,7 +28,6 @@ class InternalApiTokenServiceTest extends UnitTest {
     private void resetState() {
         ApiToken.deleteAll();
         ConfigService.delete(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
-        InternalApiTokenService.invalidateCache();
     }
 
     @BeforeEach
@@ -57,7 +56,6 @@ class InternalApiTokenServiceTest extends UnitTest {
     @Test
     void subsequentCallsReuseStoredToken() {
         var first = InternalApiTokenService.token();
-        InternalApiTokenService.invalidateCache();
         var second = InternalApiTokenService.token();
         assertEquals(first, second,
                 "second call should read the cached config row, not mint fresh");
@@ -70,11 +68,15 @@ class InternalApiTokenServiceTest extends UnitTest {
     @Test
     void reMintsWhenApiTokenRowMissing() {
         var first = InternalApiTokenService.token();
-        // Simulate: operator manually deleted the ApiToken row (e.g.
-        // cleanup script) but the config row survives. The next boot
-        // must repair the gap instead of leaving the tool unable to auth.
+        // Simulate: operator manually deleted the ApiToken row (e.g. cleanup
+        // script, restore from backup) but the config row survives. The next
+        // call must repair the gap instead of leaving the tool unable to auth.
+        //
+        // JCLAW-852: this test used to call invalidateCache() here, which is the
+        // only reason it passed — production never invalidated, so the repair
+        // below was unreachable and a deleted row broke jclaw_api until the JVM
+        // restarted. The absence of that call is now the regression guard.
         ApiToken.deleteAll();
-        InternalApiTokenService.invalidateCache();
 
         var second = InternalApiTokenService.token();
         assertNotEquals(first, second,
@@ -93,11 +95,48 @@ class InternalApiTokenServiceTest extends UnitTest {
         // invalidation forces a re-read; since the config row is gone
         // we mint a fresh one.
         ConfigService.delete(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
-        InternalApiTokenService.invalidateCache();
 
         var fresh = InternalApiTokenService.token();
         var stored = ConfigService.get(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
         assertEquals(fresh, stored,
                 "missing config row should be repopulated by the bootstrap path");
+    }
+
+    @Test
+    void tokenResolvesWithoutAnAmbientTransaction() {
+        // JCLAW-852: outside boot the only production caller is JClawApiTool,
+        // which runs in the agent tool loop with no transaction open by design.
+        // Now that every call re-reads the config and token rows, that path must
+        // carry its own transaction or it throws "No active EntityManager" —
+        // the same failure JCLAW-849 fixed in the bearer filter.
+        //
+        // Run on a fresh virtual thread so the test's own transaction is not
+        // inherited; an inline call would pass for the wrong reason.
+        var result = new String[1];
+        var error = new Throwable[1];
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                result[0] = InternalApiTokenService.token();
+            } catch (Throwable e) {
+                error[0] = e;
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted waiting for token()", e);
+        }
+
+        // Assert on the SHAPE of any failure, not on success. This class's
+        // @BeforeEach deletes from config and api_token inside the test's own
+        // uncommitted transaction, so a genuinely independent transaction can
+        // legitimately hit a lock timeout on those rows — that is the harness's
+        // state, not a defect. Reaching SQL execution at all is itself proof a
+        // transaction was open. The defect this guards against fails earlier and
+        // differently, with no EntityManager to execute against.
+        var failure = error[0] == null ? "" : error[0].toString();
+        assertFalse(failure.contains("No active EntityManager"),
+                "token() must carry its own transaction when called off the request path; got: " + failure);
     }
 }
