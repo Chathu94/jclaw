@@ -100,10 +100,7 @@ public class AppInstallTool implements ToolRegistry.Tool {
                 - `install`: validate, then publish the built app to public/apps/<slug>/, replacing any \
                 existing app at that slug. The source is auto-located — the workspace-root `<slug>/` (direct \
                 build) or the newest `coding/<session>/<slug>/` (a runtime=acp harness build lands there) — so \
-                just pass the slug; set `source` only to override. Returns the /apps/<slug>/ url.
-                Params: `action` (required: stage|validate|install), `slug` (required; lowercase letters, \
-                digits, hyphens), `source` (optional override for validate/install; auto-located otherwise), \
-                `dest` (stage; workspace dir), `overwrite` (stage; default false).""";
+                just pass the slug; set `source` only to override. Returns the /apps/<slug>/ url.""";
     }
 
     @Override public Map<String, Object> parameters() {

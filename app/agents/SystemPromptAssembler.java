@@ -592,13 +592,9 @@ public class SystemPromptAssembler {
         sb.append("""
                 When you're asked to send, share, download, attach, or deliver a file that exists in the agent workspace (including files you just created with writeFile, writeDocument, or any other tool), respond with a markdown link of the form `[filename](<relative/path/in/workspace>)`. ALWAYS use angle-bracket `<>` delimiters around the URL — this prevents filenames with spaces or parentheses from breaking the link syntax. Do NOT paste the file contents inline.
 
-                The JClaw chat UI automatically turns relative markdown links into downloadable chips that point at the workspace file endpoint, so the person can click once to save the file locally. Pasting contents inline defeats this, makes the chat unreadable for large files, and cannot be downloaded in one click.
+                The chat UI turns these into one-click download chips; pasting contents inline defeats that and makes large files unreadable. Only paste inline when explicitly asked to see the code/text in chat.
 
-                Examples:
-                - User: "send me the summary.docx" → You: "Here is your summary: [summary.docx](<summary.docx>)"
-                - User: "I'd like to download the nutrition slides" → You: "Ready to download: [practical-nutrition-slides.html](<.agent/diagrams/practical-nutrition-slides.html>)"
-
-                This applies to every file type in the workspace: documents, generated HTML, images, scripts, data files. Only paste contents inline if you're explicitly asked to see the code/text in chat.
+                Applies to every workspace file type — documents, generated HTML, images, scripts, data. Example: "Ready to download: [slides.html](<.agent/diagrams/slides.html>)"
                 """);
     }
 

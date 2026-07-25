@@ -144,17 +144,8 @@ public class SubagentYieldTool implements ToolRegistry.Tool {
                 child terminates (completion, failure, or timeout), its final output is delivered \
                 back as your next user-role message and your loop resumes from there. \
                 Use this after a `subagent_spawn` call with `async=true` when you want to block \
-                your logical turn on the child's result rather than continuing in parallel. \
-                Provide EITHER `runId` (the run id returned from the prior `subagent_spawn` call) \
-                OR `conversationId` (the child conversation id from the same return payload); \
-                when both are provided, `runId` wins. \
-                Optional: `timeoutSeconds` (0-3600, default 300) — caller-tightened resume budget; \
-                a synthetic TIMEOUT outcome is delivered if the child has not finished by then. \
-                Pass `0` to disable the yield timeout entirely; the child is still bounded by \
-                its own `runTimeoutSeconds` from the spawn call, so you don't park forever — \
-                the parent simply waits until the child terminates naturally. Useful for \
-                genuinely long-running async work (downloads, batch jobs) where any explicit \
-                yield budget would be guessing.""";
+                your logical turn on the child's result rather than continuing in parallel; \
+                see the parameters for single, batch, and collect-all forms.""";
     }
 
     @Override

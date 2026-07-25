@@ -83,15 +83,13 @@ public class DocumentsTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Read and write rich document formats. This is a single tool with an 'action' parameter. \
-                Use action="readDocument" to extract text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
-                Use action="writeDocument" to author HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
-                Use action="appendDocument" to append markdown to a draft file in the workspace — use this for large documents that would exceed your output token budget in a single call. Call with action="appendDocument" repeatedly with the SAME path (use a .md extension, NOT .docx/.pdf — appending text to a binary format is not supported), then call with action="renderDocument" to convert the accumulated draft to the target format. \
-                Use action="renderDocument" to read an existing markdown file from the workspace (via 'sourcePath') and render it to HTML, PDF, or DOCX. \
-                Supports headings, paragraphs, bold/italic/strikethrough, inline and fenced code, bullet and ordered lists, block quotes, tables, and horizontal rules. \
-                All paths are relative to the agent's workspace. \
-                If the target path already exists, the write and render actions pick a non-conflicting name by appending -1, -2, etc. before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
-                XLSX and PPTX authoring is not yet supported.""";
+                Read and write rich document formats. \
+                'readDocument' extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
+                'writeDocument' authors HTML, PDF, or DOCX from markdown 'content'. \
+                'appendDocument' appends markdown to a workspace draft — use it for documents too large for one call's output budget: append repeatedly to the SAME path (a .md extension, NOT .docx/.pdf — text cannot be appended to a binary format), then 'renderDocument' to convert the accumulated draft. \
+                'renderDocument' renders an existing workspace markdown file ('sourcePath') to HTML, PDF, or DOCX. \
+                Standard markdown is supported (headings, emphasis, code, lists, quotes, tables, rules); XLSX and PPTX authoring is not. \
+                Paths are workspace-relative. If the target exists, write and render append -1, -2 etc. before the extension and report the actual path in the response — reference that path when replying to the user.""";
     }
 
     @Override

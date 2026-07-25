@@ -161,51 +161,38 @@ public class TaskTool implements ToolRegistry.Tool {
                                 ACTION_LIST_REMINDERS),
                         SchemaKeys.DESCRIPTION, "The action to perform")),
                 Map.entry(KEY_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Task name — a short kebab-case identifier: lower-case "
-                                + "words joined by hyphens, e.g. 'nose-trimmer-search', 'morning-summary', "
-                                + "'weekly-invoice-digest'. NOT a title-case phrase like 'Nose Trimmer "
-                                + "Price Hunt'. It's the handle cancelTask/updateTask/runNow address it by.")),
+                        SchemaKeys.DESCRIPTION, "Task name — short kebab-case identifier, e.g. "
+                                + "'morning-summary' (NOT 'Morning Summary'). The handle "
+                                + "updateTask/cancelTask/runNow address it by.")),
                 Map.entry(SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Task instructions for the agent — the WORK only. For an "
-                                + "agent task ALWAYS pass a JSON array of step strings in order — never a "
-                                + "prose paragraph — even when there is only one action (then it's a "
-                                + "one-element array), e.g. "
-                                + "[\"Fetch yesterday's orders\", \"Summarise the totals\", "
-                                + "\"Highlight anything unusual\"] — the steps render as a numbered "
-                                + "list in the admin UI and are flattened into the agent's prompt. Do NOT "
-                                + "add a 'send it to <channel>' step — where the output goes is the "
-                                + "`delivery` field's job, delivered automatically after the run. The ONLY "
-                                + "case that passes a single plain string is a reminder, whose description "
-                                + "is the verbatim text the user sees (e.g. 'Brush your teeth') — 1-2 short "
-                                + "lines phrased as you nudging the user, NOT instructions to yourself.")),
+                        SchemaKeys.DESCRIPTION, "Task instructions — the WORK only. For an agent task "
+                                + "ALWAYS pass a JSON array of ordered step strings, never a prose "
+                                + "paragraph, even for a single step (a one-element array), e.g. "
+                                + "[\"Fetch yesterday's orders\", \"Summarise the totals\"]. Do NOT add a "
+                                + "'send it to <channel>' step — that is `delivery`'s job, delivered "
+                                + "automatically after the run. The ONLY case passing a plain string is a "
+                                + "reminder, whose description is the verbatim text the user sees (e.g. "
+                                + "'Brush your teeth') — 1-2 short lines phrased as you nudging the user, "
+                                + "NOT instructions to yourself.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now' (IMMEDIATE); a duration like '30m'/'2h'/'1d' for a one-shot N-from-now; an absolute ISO date-time like '2026-06-13T15:00' for a one-shot at a specific moment (interpreted in the task's timezone); 'every <duration>' for INTERVAL; or a Spring 6-field cron / at-shortcut for CRON. Use an absolute date-time (not a cron) for a one-time reminder on a specific date. "
-                                + "Day-of-month modifiers (the cron engine supports them): for 'the last <weekday> of the month' use the L suffix in the day-of-week field, e.g. '0 0 17 * * 5L' = last Friday at 5 PM — do NOT use a day-of-month range like '25-31', which silently skips months where the last weekday falls before the 25th. For the Nth weekday use '#', e.g. '0 0 9 * * 1#2' = 2nd Monday. For the last calendar day of the month use 'L' in the day-of-month field, e.g. '0 0 9 L * *'.")),
+                                + "Cron day modifiers: 'L' suffix in day-of-week = last such weekday, e.g. '0 0 17 * * 5L' = last Friday 5 PM — never a '25-31' day-of-month range, which silently skips months. '#' = Nth weekday, e.g. '0 0 9 * * 1#2' = 2nd Monday. 'L' in day-of-month = last calendar day, e.g. '0 0 9 L * *'.")),
                 Map.entry(KEY_PAUSED, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "On updateTask: flip the paused flag")),
                 Map.entry(KEY_DELIVERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION,
                         "Where the task's output goes. Three forms: "
-                                + "(1) a channel — '<channel>:<target>' e.g. 'telegram:12345', "
-                                + "'slack:C0123', 'whatsapp:+15551234567' (or just the channel name "
-                                + "like 'web'/'telegram', which fills the target from the calling chat); "
-                                + "(2) a tool the agent calls during the run — 'tool:<toolName>' e.g. "
-                                + "'tool:send_gmail_message' for emailing the result (email is NOT a "
-                                + "channel — use tool: for it); "
-                                + "(3) 'none' for a task whose output just stays in the run. "
-                                + "When the task should deliver back to the chat that's creating it (the "
-                                + "common 'remind me' case), OMIT this field — it auto-fills to the "
-                                + "calling conversation.")),
+                                + "(1) '<channel>:<target>' e.g. 'telegram:12345', 'slack:C0123', "
+                                + "'whatsapp:+15551234567' (bare 'telegram'/'web' fills the target from "
+                                + "the calling chat); (2) 'tool:<toolName>' e.g. 'tool:send_gmail_message' "
+                                + "— email is a tool, NOT a channel; (3) 'none' to keep output in the run. "
+                                + "OMIT to auto-fill the calling conversation (the usual 'remind me' case).")),
                 Map.entry(KEY_PAYLOAD_TYPE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION,
-                        "Payload kind. \"reminder\" makes this a user-visible "
-                                + "reminder — fire skips the LLM, the description "
-                                + "is delivered verbatim to the configured channel "
-                                + "(web notification toast / Telegram chat with 🔔 "
-                                + "prefix). Other values (\"text\", \"json\", "
-                                + "\"markdown\") are hints for future delivery-layer "
-                                + "formatting; leave null for ordinary agent-driven "
-                                + "tasks.")),
+                        "Payload kind. \"reminder\" makes this a user-visible reminder — the fire "
+                                + "skips the LLM and the description is delivered verbatim (web "
+                                + "notification toast / Telegram chat with a 🔔 prefix). Leave null "
+                                + "for ordinary agent-driven tasks.")),
                 Map.entry(KEY_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Override the agent's LLM provider for this task")),
                 Map.entry(KEY_MODEL_ID, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -221,7 +208,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 Map.entry(KEY_NO_AGENT, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "Skip the LLM round-trip; runs script if set, otherwise delivers description verbatim")),
                 Map.entry(KEY_AUTO_DELETE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
-                        SchemaKeys.DESCRIPTION, "Auto-delete this reminder after a successful one-off fire (a fired one-off reminder has served its purpose). Defaults TRUE for reminders, false for regular tasks; set false to KEEP a reminder. Only one-shot reminders are affected — recurring reminders and regular tasks are never auto-deleted.")),
+                        SchemaKeys.DESCRIPTION, "Auto-delete a one-shot reminder after it fires successfully. Defaults true for reminders, false for regular tasks; set false to KEEP a fired reminder. Recurring reminders and regular tasks are never auto-deleted.")),
                 Map.entry(KEY_CONTEXT_FROM_TASK_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "JSON array of upstream Task ids whose outputs feed this task's context")),
                 Map.entry(KEY_REPEAT_LIMIT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
