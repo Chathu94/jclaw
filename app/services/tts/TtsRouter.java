@@ -1,5 +1,6 @@
 package services.tts;
 
+import play.Logger;
 import services.ConfigService;
 
 /**
@@ -40,9 +41,80 @@ public final class TtsRouter {
      * Synthesize {@code text} to WAV bytes using the selected engine + its
      * configured model. Throws {@link TtsException} if the chosen engine can't
      * satisfy the request (sidecar unreachable, model download failed, …).
+     *
+     * <p>Deliberately has no fallback. Read-aloud in the chat view is a discrete
+     * action the operator can retry, and an explicit error there is more useful
+     * than silently substituting a different engine's voice. Voice mode, where
+     * losing a turn mid-conversation is disproportionate, uses
+     * {@link #synthesizeForVoice} instead.
      */
     public static byte[] synthesize(String text) {
+        return synthesizeWith(currentEngine(), text);
+    }
+
+    /**
+     * Audio for one voice-mode utterance, and which engine actually produced it.
+     *
+     * @param fellBack true when the operator's selected engine failed and the
+     *                 other one covered for it — the caller is expected to make
+     *                 that visible rather than pass off downgraded audio as the
+     *                 chosen engine's output.
+     */
+    public record Spoken(byte[] audio, TtsEngine engine, boolean fellBack) {}
+
+    /**
+     * Voice-mode synthesis, falling back to the other engine when the selected
+     * one fails (JCLAW-861).
+     *
+     * <p>The two engines fail in different ways, which is what makes falling
+     * back worthwhile here rather than merely papering over a problem. The JVM
+     * engine is in-process with its weights already on disk and has no external
+     * dependencies; the sidecar needs uv, a Python environment, a subprocess
+     * that can die for reasons unrelated to the request, and possibly a network
+     * fetch. The higher-quality engine is the less reliable one, so a live
+     * conversation should not end because it stumbled.
+     */
+    public static Spoken synthesizeForVoice(String text) {
         var engine = currentEngine();
+        try {
+            return new Spoken(synthesizeWith(engine, text), engine, false);
+        } catch (RuntimeException primary) {
+            var alt = fallbackFor(engine);
+            if (alt == null) throw primary;
+            try {
+                var audio = synthesizeWith(alt, text);
+                Logger.warn("TtsRouter: %s synthesis failed (%s) — fell back to %s for this utterance",
+                        engine.id(), primary.getMessage(), alt.id());
+                return new Spoken(audio, alt, true);
+            } catch (RuntimeException secondary) {
+                // Surface the ORIGINAL failure. The operator chose that engine and
+                // it is the one they need to fix; the fallback's own error is a
+                // detail, attached rather than substituted.
+                primary.addSuppressed(secondary);
+                throw primary;
+            }
+        }
+    }
+
+    /**
+     * The engine to try when {@code primary} fails, or null when there is no
+     * sane alternative.
+     *
+     * <p>One-directional on purpose. Sidecar → JVM trades quality for a local,
+     * dependency-free engine. The reverse would fall back to the <em>less</em>
+     * reliable option, which is backwards.
+     *
+     * <p>The JVM engine is only offered when its weights are already extracted.
+     * {@link TtsJvmEngine#synthesize} would otherwise download hundreds of
+     * megabytes on demand, and stalling a live turn on a cold download is worse
+     * than failing it promptly.
+     */
+    private static TtsEngine fallbackFor(TtsEngine primary) {
+        if (primary != TtsEngine.SIDECAR) return null;
+        return TtsJvmEngine.isModelPresent(modelFor(TtsEngine.JVM)) ? TtsEngine.JVM : null;
+    }
+
+    private static byte[] synthesizeWith(TtsEngine engine, String text) {
         var model = modelFor(engine);
         var voice = voiceFor(engine);
         return switch (engine) {

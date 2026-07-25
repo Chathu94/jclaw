@@ -270,11 +270,22 @@ async function onMessage(ev: MessageEvent) {
     case 'reply':
       if (msg.turn != null) currentTurn = msg.turn
       reply.value = msg.text || ''
-      if (state.value === 'thinking') state.value = 'speaking'
+      // JCLAW-860: deliberately does NOT enter `speaking`. The server now sends
+      // reply text before synthesising it, so the text arriving says nothing
+      // about whether audio is close. Entering `speaking` here would start the
+      // short SPEAKING_STALL_MS leash while the engine is still working, and a
+      // cold model load blows straight through it — Chatterbox measures ~52s on
+      // its first synthesis. Staying in `thinking` keeps the longer leash, and
+      // this frame re-arms it, so the wait for audio starts counting from the
+      // text rather than from whenever thinking began.
       turnComplete = false // a fresh turn's audio is about to stream
       break
     case 'audio':
       if (msg.turn !== currentTurn) break // straggler from a superseded turn
+      // `speaking` begins when audio does. A turn that never produces audio
+      // stays in `thinking` and is released by turn_complete below, which is the
+      // same path a blank or native-audio-only reply already took.
+      if (state.value === 'thinking') state.value = 'speaking'
       playChunk(msg.audio || '')
       break
     case 'turn_complete':

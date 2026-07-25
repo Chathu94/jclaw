@@ -381,6 +381,9 @@ public class VoiceController extends WebSocketController {
             // displayed reply with the spoken (plain) text as we go.
             var enc = Base64.getEncoder();
             var spoken = new StringBuilder();
+            // Latched so a dead engine logs once per turn rather than once per
+            // sentence — every utterance after the first will fail the same way.
+            boolean audioDegraded = false;
             int i = 0;
             while (!cancel.get()) {
                 String sentence;
@@ -394,14 +397,42 @@ public class VoiceController extends WebSocketController {
                 var speakable = TtsText.toSpeakable(sentence);
                 if (!speakable.isBlank()) { // skip whitespace-only chunks (e.g. stripped emoji)
                     if (cancel.get() || !out.isOpen()) return;
-                    long synthStart = System.nanoTime();
-                    var audio = TtsRouter.synthesize(speakable);
-                    long synthMs = (System.nanoTime() - synthStart) / 1_000_000L;
-                    if (cancel.get()) return;
+
+                    // JCLAW-860: text first, and independent of audio. The reply
+                    // exists whether or not it can be spoken — emitting it only
+                    // after a successful synthesize meant a TTS failure discarded
+                    // an answer the model had already produced and the operator
+                    // had already paid for. A text-only turn is a supported client
+                    // state: turn_complete with nothing queued for playback hands
+                    // the floor straight back to the mic.
                     spoken.append(!spoken.isEmpty() ? " " : "").append(speakable);
                     send(out, lock, Map.of("type", "reply", "turn", turnId, "text", spoken.toString()));
+
+                    long synthStart = System.nanoTime();
+                    TtsRouter.Spoken synth;
+                    try {
+                        synth = TtsRouter.synthesizeForVoice(speakable);
+                    } catch (RuntimeException e) {
+                        // One utterance losing its audio must not abandon the rest
+                        // of the turn, and must not raise to the handler below —
+                        // that sends an `error` frame, which the client treats as
+                        // fatal and tears the whole session down. Text keeps
+                        // streaming; the turn degrades to transcript-only.
+                        if (!audioDegraded) {
+                            audioDegraded = true;
+                            Logger.warn("voice: turn %d — audio unavailable, continuing text-only: %s",
+                                    turnId, e.getMessage());
+                        }
+                        continue;
+                    }
+                    long synthMs = (System.nanoTime() - synthStart) / 1_000_000L;
+                    if (cancel.get()) return;
                     send(out, lock, Map.of("type", "audio", "turn", turnId, "index", i++,
-                            "audio", enc.encodeToString(audio)));
+                            "audio", enc.encodeToString(synth.audio()),
+                            // Which engine actually spoke, so downgraded audio is
+                            // identifiable on the wire rather than passed off as
+                            // the operator's choice (JCLAW-861).
+                            "engine", synth.engine().id(), "degraded", synth.fellBack()));
                     if (i == 1) { // first audio out — the voice-to-voice metric that matters most
                         metrics.ttsSynth(synthMs);
                         metrics.firstAudioSent();
