@@ -18,8 +18,10 @@ import type { PromptBreakdownEntry } from '~/types/api'
 
 const props = withDefaults(defineProps<{
   entries: PromptBreakdownEntry[]
-  /** Denominator for share %. Pass the dialog's grand total so the section and
-   *  tool donuts are comparable; omit to normalise within this series. */
+  /** Denominator for share %. Omit to normalise within this series, which is
+   *  what the prompt breakdown does — its one chart already spans every
+   *  contributor, so the arcs should close at exactly 100%. Pass an explicit
+   *  total only when a series is a known part of a larger whole. */
   total?: number
   /** Slices drawn before the remainder collapses into "Other". */
   maxSlices?: number
@@ -28,9 +30,12 @@ const props = withDefaults(defineProps<{
 
 // Categorical palette. Chosen to stay distinguishable in both themes and to
 // avoid the red reserved for destructive affordances elsewhere in the admin UI.
+// Must hold at least `maxSlices` entries: the lookup wraps with `% length`, so a
+// shorter palette silently paints two slices of one chart the same colour.
 const COLORS = [
   '#2dd4bf', '#60a5fa', '#a78bfa', '#f0abfc',
   '#fbbf24', '#34d399', '#818cf8', '#fb923c',
+  '#22d3ee', '#a3e635', '#f472b6', '#94a3b8',
 ]
 const OTHER_COLOR = '#6b7280'
 

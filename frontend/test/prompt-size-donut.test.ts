@@ -45,6 +45,17 @@ describe('PromptSizeDonut', () => {
     expect(w.text()).toContain('Other (4)')
   })
 
+  it('gives every slice its own colour at the largest maxSlices in use', () => {
+    // The palette lookup wraps with `% length`, so a palette shorter than
+    // maxSlices repeats a colour inside one chart. The prompt breakdown asks
+    // for 12 slices, so 12 must stay distinct.
+    const entries = Array.from({ length: 12 }, (_, i) => entry(`t${i}`, 100 - i))
+    const w = mountDonut(entries, { maxSlices: 12 })
+    const colors = w.findAll('circle').slice(1).map(c => c.attributes('stroke'))
+    expect(colors).toHaveLength(12)
+    expect(new Set(colors).size).toBe(12)
+  })
+
   it('keeps every entry when the count fits under maxSlices', () => {
     const w = mountDonut([entry('a', 5), entry('b', 4)])
     expect(w.text()).not.toContain('Other')

@@ -708,7 +708,7 @@ describe('Agents page — Inspect prompt dialog', () => {
     await vi.waitFor(() => expect(calls.some(u => u.includes('channelType=telegram'))).toBe(true))
   })
 
-  it('swaps the sections table for a donut when the chart view is selected', async () => {
+  it('swaps both tables for a single donut spanning sections and tool schemas', async () => {
     registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
       totalChars: 400,
       totalTokenEstimate: 100,
@@ -716,11 +716,13 @@ describe('Agents page — Inspect prompt dialog', () => {
       cacheablePrefixChars: 320,
       variableSuffixChars: 80,
       sections: [
-        { name: 'Identity', chars: 300, tokens: 75 },
+        { name: 'Identity', chars: 200, tokens: 50 },
         { name: 'Safety', chars: 100, tokens: 25 },
       ],
-      skills: [],
-      tools: [],
+      // Skills live inside the Identity/Skills section already — the chart must
+      // not merge them in on top, or the shares would exceed the whole.
+      skills: [{ name: 'deploy', chars: 40, tokens: 10 }],
+      tools: [{ name: 'Bash', chars: 100, tokens: 25 }],
     }))
     setupAgentsApi()
     const component = await mountSuspended(Agents)
@@ -736,10 +738,18 @@ describe('Agents page — Inspect prompt dialog', () => {
     await component.findAll('button').find(b => b.text().trim() === 'chart')!.trigger('click')
     await flushPromises()
 
-    // Donut replaces the table; shares come off totalTokenEstimate, not the series.
+    // Exactly one donut replaces BOTH tables — sections and tools are disjoint
+    // halves of one whole, so two charts would each read as its own 100%.
     expect(component.findAll('table').length).toBe(0)
-    expect(component.find('svg[role="img"]').exists()).toBe(true)
-    expect(component.text()).toContain('75.0%')
+    expect(component.findAll('svg[role="img"]')).toHaveLength(1)
+
+    // Its legend carries slices from both series, tools marked by origin.
+    const legend = component.find('svg[role="img"]').attributes('aria-label')!
+    expect(legend).toContain('Identity 50.0%')
+    expect(legend).toContain('Safety 25.0%')
+    expect(legend).toContain('Tool: Bash 25.0%')
+    // Skills are not a third series: 50 + 25 + 25 already closes the circle.
+    expect(legend).not.toContain('deploy')
   })
 
   it('View Full fetches and renders the assembled prompt text', async () => {

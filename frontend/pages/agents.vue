@@ -41,6 +41,7 @@ import type {
   ConfigValueResponse,
   EffectiveAllowlist,
   PromptBreakdown,
+  PromptBreakdownEntry,
   WorkspaceFileContent,
 } from '~/types/api'
 import { effectiveThinkingLevels, findProviderModel, type ProviderModel } from '~/composables/useProviders'
@@ -455,6 +456,29 @@ onBeforeUnmount(() => document.removeEventListener('keydown', handlePromptBreakd
 /** Table is the exhaustive view and stays the default; the donut is the
  *  at-a-glance shape (see PromptSizeDonut for why it collapses the long tail). */
 const promptBreakdownView = ref<'table' | 'chart'>('table')
+
+/**
+ * Single series behind the chart view: prompt sections followed by tool schemas.
+ *
+ * The two are disjoint halves of the same whole — sections are contiguous,
+ * non-overlapping spans of the assembled prompt string, and tool schemas are the
+ * separately-delivered `tools` array — so one pie over both accounts for 100% of
+ * the input the model receives, which is why the chart view shows one and not
+ * two. Skills are deliberately excluded: they live inside the Skills section
+ * already, so including them would double-count.
+ *
+ * Tool names carry a prefix so the legend says which half a slice came from, and
+ * so a tool that happens to share a name with a section can't collide on the
+ * slice key.
+ */
+const promptChartEntries = computed<PromptBreakdownEntry[]>(() => {
+  const data = promptBreakdownData.value
+  if (!data) return []
+  return [
+    ...data.sections,
+    ...data.tools.map(t => ({ ...t, name: `Tool: ${t.name}` })),
+  ]
+})
 
 // Full assembled prompt text. Fetched lazily from its own endpoint rather than
 // riding along on the breakdown: it runs to tens of kilobytes and the dialog is
@@ -2833,19 +2857,30 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </div>
           </div>
 
+          <!--
+            Chart view: ONE pie over both series. Sections and tool schemas are
+            disjoint halves of the same total, so a single chart is the only one
+            that reads as a composition — two charts invited the reader to treat
+            each as its own 100%. Shares normalise within the merged series
+            (no :total), so the arcs close exactly.
+          -->
+          <div v-if="promptBreakdownView === 'chart'">
+            <h4 class="text-[11px] text-fg-muted uppercase tracking-wide mb-1.5">
+              Prompt sections + tool schemas
+            </h4>
+            <PromptSizeDonut
+              :entries="promptChartEntries"
+              :max-slices="12"
+              label="Prompt composition"
+            />
+          </div>
+
           <!-- Sections table -->
-          <div>
+          <div v-else>
             <h4 class="text-[11px] text-fg-muted uppercase tracking-wide mb-1.5">
               Prompt sections
             </h4>
-            <PromptSizeDonut
-              v-if="promptBreakdownView === 'chart'"
-              :entries="promptBreakdownData.sections"
-              :total="promptBreakdownData.totalTokenEstimate"
-              label="Prompt sections"
-            />
             <table
-              v-else
               class="w-full text-xs font-mono table-fixed"
             >
               <colgroup>
@@ -2989,21 +3024,14 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           </div>
 
           <!-- Tools table -->
-          <div v-if="promptBreakdownData.tools.length > 0">
+          <div v-if="promptBreakdownView === 'table' && promptBreakdownData.tools.length > 0">
             <h4 class="text-[11px] text-fg-muted uppercase tracking-wide mb-1.5">
               Tool schemas ({{ promptBreakdownData.tools.length }})
             </h4>
             <p class="text-[10px] text-fg-muted mb-1">
               Sent separately as the <code class="text-fg-muted">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.
             </p>
-            <PromptSizeDonut
-              v-if="promptBreakdownView === 'chart'"
-              :entries="promptBreakdownData.tools"
-              :total="promptBreakdownData.totalTokenEstimate"
-              label="Tool schemas"
-            />
             <table
-              v-else
               class="w-full text-xs font-mono table-fixed"
             >
               <colgroup>
