@@ -4,6 +4,7 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatRequest;
 import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
 import org.junit.jupiter.api.Test;
@@ -211,5 +212,73 @@ class OpenAiProviderTest extends UnitTest {
         Method m = LlmProvider.class.getDeclaredMethod("extractReasoningFromDelta", ChunkDelta.class);
         m.setAccessible(true);
         return (String) m.invoke(p, delta);
+    }
+
+    // =====================
+    // disableReasoning — JCLAW-851
+    //
+    // serializeRequest calls disableReasoning on EVERY request with no thinking
+    // mode set, which is most traffic. A naive emit would attach reasoning_effort
+    // to ordinary non-reasoning calls, so both guards below are load-bearing.
+    // =====================
+
+    private static OpenAiProvider providerNamed(String name, ModelInfo... models) {
+        return new OpenAiProvider(new ProviderConfig(
+                name, "http://localhost:1234/v1", "k", List.of(models)));
+    }
+
+    private static ModelInfo model(String id, boolean supportsThinking) {
+        return new ModelInfo(id, id, 32768, 0, supportsThinking);
+    }
+
+    private static ChatRequest noThinking(String modelId) {
+        return new ChatRequest(modelId, List.of(ChatMessage.user("hi")),
+                null, false, null, null);
+    }
+
+    @Test
+    void disableReasoningEmitsNoneForCompatProviderWithThinkingModel() throws Exception {
+        var p = providerNamed("lm-studio", model("qwen3.5-4b-mlx", true));
+        var json = serialize(p, noThinking("qwen3.5-4b-mlx"));
+        assertEquals("none", json.get("reasoning_effort").getAsString(),
+                "thinking-capable model on a compat endpoint must receive the off-signal");
+    }
+
+    @Test
+    void disableReasoningSkipsRealOpenAi() throws Exception {
+        // OpenAI reasoning models accept low/medium/high/minimal — not "none" —
+        // so emitting it against the real API would be rejected.
+        var p = providerNamed("openai", model("o3", true));
+        var json = serialize(p, noThinking("o3"));
+        assertFalse(json.has("reasoning_effort"),
+                "real OpenAI must never receive reasoning_effort=none");
+    }
+
+    @Test
+    void disableReasoningSkipsNonThinkingModel() throws Exception {
+        // The regression guard: thinkingMode is null both when the operator turned
+        // thinking off and when the model never had it, so without this check every
+        // ordinary chat call would carry reasoning_effort.
+        var p = providerNamed("lm-studio", model("gemma-plain", false));
+        var json = serialize(p, noThinking("gemma-plain"));
+        assertFalse(json.has("reasoning_effort"),
+                "a model with no reasoning mode must not receive reasoning_effort");
+    }
+
+    @Test
+    void disableReasoningSkipsUnknownModel() throws Exception {
+        var p = providerNamed("lm-studio", model("something-else", true));
+        var json = serialize(p, noThinking("not-in-the-catalog"));
+        assertFalse(json.has("reasoning_effort"),
+                "unknown models default to silence rather than guessing");
+    }
+
+    @Test
+    void explicitThinkingModeStillWinsOverDisable() throws Exception {
+        // Sanity: the disable path must not shadow an operator-selected level.
+        var p = providerNamed("lm-studio", model("qwen3.5-4b-mlx", true));
+        var json = serialize(p, new ChatRequest("qwen3.5-4b-mlx",
+                List.of(ChatMessage.user("hi")), null, false, null, "high"));
+        assertEquals("high", json.get("reasoning_effort").getAsString());
     }
 }

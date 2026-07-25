@@ -2,6 +2,7 @@ package llm;
 
 import com.google.gson.JsonObject;
 import llm.LlmTypes.ChunkDelta;
+import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 
 /**
@@ -18,6 +19,9 @@ import llm.LlmTypes.ProviderConfig;
  */
 public final class OpenAiProvider extends LlmProvider {
 
+    /** Provider name for the real OpenAI API, as opposed to the compat catch-all. */
+    private static final String OPENAI_PROVIDER = "openai";
+
     public OpenAiProvider(ProviderConfig config) {
         super(config);
     }
@@ -32,6 +36,43 @@ public final class OpenAiProvider extends LlmProvider {
         // OpenAI nests reasoning tokens under completion_tokens_details; the
         // shared top-then-nested chain resolves to that (no top-level field).
         return readReasoningTokens(usageObj);
+    }
+
+    @Override
+    protected void disableReasoning(JsonObject request) {
+        // JCLAW-851: the base is a no-op, so before this the Think toggle sent no
+        // off-signal at all on any OpenAI-compatible provider — the same omission
+        // as extractReasoningFromDelta above, in the opposite direction.
+        //
+        // Two guards, because a naive emit here would be a regression rather than
+        // a fix. serializeRequest calls this on EVERY request whose thinking mode
+        // is unset, and thinkingMode is null both when the operator turned
+        // thinking off AND when the model never supported it — indistinguishable
+        // at this layer.
+        //
+        // 1. Real OpenAI is served by this same class. Its reasoning models accept
+        //    low/medium/high/minimal for reasoning_effort but NOT "none", so the
+        //    field would be rejected. Only the compat endpoints get it.
+        // 2. Gate on the model actually advertising thinking. Otherwise ordinary
+        //    non-reasoning traffic would carry reasoning_effort, which OpenAI-shaped
+        //    servers reject on models that have no reasoning mode.
+        if (OPENAI_PROVIDER.equalsIgnoreCase(config().name())) return;
+        if (!modelSupportsThinking(request)) return;
+        request.addProperty("reasoning_effort", "none");
+    }
+
+    /** True when the request's model is configured as thinking-capable. Unknown
+     *  models return false: silence is the safe default, since an unrecognised
+     *  model is more likely a plain chat model than a reasoner. */
+    private boolean modelSupportsThinking(JsonObject request) {
+        var modelEl = request.get("model");
+        if (modelEl == null || modelEl.isJsonNull()) return false;
+        var modelId = modelEl.getAsString();
+        var models = config().models();
+        if (models == null) return false;
+        return models.stream()
+                .filter(m -> modelId.equals(m.id()))
+                .anyMatch(ModelInfo::supportsThinking);
     }
 
     @Override
