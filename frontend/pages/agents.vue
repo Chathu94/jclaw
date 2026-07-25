@@ -9,6 +9,7 @@ import {
   ChevronUpIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
+  CodeBracketIcon,
   Cog6ToothIcon,
   CommandLineIcon,
   ComputerDesktopIcon,
@@ -462,6 +463,29 @@ const promptTextOpen = ref(false)
 const promptText = ref('')
 const promptTextLoading = ref(false)
 const promptTextError = ref('')
+
+// Same MacDown-style split as the workspace file editor, minus the editing: the
+// assembled prompt is markdown, so it reads either as the literal string the
+// model receives (raw) or as rendered HTML. Both panes on = side-by-side, and
+// at least one always stays visible. The choice is deliberately not reset by
+// closePromptText() — it's a viewing preference, so it survives Back/re-open.
+const showPromptRaw = ref(true)
+const showPromptRendered = ref(true)
+function togglePromptRaw() {
+  // Refuse to hide the raw pane when it's the only visible one.
+  if (showPromptRaw.value && !showPromptRendered.value) return
+  showPromptRaw.value = !showPromptRaw.value
+}
+function togglePromptRendered() {
+  // Refuse to hide the rendered pane when it's the only visible one.
+  if (showPromptRendered.value && !showPromptRaw.value) return
+  showPromptRendered.value = !showPromptRendered.value
+}
+
+// Computed rather than called inline in the template: the prompt runs to tens of
+// kilobytes, and Vue's own caching keeps unrelated re-renders of the dialog off
+// the markdown pipeline (and out of the shared render LRU).
+const promptTextHtml = computed(() => renderMarkdown(promptText.value))
 
 async function openPromptText() {
   if (!promptBreakdownAgent.value) return
@@ -2542,7 +2566,12 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       aria-modal="true"
       @click.self="closePromptBreakdown()"
     >
-      <div class="bg-surface-elevated border border-border w-full max-w-4xl my-6 text-fg-primary">
+      <!-- Wider while the full prompt is open: a side-by-side raw/rendered split
+           at 4xl leaves each pane too narrow for dense monospace text. -->
+      <div
+        class="bg-surface-elevated border border-border w-full my-6 text-fg-primary"
+        :class="promptTextOpen ? 'max-w-6xl' : 'max-w-4xl'"
+      >
         <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <div class="min-w-0">
             <h3 class="text-sm font-medium text-fg-strong truncate">
@@ -2608,6 +2637,44 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
               View Full
             </button>
+            <!-- Raw / rendered pane toggles, mirroring the workspace file editor.
+                 At least one stays on, so neither can be un-toggled into an
+                 empty panel. -->
+            <div
+              v-if="promptTextOpen && promptText"
+              class="flex items-center gap-1"
+            >
+              <button
+                type="button"
+                :class="showPromptRaw ? 'text-fg-strong bg-muted' : 'text-fg-muted'"
+                class="p-1.5 hover:text-fg-strong transition-colors"
+                :aria-pressed="showPromptRaw"
+                title="Toggle raw markdown"
+                data-testid="toggle-prompt-raw"
+                @click="togglePromptRaw()"
+              >
+                <CodeBracketIcon
+                  class="w-4 h-4"
+                  aria-hidden="true"
+                />
+                <span class="sr-only">Toggle raw markdown pane</span>
+              </button>
+              <button
+                type="button"
+                :class="showPromptRendered ? 'text-fg-strong bg-muted' : 'text-fg-muted'"
+                class="p-1.5 hover:text-fg-strong transition-colors"
+                :aria-pressed="showPromptRendered"
+                title="Toggle rendered markdown"
+                data-testid="toggle-prompt-rendered"
+                @click="togglePromptRendered()"
+              >
+                <EyeIcon
+                  class="w-4 h-4"
+                  aria-hidden="true"
+                />
+                <span class="sr-only">Toggle rendered markdown pane</span>
+              </button>
+            </div>
             <button
               v-if="promptTextOpen"
               class="px-2 py-1 text-xs text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
@@ -2677,10 +2744,34 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <span class="font-mono">{{ promptBreakdownChannel }}</span>, as the model
               receives it. Tool schemas travel separately and are not part of this text.
             </p>
-            <pre
-              class="max-h-[60vh] overflow-auto bg-muted border border-border p-3 text-[11px] leading-relaxed font-mono text-fg-primary whitespace-pre-wrap break-words"
-              data-testid="full-prompt-text"
-            >{{ promptText }}</pre>
+            <!-- Panes scroll independently: the raw string and its rendered form
+                 have very different heights, so a shared scroller would strand
+                 one of them. -->
+            <div class="flex h-[60vh] bg-muted border border-border">
+              <div
+                v-if="showPromptRaw"
+                class="min-w-0 overflow-auto"
+                :class="showPromptRendered ? 'w-1/2 border-r border-border' : 'w-full'"
+              >
+                <pre
+                  class="p-3 text-[11px] leading-relaxed font-mono text-fg-primary whitespace-pre-wrap break-words"
+                  data-testid="full-prompt-text"
+                >{{ promptText }}</pre>
+              </div>
+              <div
+                v-if="showPromptRendered"
+                class="min-w-0 overflow-auto p-3"
+                :class="showPromptRaw ? 'w-1/2' : 'w-full'"
+              >
+                <!-- eslint-disable vue/no-v-html -- renderMarkdown output is DOMPurify-sanitized -->
+                <div
+                  class="md-preview text-[13px] text-fg-primary"
+                  data-testid="full-prompt-rendered"
+                  v-html="promptTextHtml"
+                />
+                <!-- eslint-enable vue/no-v-html -->
+              </div>
+            </div>
           </template>
         </div>
 

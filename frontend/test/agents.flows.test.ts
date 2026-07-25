@@ -780,6 +780,59 @@ describe('Agents page — Inspect prompt dialog', () => {
     expect(component.findAll('table').length).toBeGreaterThan(0)
   })
 
+  it('View Full shows raw and rendered markdown panes, and toggles between them', async () => {
+    registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
+      totalChars: 100,
+      totalTokenEstimate: 25,
+      cacheBoundaryMarker: '',
+      cacheablePrefixChars: 80,
+      variableSuffixChars: 20,
+      sections: [{ name: 'Identity', chars: 100, tokens: 25 }],
+      skills: [],
+      tools: [],
+    }))
+    registerEndpoint('/api/agents/2/prompt-text', () => ({
+      text: '## Your Role\nYou are a helpful agent.',
+    }))
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+    await component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')!.trigger('click')
+    await flushPromises()
+    await component.find('[data-testid="view-full-prompt"]').trigger('click')
+    await flushPromises()
+
+    const raw = () => component.find('[data-testid="full-prompt-text"]')
+    const rendered = () => component.find('[data-testid="full-prompt-rendered"]')
+
+    // Default = split: raw keeps the literal "## Your Role", the rendered pane
+    // turns it into a real heading element.
+    expect(raw().exists()).toBe(true)
+    expect(raw().text()).toContain('## Your Role')
+    expect(rendered().exists()).toBe(true)
+    expect(rendered().html()).toContain('<h2')
+    expect(rendered().text()).not.toContain('## Your Role')
+
+    // Hide the raw pane → rendered only.
+    await component.find('[data-testid="toggle-prompt-raw"]').trigger('click')
+    await flushPromises()
+    expect(raw().exists()).toBe(false)
+    expect(rendered().exists()).toBe(true)
+
+    // Guard: hiding the rendered pane when it's the only visible one is refused.
+    await component.find('[data-testid="toggle-prompt-rendered"]').trigger('click')
+    await flushPromises()
+    expect(rendered().exists()).toBe(true)
+
+    // Bring raw back → split again.
+    await component.find('[data-testid="toggle-prompt-raw"]').trigger('click')
+    await flushPromises()
+    expect(raw().exists()).toBe(true)
+    expect(rendered().exists()).toBe(true)
+  })
+
   it('closes the dialog when the close button is clicked', async () => {
     registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
       totalChars: 100,
