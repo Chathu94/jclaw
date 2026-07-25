@@ -106,7 +106,6 @@ public final class TtsReferenceVoice {
     public static void clear(TtsEngine engine) throws IOException {
         clearFiles();
         ConfigService.delete(configKey(engine));
-        ConfigService.delete(CONFIG_KEY_PREFIX + engine.id() + ".refText");
     }
 
     private static void clearFiles() throws IOException {

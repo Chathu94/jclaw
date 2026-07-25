@@ -14,7 +14,7 @@ NVIDIA/vLLM backend is deferred (JCLAW-788 RTX 4090 validation).
 
 Protocol (bound to 127.0.0.1 only):
   GET  /health -> 200 {status, model, loaded}
-  POST /synthesize {text, model?, voice?, ref_audio?, ref_text?, speed?, format?}
+  POST /synthesize {text, model?, voice?, ref_audio?, speed?, format?}
         -> 200 audio bytes (Content-Type: audio/wav) | 400/409/500 JSON on error
   POST /shutdown -> 200 (evict an adopted orphan whose identity no longer matches)
 
@@ -243,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self.state.ask("_tts_worker", self.state.tts_worker, {
                     "op": "synthesize", "text": text,
                     "model": req.get("model"), "voice": req.get("voice"),
-                    "ref_audio": req.get("ref_audio"), "ref_text": req.get("ref_text"),
+                    "ref_audio": req.get("ref_audio"),
                     "speed": req.get("speed"), "format": fmt,
                 })
             audio = base64.b64decode(payload["audio_b64"])

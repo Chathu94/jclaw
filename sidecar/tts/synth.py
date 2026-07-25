@@ -20,7 +20,7 @@ Qwen/Qwen3-TTS repos) is DEFERRED until the JCLAW-788 RTX 4090 validation.
 usage (one-shot): uv run synth.py "text to speak" [model-id]   -> WAV bytes on stdout
 usage (worker):   uv run synth.py --worker
   worker protocol: one request per line on stdin:
-    {"op":"synthesize","text":..,"model":id,"voice":..,"ref_audio":..,"ref_text":..,"speed":..,"format":"wav"}
+    {"op":"synthesize","text":..,"model":id,"voice":..,"ref_audio":..,"speed":..,"format":"wav"}
   one response per line on stdout: {"audio_b64":..,"sample_rate":..,"format":".."} or {"error":..}
   The loaded model is cached in-process so repeated calls skip the ~1.5s reload.
 """
@@ -177,7 +177,7 @@ def _synthesize_chatterbox(text, ref_audio):
     return audio, sr
 
 
-def _synthesize_mlx(text, model_id, voice, ref_audio, ref_text, speed):
+def _synthesize_mlx(text, model_id, voice, ref_audio, speed):
     """mlx-audio synth (Apple silicon) -> (float mono audio, sample_rate)."""
     import numpy as np
     model = _load_mlx(model_id)
@@ -190,8 +190,6 @@ def _synthesize_mlx(text, model_id, voice, ref_audio, ref_text, speed):
         kw["speed"] = float(speed)
     if ref_audio:  # zero-shot voice cloning (Qwen3-TTS)
         kw["ref_audio"] = ref_audio
-    if ref_text:
-        kw["ref_text"] = ref_text
 
     # Pin the speaker so the voice stays consistent across sentence chunks and
     # turns: Qwen3-TTS-Base samples a fresh voice per call otherwise. Seed mlx's
@@ -208,7 +206,7 @@ def _synthesize_mlx(text, model_id, voice, ref_audio, ref_text, speed):
     return audio, sr
 
 
-def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
+def _synthesize(text, model_id, voice, ref_audio, speed, fmt):
     """Synthesize `text` to audio bytes; returns (base64_str, sample_rate).
     Routes by model id: Chatterbox takes the cross-platform torch path (MPS/CUDA);
     every other id is mlx-audio, which is Apple-silicon only."""
@@ -228,7 +226,7 @@ def _synthesize(text, model_id, voice, ref_audio, ref_text, speed, fmt):
                 "Apple silicon is implemented (JCLAW-789). Use model=chatterbox for the "
                 "cross-platform MPS/CUDA engine (JCLAW-814); the NVIDIA/vLLM Qwen backend "
                 "is pending the JCLAW-788 RTX 4090 validation.")
-        audio, sr = _synthesize_mlx(text, model_id, voice, ref_audio, ref_text, speed)
+        audio, sr = _synthesize_mlx(text, model_id, voice, ref_audio, speed)
 
     # WAV is the guaranteed format (libsndfile always writes it). FLAC too if the
     # build supports it; anything else falls back to WAV for the batch cut.
@@ -251,7 +249,7 @@ def worker():
             req = json.loads(line)
             b64, sr = _synthesize(
                 req.get("text", ""), req.get("model"), req.get("voice"),
-                req.get("ref_audio"), req.get("ref_text"), req.get("speed"),
+                req.get("ref_audio"), req.get("speed"),
                 (req.get("format") or "wav").lower())
             _emit_json({"audio_b64": b64, "sample_rate": sr,
                         "format": (req.get("format") or "wav").lower()})
@@ -267,7 +265,7 @@ def main():
     _init_protocol_stdout()
     text = sys.argv[1] if len(sys.argv) > 1 else "Hello from the jclaw text to speech sidecar."
     model_id = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_MODEL
-    b64, _ = _synthesize(text, model_id, None, None, None, None, "wav")
+    b64, _ = _synthesize(text, model_id, None, None, None, "wav")
     _emit_bytes(base64.b64decode(b64))
     return 0
 

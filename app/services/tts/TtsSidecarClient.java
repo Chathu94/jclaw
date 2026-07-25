@@ -48,7 +48,7 @@ public class TtsSidecarClient extends SidecarHttpClient {
      * optional (null/blank omitted, letting the sidecar default).
      */
     public byte[] synthesize(String text, String model, String voice, String format) {
-        return synthesize(text, model, voice, format, null, null);
+        return synthesize(text, model, voice, format, null);
     }
 
     /**
@@ -57,21 +57,28 @@ public class TtsSidecarClient extends SidecarHttpClient {
      * it as {@code audio_prompt_path}, Qwen3-TTS as {@code ref_audio}. It is the
      * only way to choose a voice on those models, which have no named presets.
      *
-     * <p>{@code refText} is the reference clip's transcript, used only by
-     * Qwen3-TTS; Chatterbox clones from audio alone and ignores it. Both are
-     * omitted from the request when null or blank, leaving the model's default
+     * <p>Omitted from the request when null or blank, leaving the model's default
      * speaker in place.
      *
      * <p>The path is read by the sidecar process, not this one, so it must be
      * absolute — the sidecar runs with its own working directory.
+     *
+     * <p>No transcript is sent alongside it (JCLAW-867). Qwen3-TTS clones two
+     * ways: a speaker embedding derived from the clip alone, and ICL, which
+     * prefills the clip's audio codes plus its transcript ahead of every
+     * utterance. The embedding is what the Base checkpoints ship a speaker
+     * encoder for, and it is amortized — ICL re-pays that prefill on each turn
+     * and needs its repetition penalty forced up to stop long prefills
+     * degenerating. Sending a transcript is the only thing that selects ICL, so
+     * not having one to send is what keeps the cheap path.
      */
     public byte[] synthesize(String text, String model, String voice, String format,
-                             String refAudio, String refText) {
-        return withSidecarLock(() -> synthesizeLocked(text, model, voice, format, refAudio, refText));
+                             String refAudio) {
+        return withSidecarLock(() -> synthesizeLocked(text, model, voice, format, refAudio));
     }
 
     private byte[] synthesizeLocked(String text, String model, String voice, String format,
-                                    String refAudio, String refText) {
+                                    String refAudio) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : TtsSidecarManager.ensureRunning();
         var body = new JsonObject();
         body.addProperty("text", text);
@@ -79,7 +86,6 @@ public class TtsSidecarClient extends SidecarHttpClient {
         if (voice != null && !voice.isBlank()) body.addProperty("voice", voice);
         if (format != null && !format.isBlank()) body.addProperty("format", format);
         if (refAudio != null && !refAudio.isBlank()) body.addProperty("ref_audio", refAudio);
-        if (refText != null && !refText.isBlank()) body.addProperty("ref_text", refText);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/synthesize")
                 .post(RequestBody.create(body.toString(), JSON))

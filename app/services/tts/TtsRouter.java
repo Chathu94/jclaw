@@ -51,14 +51,6 @@ public final class TtsRouter {
         return TtsReferenceVoice.activePath(engine);
     }
 
-    /** Transcript of the reference clip, or null. Qwen3-TTS uses it; Chatterbox
-     *  clones from audio alone and ignores it. Same cloning gate as
-     *  {@link #refAudioFor}. */
-    public static String refTextFor(TtsEngine engine) {
-        if (!TtsModel.cloningById(modelFor(engine))) return null;
-        return ConfigService.get("tts." + engine.id() + ".refText");
-    }
-
     /**
      * Synthesize {@code text} to WAV bytes using the selected engine + its
      * configured model. Throws {@link TtsException} if the chosen engine can't
@@ -140,8 +132,7 @@ public final class TtsRouter {
         var model = modelFor(engine);
         var voice = voiceFor(engine);
         return switch (engine) {
-            case SIDECAR -> SIDECAR.synthesize(text, model, voice, "wav",
-                    refAudioFor(engine), refTextFor(engine));
+            case SIDECAR -> SIDECAR.synthesize(text, model, voice, "wav", refAudioFor(engine));
             case JVM -> TtsJvmEngine.synthesize(text, model, voice, null);
         };
     }
