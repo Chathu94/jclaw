@@ -36,7 +36,12 @@ let captureNode: AudioWorkletNode | null = null
 // --- ring-buffer playback ---
 let playCtx: AudioContext | null = null
 let playNode: AudioWorkletNode | null = null
-let bufferEmpty = true // mirrors the worklet ring buffer (drained = true)
+let ringDrained = true // mirrors the worklet ring buffer (drained = true)
+/** Serialises decodes so chunks enqueue in arrival order — decodeAudioData
+ *  promises resolve in completion order, which is not the same thing. */
+let decodeChain: Promise<void> = Promise.resolve()
+/** Bumped on barge-in/teardown so a chunk mid-decode can be discarded. */
+let playbackEpoch = 0
 
 /**
  * Seconds of audio the worklet ring holds. The writer must not exceed it:
@@ -106,7 +111,9 @@ function teardown() {
   }
   pump?.reset()
   pump = null
-  bufferEmpty = true
+  playbackEpoch++
+  decodeChain = Promise.resolve()
+  ringDrained = true
   turnComplete = false
   currentTurn = -1
 }
@@ -260,7 +267,7 @@ async function onMessage(ev: MessageEvent) {
       break
     case 'audio':
       if (msg.turn !== currentTurn) break // straggler from a superseded turn
-      await playChunk(msg.audio || '')
+      playChunk(msg.audio || '')
       break
     case 'turn_complete':
       if (msg.turn !== currentTurn) break
@@ -280,52 +287,78 @@ async function onMessage(ev: MessageEvent) {
 }
 
 /**
- * (queueing and splitting live in AudioPump so they can be tested without the
- * Web Audio graph — this is the regression that broke playback outright.)
+ * Accept one base64 audio chunk. Decoding is asynchronous, so this returns
+ * immediately and the work is chained (queueing and splitting live in AudioPump
+ * so they can be tested without the Web Audio graph).
+ *
+ * Two things the chain buys us. The socket does not serialise our async handler
+ * and `decodeAudioData` promises resolve in whatever order the decoder finishes,
+ * so chaining is what keeps chunks enqueued in arrival order. And the pump counts
+ * work in flight, so a chunk still being decoded when `turn_complete` arrives
+ * holds the turn open — otherwise the server's completion signal could land while
+ * the ring happened to be drained and cut the reply off mid-sentence.
  */
-async function playChunk(b64: string) {
+function playChunk(b64: string) {
   if (!playCtx || !playNode || !b64) return
-  try {
-    const bytes = Uint8Array.from(atob(b64), c => c.codePointAt(0)!)
-    const audio = await playCtx.decodeAudioData(bytes.buffer)
-    if (!playCtx || !playNode) return
-    if (playCtx.state === 'suspended') await playCtx.resume()
-    // decodeAudioData resamples to the context rate, so the samples already
-    // match the worklet's output rate. Copy channel 0 to transfer ownership.
-    const mono = new Float32Array(audio.getChannelData(0))
-    bufferEmpty = false
-    // Queue rather than push: the ring holds seconds and a reply can be
-    // minutes, so the writer waits for space instead of overrunning it.
-    pump?.enqueue(mono)
-    armWatchdog()
-  }
-  catch (e) {
-    console.error('voice: failed to decode/play audio chunk', e)
-  }
+  pump?.beginDecode()
+  const epoch = playbackEpoch
+  decodeChain = decodeChain
+    .then(() => decodeAndEnqueue(b64, epoch))
+    .catch(e => console.error('voice: failed to decode/play audio chunk', e))
+    .finally(() => {
+      pump?.endDecode()
+      // A chunk that failed to decode enqueues nothing, so no `drained` will
+      // follow to close the turn — re-check here so a bad final chunk can't
+      // leave the session stuck in `speaking`.
+      maybeEndTurn()
+    })
+}
+
+async function decodeAndEnqueue(b64: string, epoch: number) {
+  if (!playCtx || !playNode) return
+  const bytes = Uint8Array.from(atob(b64), c => c.codePointAt(0)!)
+  const audio = await playCtx.decodeAudioData(bytes.buffer)
+  // Barge-in (or teardown) while this was decoding — the chunk belongs to an
+  // abandoned turn and must not play behind the user's new one.
+  if (epoch !== playbackEpoch || !playCtx || !playNode) return
+  if (playCtx.state === 'suspended') await playCtx.resume()
+  // decodeAudioData resamples to the context rate, so the samples already
+  // match the worklet's output rate. Copy channel 0 to transfer ownership.
+  const mono = new Float32Array(audio.getChannelData(0))
+  ringDrained = false
+  // Queue rather than push: the ring holds seconds and a reply can be
+  // minutes, so the writer waits for space instead of overrunning it.
+  pump?.enqueue(mono)
+  armWatchdog()
 }
 
 function stopPlayback() {
   if (playNode) playNode.port.postMessage({ type: 'flush' })
   // Barge-in drops queued audio too — otherwise the interrupted reply would
-  // resume playing behind the user's new turn.
+  // resume playing behind the user's new turn. Bumping the epoch also discards
+  // any chunk still mid-decode when the interruption landed.
+  playbackEpoch++
   pump?.reset()
-  bufferEmpty = true
+  ringDrained = true
   turnComplete = false
 }
 
 function onDrained() {
-  // The ring emptying only ends playback when nothing is queued behind it —
-  // otherwise a momentary underrun mid-reply would hand the floor back to the
-  // mic while the rest of the answer was still waiting for space.
-  bufferEmpty = pump?.isEmpty ?? true
-  if (bufferEmpty) maybeEndTurn()
+  ringDrained = true
+  maybeEndTurn()
   armWatchdog() // a chunk finishing is progress during a long reply
 }
 
+/** True once nothing is left to play: the ring is empty, the backpressure queue
+ *  is empty, and no chunk is still being decoded. */
+function playbackIdle(): boolean {
+  return ringDrained && (pump?.isIdle ?? true)
+}
+
 function maybeEndTurn() {
-  // The turn ends once the server signalled completion AND the ring buffer has
-  // played out — then we hand the floor back to the mic.
-  if (turnComplete && bufferEmpty && state.value === 'speaking') {
+  // The turn ends once the server signalled completion AND every sample has
+  // played — including any still queued behind the ring or still decoding.
+  if (turnComplete && playbackIdle() && state.value === 'speaking') {
     state.value = 'listening'
     clearWatchdog()
   }

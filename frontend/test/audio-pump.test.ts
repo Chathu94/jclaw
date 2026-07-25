@@ -100,6 +100,51 @@ describe('AudioPump', () => {
     expect(sent).toEqual([100])
   })
 
+  it('is not idle while a decode is in flight, even with an empty queue', () => {
+    // The turn-end race: the server's turn_complete can land while the last
+    // chunk is still in decodeAudioData and the ring has already drained. If the
+    // pump called itself idle there, the reply was cut off mid-sentence.
+    const { pump } = harness(1000)
+    expect(pump.isIdle).toBe(true)
+    pump.beginDecode()
+    expect(pump.isIdle).toBe(false)
+    expect(pump.isEmpty).toBe(true) // queue really is empty — that is the trap
+    pump.endDecode()
+    expect(pump.isIdle).toBe(true)
+  })
+
+  it('tracks concurrent decodes', () => {
+    const { pump } = harness(1000)
+    pump.beginDecode()
+    pump.beginDecode()
+    pump.endDecode()
+    expect(pump.isIdle).toBe(false)
+    pump.endDecode()
+    expect(pump.isIdle).toBe(true)
+  })
+
+  it('reset leaves in-flight decodes counted', () => {
+    // Barge-in clears the queue, but a decode already running still resolves.
+    // Zeroing it here would report idle while a chunk was mid-flight.
+    const { pump } = harness(1000)
+    pump.beginDecode()
+    pump.enqueue(chunk(100))
+    pump.reset()
+    expect(pump.isEmpty).toBe(true)
+    expect(pump.isIdle).toBe(false)
+    pump.endDecode()
+    expect(pump.isIdle).toBe(true)
+  })
+
+  it('never counts below zero when a decode outlives a reset', () => {
+    const { pump } = harness(1000)
+    pump.endDecode()
+    pump.endDecode()
+    expect(pump.isIdle).toBe(true)
+    pump.beginDecode()
+    expect(pump.isIdle).toBe(false)
+  })
+
   it('ignores empty chunks', () => {
     const { pump, sent } = harness(100)
     pump.enqueue(chunk(0))

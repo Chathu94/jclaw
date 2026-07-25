@@ -15,6 +15,11 @@
 export class AudioPump {
   private pending: Float32Array[] = []
   private free: number
+  /** Chunks handed to the decoder but not yet enqueued. Counted here because
+   *  "is there audio still to come?" has to include work that has not reached
+   *  the queue yet — a chunk mid-decode when the server signals turn_complete
+   *  would otherwise let the turn end mid-sentence. */
+  private inFlight = 0
 
   /**
    * @param capacity ring capacity in samples — the pump's own starting estimate
@@ -36,13 +41,34 @@ export class AudioPump {
     this.pump()
   }
 
-  /** Drop everything still queued — barge-in, or teardown. */
+  /** A chunk has been handed to the decoder. */
+  beginDecode(): void {
+    this.inFlight++
+  }
+
+  /** A decode finished — whether it enqueued, failed, or was discarded. */
+  endDecode(): void {
+    this.inFlight = Math.max(0, this.inFlight - 1)
+  }
+
+  /**
+   * Drop everything still queued — barge-in, or teardown.
+   *
+   * Deliberately leaves {@link inFlight} alone: those decodes really are still
+   * running and will decrement themselves. Zeroing it here would report idle
+   * while a chunk was still resolving, which is the state that ends a turn early.
+   */
   reset(): void {
     this.pending = []
     this.free = this.capacity
   }
 
-  /** True when nothing is waiting for ring space. */
+  /** True when nothing is queued and nothing is still decoding. */
+  get isIdle(): boolean {
+    return this.pending.length === 0 && this.inFlight === 0
+  }
+
+  /** True when nothing is waiting for ring space, ignoring in-flight decodes. */
   get isEmpty(): boolean {
     return this.pending.length === 0
   }
