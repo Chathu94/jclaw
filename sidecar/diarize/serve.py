@@ -98,6 +98,53 @@ def _engine_of(repo):
     return "pyannote" if "diarization" in repo.lower() else "ser"
 
 
+def _open_worker_stderr(tag):
+    """Temp file for a persistent worker's stderr, plus its path.
+
+    JCLAW-859: this used to be subprocess.DEVNULL. A worker that dies mid-request
+    is already gone by the time we notice, so its stderr is the only evidence of
+    why — discarding it made a corrupt uv cache, an OOM kill, a failed weight
+    download and a plain traceback all surface as the same opaque
+    "died mid-request". Mirrors what start_prefetch below already does.
+    """
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".%s.stderr" % tag)
+    return os.fdopen(fd, "w"), path
+
+
+# tqdm / huggingface download frames. Dropped from the tail because a long
+# model pull emits hundreds of them and would otherwise push the actual
+# traceback out of the window — which is exactly what happened on the first
+# cut of this fix: the uv error was truncated one character in.
+_PROGRESS_MARKERS = ("%|", "it/s]", "B/s]")
+
+
+def _stderr_tail(path, limit=1200):
+    """Trailing lines of a dead worker's stderr, formatted for an error message.
+
+    Progress frames are stripped and in-place carriage-return redraws collapsed
+    to their final state, so the budget is spent on diagnostics rather than
+    download bars. Still bounded — a deep traceback should not flood the HTTP
+    reply — and the tail is the right end to keep, since the exception is the
+    last thing a dying worker writes.
+    """
+    if not path:
+        return ""
+    try:
+        with open(path, "r", errors="replace") as fh:
+            raw = fh.read()
+    except OSError:
+        return ""
+    lines = []
+    for chunk in raw.split("\n"):
+        line = chunk.split("\r")[-1].rstrip()
+        if not line or any(m in line for m in _PROGRESS_MARKERS):
+            continue
+        lines.append(line)
+    text = "\n".join(lines).strip()
+    return (": " + text[-limit:]) if text else ""
+
+
 class SidecarState:
     def __init__(self, model: str, idle_timeout_s: float):
         self.model = model  # identity string echoed on /health
@@ -106,6 +153,7 @@ class SidecarState:
         self.run_lock = threading.Lock()
         self._worker = None
         self._ser_worker = None
+        self._worker_stderr = {}  # key -> stderr temp-file path (JCLAW-859)
         self.io_lock = threading.Lock()  # serializes worker line-protocol I/O
         # Model downloads run as DETACHED subprocesses (via hf_prefetch.py, not
         # the heavy pyannote/SER workers) so a multi-GB pull can't stall status
@@ -123,15 +171,31 @@ class SidecarState:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sys.stderr.write("[diarize-sidecar] spawning persistent pyannote worker\n")
+        errfh, errpath = _open_worker_stderr("pyannote")
         w = subprocess.Popen(["uv", "run", "diarize.py", "--worker"],
                              cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=errfh,
                              text=True, bufsize=1)
+        errfh.close()  # the child holds its own dup of the fd
+        self._discard_worker_stderr("pyannote")
+        self._worker_stderr["pyannote"] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("pyannote worker failed to start: %r" % ready)
+            raise RuntimeError("pyannote worker failed to start: %r%s"
+                               % (ready, _stderr_tail(errpath)))
         self._worker = w
         return w
+
+    def _discard_worker_stderr(self, key):
+        """Drop the previous generation's stderr file so respawns don't leak
+        temp files over a long-running sidecar."""
+        prev = self._worker_stderr.pop(key, None)
+        if not prev:
+            return
+        try:
+            os.unlink(prev)
+        except OSError:
+            pass
 
     def ser_worker(self):
         """Persistent MERaLiON-SER worker — spawned lazily on the first
@@ -143,13 +207,18 @@ class SidecarState:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sys.stderr.write("[diarize-sidecar] spawning persistent SER worker\n")
+        errfh, errpath = _open_worker_stderr("ser")
         w = subprocess.Popen(["uv", "run", "ser.py", "--worker"],
                              cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=errfh,
                              text=True, bufsize=1)
+        errfh.close()  # the child holds its own dup of the fd
+        self._discard_worker_stderr("ser")
+        self._worker_stderr["ser"] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("SER worker failed to start: %r" % ready)
+            raise RuntimeError("SER worker failed to start: %r%s"
+                               % (ready, _stderr_tail(errpath)))
         self._ser_worker = w
         return w
 
@@ -341,7 +410,8 @@ class Handler(BaseHTTPRequestHandler):
                 line = w.stdout.readline()
             if not line:
                 self.state._worker = None
-                raise RuntimeError("pyannote worker died mid-request")
+                raise RuntimeError("pyannote worker died mid-request%s"
+                                   % _stderr_tail(self.state._worker_stderr.get("pyannote")))
             out = json.loads(line)
             if "error" in out:
                 raise RuntimeError(out["error"])
@@ -375,7 +445,8 @@ class Handler(BaseHTTPRequestHandler):
                 line = w.stdout.readline()
             if not line:
                 self.state._ser_worker = None
-                raise RuntimeError("SER worker died mid-request")
+                raise RuntimeError("SER worker died mid-request%s"
+                                   % _stderr_tail(self.state._worker_stderr.get("ser")))
             res = json.loads(line)
             if "error" in res:
                 raise RuntimeError(res["error"])

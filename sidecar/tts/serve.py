@@ -42,6 +42,53 @@ DEFAULT_IDENTITY = "tts"
 _MIME = {"wav": "audio/wav", "flac": "audio/flac", "mp3": "audio/mpeg", "opus": "audio/opus"}
 
 
+def _open_worker_stderr(tag):
+    """Temp file for a persistent worker's stderr, plus its path.
+
+    JCLAW-859: this used to be subprocess.DEVNULL. A worker that dies mid-request
+    is already gone by the time we notice, so its stderr is the only evidence of
+    why — discarding it made a corrupt uv cache, an OOM kill, a failed weight
+    download and a plain traceback all surface as the same opaque
+    "died mid-request". Mirrors what the prefetch paths already do.
+    """
+    import tempfile
+    fd, path = tempfile.mkstemp(suffix=".%s.stderr" % tag)
+    return os.fdopen(fd, "w"), path
+
+
+# tqdm / huggingface download frames. Dropped from the tail because a long
+# model pull emits hundreds of them and would otherwise push the actual
+# traceback out of the window — which is exactly what happened on the first
+# cut of this fix: the uv error was truncated one character in.
+_PROGRESS_MARKERS = ("%|", "it/s]", "B/s]")
+
+
+def _stderr_tail(path, limit=1200):
+    """Trailing lines of a dead worker's stderr, formatted for an error message.
+
+    Progress frames are stripped and in-place carriage-return redraws collapsed
+    to their final state, so the budget is spent on diagnostics rather than
+    download bars. Still bounded — a deep traceback should not flood the HTTP
+    reply — and the tail is the right end to keep, since the exception is the
+    last thing a dying worker writes.
+    """
+    if not path:
+        return ""
+    try:
+        with open(path, "r", errors="replace") as fh:
+            raw = fh.read()
+    except OSError:
+        return ""
+    lines = []
+    for chunk in raw.split("\n"):
+        line = chunk.split("\r")[-1].rstrip()
+        if not line or any(m in line for m in _PROGRESS_MARKERS):
+            continue
+        lines.append(line)
+    text = "\n".join(lines).strip()
+    return (": " + text[-limit:]) if text else ""
+
+
 class SidecarState:
     def __init__(self, model: str, idle_timeout_s: float):
         self.model = model  # identity string echoed on /health (orphan-eviction key)
@@ -50,6 +97,7 @@ class SidecarState:
         self.run_lock = threading.Lock()
         self.io_lock = threading.Lock()  # serializes worker line-protocol I/O
         self._tts_worker = None
+        self._worker_stderr = {}  # attr -> stderr temp-file path (JCLAW-859)
 
     def _spawn(self, attr, script):
         """Lazily (re)spawn a persistent PEP-723 worker for `script`, cached on
@@ -61,15 +109,31 @@ class SidecarState:
             return w
         script_dir = os.path.dirname(os.path.abspath(__file__))
         sys.stderr.write("[tts-sidecar] spawning persistent %s worker\n" % script)
+        errfh, errpath = _open_worker_stderr(attr.lstrip("_"))
         w = subprocess.Popen(["uv", "run", script, "--worker"],
                              cwd=script_dir, stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=errfh,
                              text=True, bufsize=1)
+        errfh.close()  # the child holds its own dup of the fd
+        self._discard_worker_stderr(attr)
+        self._worker_stderr[attr] = errpath
         ready = w.stdout.readline()
         if not ready or not json.loads(ready).get("ready"):
-            raise RuntimeError("%s worker failed to start: %r" % (script, ready))
+            raise RuntimeError("%s worker failed to start: %r%s"
+                               % (script, ready, _stderr_tail(errpath)))
         setattr(self, attr, w)
         return w
+
+    def _discard_worker_stderr(self, attr):
+        """Drop the previous generation's stderr file so respawns don't leak
+        temp files over a long-running sidecar."""
+        prev = self._worker_stderr.pop(attr, None)
+        if not prev:
+            return
+        try:
+            os.unlink(prev)
+        except OSError:
+            pass
 
     def tts_worker(self):
         return self._spawn("_tts_worker", "synth.py")
@@ -84,7 +148,11 @@ class SidecarState:
         line = w.stdout.readline()
         if not line:
             setattr(self, attr, None)
-            raise RuntimeError("%s died mid-request" % attr.lstrip("_"))
+            # Append the worker's own last words — without them this error names
+            # the symptom and nothing else (JCLAW-859).
+            raise RuntimeError("%s died mid-request%s"
+                               % (attr.lstrip("_"),
+                                  _stderr_tail(self._worker_stderr.get(attr))))
         payload = json.loads(line)
         if "error" in payload:
             raise RuntimeError(payload["error"])
