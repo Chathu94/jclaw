@@ -70,38 +70,35 @@ describe('PromptSizeDonut', () => {
     expect(columns[1]!.text()).not.toContain('t0')
   })
 
-  it('still totals 100% once the slices are spread across both columns', () => {
-    // Shares are per-slice, so splitting the list must not change the sum.
-    const entries = Array.from({ length: 50 }, (_, i) => entry(`t${i}`, 100 - i))
+  it('labels the numeric columns on both halves of the legend', () => {
+    // The halves are independent lists side by side, so a header over one of
+    // them would leave the other's three numbers unexplained.
+    const entries = Array.from({ length: 6 }, (_, i) => entry(`t${i}`, 100 - i))
     const w = mountDonut(entries)
-    expect(w.find('[data-testid="donut-total"]').text()).toContain('100.0%')
+    const headers = w.findAll('[data-testid="legend-header"]')
+    expect(headers).toHaveLength(2)
+    for (const h of headers) {
+      expect(h.text()).toContain('Section')
+      expect(h.text()).toContain('Chars')
+      expect(h.text()).toContain('Tokens')
+      expect(h.text()).toContain('% of total')
+    }
   })
 
-  it('closes the legend with a total row that reconciles to 100%', () => {
-    // chars are exact (4 tokens ⇒ 16 chars via the fixture), so the row is
-    // checkable against the dialog header's Total chars / ≈ tokens.
+  it('carries no total row — the dialog header already states the totals', () => {
     const w = mountDonut([entry('a', 300), entry('b', 100)])
-    const total = w.find('[data-testid="donut-total"]')
-    expect(total.exists()).toBe(true)
-    expect(total.text()).toContain('1,600')
-    expect(total.text()).toContain('400')
-    expect(total.text()).toContain('100.0%')
+    expect(w.find('[data-testid="donut-total"]').exists()).toBe(false)
+    expect(w.text()).not.toContain('Total')
   })
 
-  it('derives the total tokens from total chars, not by summing rounded rows', () => {
-    // Each row is its own round(chars/4). Three rows of 2 chars each round to
-    // 1 token apiece (3 summed), but the series is 6 chars ⇒ 2 tokens. The
-    // header rounds once over the whole, and the total row has to agree with it.
-    const rows = [
-      { name: 'a', chars: 2, tokens: 1 },
-      { name: 'b', chars: 2, tokens: 1 },
-      { name: 'c', chars: 2, tokens: 1 },
-    ]
-    const w = mountDonut(rows)
-    // Cells: [label, chars, tokens, share].
-    const cells = w.find('[data-testid="donut-total"]').findAll('span')
-    expect(cells[1]!.text()).toBe('6')
-    expect(cells[2]!.text()).toBe('2')
+  it('sizes the donut off the legend height rather than a fixed box', () => {
+    // The wrapper stretches to the row height — set by the taller legend column
+    // — and the SVG fills it, so the graphic can't overhang the rows. A fixed
+    // height on either would put the overhang back.
+    const w = mountDonut([entry('a', 300), entry('b', 100)])
+    expect(w.find('svg').classes()).toContain('h-full')
+    expect(w.find('svg').element.parentElement?.className).toContain('lg:h-auto')
+    expect(w.find('svg').classes()).not.toContain('lg:h-72')
   })
 
   it('skips zero-token entries so they do not render invisible arcs', () => {
