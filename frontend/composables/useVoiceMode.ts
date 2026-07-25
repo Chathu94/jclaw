@@ -207,6 +207,14 @@ async function startPlayback() {
     else if (msg?.type === 'level') {
       // The worklet is authoritative on free space; adopt its number and top up.
       pump?.setFree(msg.free ?? 0)
+      // A level report means the ring is actively draining — samples are
+      // reaching the speakers, which is the definition of progress this
+      // watchdog exists to look for. Without this the stall timer is re-armed
+      // only by chunk ARRIVAL, and since the sidecar synthesises much faster
+      // than real-time, a long reply arrives in full within seconds and then
+      // plays for minutes with nothing touching the timer — so the watchdog
+      // fired mid-sentence and handed the floor back to the mic.
+      armWatchdog()
     }
     else if (msg?.type === 'overflow') {
       // Backpressure should make this unreachable; if it fires, audio was lost

@@ -120,6 +120,23 @@ describe('voice playback worklet ring', () => {
     expect(levels.at(-1)!.free).toBeGreaterThan(0)
   })
 
+  it('keeps reporting at a steady cadence for the whole drain', () => {
+    // The stall watchdog treats a level report as proof that samples are still
+    // reaching the speakers. A long reply arrives from the sidecar in seconds
+    // and then plays for minutes, so these reports are the ONLY progress signal
+    // in that window — if they ever stopped, the turn would be cut off
+    // mid-sentence. Free space must also climb monotonically as it drains.
+    const p = make(1)
+    push(p, SAMPLE_RATE)
+    posted = []
+    render(p, 160) // 10x the report interval
+    const levels = posted.filter(m => m.type === 'level')
+    expect(levels.length).toBe(10)
+    const frees = levels.map(l => l.free!)
+    expect(frees).toEqual([...frees].sort((a, b) => a - b))
+    expect(new Set(frees).size).toBe(frees.length)
+  })
+
   it('flush drops everything and re-reports full free space', () => {
     const p = make(1)
     push(p, 1000)
