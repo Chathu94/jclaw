@@ -98,12 +98,21 @@ async function manuallyRefreshPrices() {
   finally { saving.value = false }
 }
 
-// Ollama-specific settings (rendered inside the provider section when provider name contains "ollama")
-const ollamaKeepAlive = computed(() => {
+// Ollama keep_alive, keyed per provider. Only surfaced for ollama-local: it controls
+// how long the model holds GPU memory on the operator's own box, which is meaningless
+// for the hosted ollama-cloud (residency there is server-side and the field is inert).
+const KEEP_ALIVE_PROVIDERS = new Set(['ollama-local'])
+
+function keepAliveKey(name: string): string {
+  return `provider.${name}.keepAlive`
+}
+
+// Fallback mirrors the backend default (OllamaProvider.applyCacheDirectives), so an
+// unset key renders the value that would actually be sent rather than a blank.
+function keepAliveFor(name: string): string {
   const entries = configData.value?.entries ?? []
-  // Fallback mirrors the backend default (OllamaProvider.applyCacheDirectives).
-  return entries.find(e => e.key === 'ollama.keepAlive')?.value ?? '5m'
-})
+  return entries.find(e => e.key === keepAliveKey(name))?.value ?? '5m'
+}
 
 // JCLAW-110: per-provider enabled flag. A provider is considered enabled
 // unless `provider.NAME.enabled=false` is explicitly set (case-insensitive).
@@ -704,7 +713,7 @@ const groupedProviders = computed(() => {
                  constrained to supportedModalities, and a $/mo numeric only when the
                  selected modality is SUBSCRIPTION. -->
           <div
-            v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models') && !e.key.endsWith('.paymentModality') && !e.key.endsWith('.subscriptionMonthlyUsd'))"
+            v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models') && !e.key.endsWith('.paymentModality') && !e.key.endsWith('.subscriptionMonthlyUsd') && !e.key.endsWith('.keepAlive'))"
             :key="entry.key"
             class="px-4 py-2 flex items-center gap-3"
           >
@@ -899,9 +908,9 @@ const groupedProviders = computed(() => {
               </button>
             </template>
           </div>
-          <!-- Ollama-specific: keepAlive setting -->
+          <!-- keepAlive — local Ollama daemons only (see KEEP_ALIVE_PROVIDERS) -->
           <div
-            v-if="name.toLowerCase().includes('ollama')"
+            v-if="KEEP_ALIVE_PROVIDERS.has(name)"
             class="px-4 py-2 flex items-center gap-3"
           >
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
@@ -916,15 +925,16 @@ const groupedProviders = computed(() => {
                 </span>
               </span>
             </span>
-            <template v-if="editingKey === 'ollama.keepAlive'">
+            <template v-if="editingKey === keepAliveKey(name)">
               <input
                 v-model="editValue"
+                :aria-label="`Edit value for ${keepAliveKey(name)}`"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                 title="Save"
-                @click="updateEntry('ollama.keepAlive')"
+                @click="updateEntry(keepAliveKey(name))"
               >
                 <CheckIcon
                   class="w-3.5 h-3.5"
@@ -943,11 +953,11 @@ const groupedProviders = computed(() => {
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ ollamaKeepAlive }}</span>
+              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ keepAliveFor(name) }}</span>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Edit"
-                @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive"
+                @click="editingKey = keepAliveKey(name); editValue = keepAliveFor(name)"
               >
                 <PencilIcon
                   class="w-3.5 h-3.5"

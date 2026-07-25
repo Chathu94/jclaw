@@ -102,7 +102,7 @@ function defaultConfigEntries() {
       updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'provider.ollama-local.apiKey', value: 'ollama-local',
       updatedAt: '2026-04-22T10:00:00Z' },
-    { key: 'ollama.keepAlive', value: '30m', updatedAt: '2026-04-22T10:00:00Z' },
+    { key: 'provider.ollama-local.keepAlive', value: '30m', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'pricing.refresh.enabled', value: 'false', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'chat.maxToolRounds', value: '10', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'chat.maxContextMessages', value: '50', updatedAt: '2026-04-22T10:00:00Z' },
@@ -365,12 +365,26 @@ describe('Settings page — ollama keepAlive', () => {
     clearNuxtData()
   })
 
-  it('renders the ollama keepAlive row for Ollama Cloud', async () => {
+  it('renders the keepAlive row for Ollama Local with its per-provider value', async () => {
     setupDefaultApi()
     const component = await mountSettingsSection('providers')
 
     expect(component.text()).toContain('keepAlive')
+    // Sourced from provider.ollama-local.keepAlive in the fixture.
     expect(component.text()).toContain('30m')
+  })
+
+  it('does not render the keepAlive row for Ollama Cloud', async () => {
+    // Residency is server-side on the hosted provider, so the knob is local-only
+    // (KEEP_ALIVE_PROVIDERS). Guards against the pre-JCLAW substring gate, which
+    // matched any provider named "*ollama*" and rendered the row twice — both
+    // instances bound to one global key.
+    setupDefaultApi()
+    const component = await mountSettingsSection('providers')
+
+    // The fixture configures both ollama-cloud and ollama-local, so a gate that
+    // still matched on "ollama" would render this row twice.
+    expect(component.text().match(/keepAlive/g) ?? []).toHaveLength(1)
   })
 })
 

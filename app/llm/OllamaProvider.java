@@ -66,15 +66,19 @@ public final class OllamaProvider extends LlmProvider {
         // Pass it as an extra top-level field; Ollama's OpenAI-compat shim forwards unknown
         // fields to the native scheduler.
         //
+        // Keyed per provider, not globally: residency is a property of the daemon behind
+        // this provider, so a self-hosted ollama-local and a hosted ollama-cloud have no
+        // reason to share a value. Only ollama-local surfaces the knob in Settings today
+        // (cloud residency is server-side and the field is inert there), but the key is
+        // per-provider so a second local daemon can be tuned independently.
+        //
         // The default matches Ollama's own OLLAMA_KEEP_ALIVE (5m) rather than overriding it.
-        // A longer pin does improve prefix reuse on a warm model, but it applies to every
-        // model JClaw touches — so with OLLAMA_MAX_LOADED_MODELS unset (unlimited), each
-        // one holds GPU memory for the full window and they accumulate. On a local box
-        // that co-residency costs more (eviction pressure, swap, contention with other
-        // Ollama clients sharing the daemon) than the reuse it buys. Operators who want a
-        // longer pin can still set ollama.keepAlive; the point is not to override Ollama's
-        // memory policy by default. Inert for ollama-cloud, whose residency is server-side.
-        var keepAlive = ConfigService.get("ollama.keepAlive");
+        // A longer pin does improve prefix reuse on a warm model, but it is paid per model
+        // — so with OLLAMA_MAX_LOADED_MODELS unset (unlimited), each one holds GPU memory
+        // for the full window and they accumulate. On a local box that co-residency costs
+        // more (eviction pressure, swap, contention with other Ollama clients sharing the
+        // daemon) than the reuse it buys.
+        var keepAlive = ConfigService.get("provider." + config.name() + ".keepAlive");
         request.addProperty("keep_alive", keepAlive != null && !keepAlive.isBlank() ? keepAlive : "5m");
     }
 }

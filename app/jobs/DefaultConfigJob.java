@@ -275,13 +275,14 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("chat.maxToolRounds", String.valueOf(AgentRunner.DEFAULT_MAX_TOOL_ROUNDS));
         seedIfAbsent("chat.maxContextMessages", "50");
 
-        // Ollama: how long the model + KV cache stays resident between requests.
-        // Passed through as the top-level keep_alive field on every chat request.
-        // Longer values improve prefix-reuse hit rates at the cost of GPU memory —
-        // paid per model, so on a local box several can pin memory at once. Defaults
-        // to Ollama's own OLLAMA_KEEP_ALIVE (5m) so JClaw doesn't override the
-        // daemon's memory policy; see OllamaProvider.applyCacheDirectives.
-        seedIfAbsent("ollama.keepAlive", "5m");
+        // Ollama keep_alive (how long the model + KV cache stays resident) moved from a
+        // global key to per-provider `provider.<name>.keepAlive`, since residency belongs
+        // to the daemon behind a provider rather than to "Ollama" as a whole. Carry the
+        // operator's old value onto ollama-local — the only provider where the setting
+        // does anything (cloud residency is server-side). Not seeded: the 5m default lives
+        // in OllamaProvider.applyCacheDirectives and the Settings row renders that
+        // fallback, so an unset key is the correct resting state.
+        renameKeyIfPresent("ollama.keepAlive", "provider.ollama-local.keepAlive");
 
         // JCLAW-172: playwright.enabled / playwright.headless / shell.enabled
         // are gone — the browser is always headless and both tools register
@@ -494,7 +495,6 @@ public class DefaultConfigJob extends Job<Void> {
      * any future Config DB key rename, and {@code AgentSystemTest} exercises it
      * reflectively so the contract stays covered.
      */
-    @SuppressWarnings("unused")
     private void renameKeyIfPresent(String oldKey, String newKey) {
         Tx.run(() -> {
             var oldRow = Config.findByKey(oldKey);

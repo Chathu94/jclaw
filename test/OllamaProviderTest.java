@@ -34,15 +34,25 @@ class OllamaProviderTest extends UnitTest {
         ConfigService.clearCache();
     }
 
+    /** keep_alive is keyed per provider — see OllamaProvider.applyCacheDirectives. */
+    private static final String KEEP_ALIVE_CLOUD = "provider.ollama-cloud.keepAlive";
+    private static final String KEEP_ALIVE_LOCAL = "provider.ollama-local.keepAlive";
+
     @AfterEach
     void teardown() {
-        ConfigService.delete("ollama.keepAlive");
+        ConfigService.delete(KEEP_ALIVE_CLOUD);
+        ConfigService.delete(KEEP_ALIVE_LOCAL);
         ConfigService.clearCache();
     }
 
     private static OllamaProvider provider() {
         return new OllamaProvider(new ProviderConfig(
                 "ollama-cloud", "https://ollama.com/v1", "ollama-key", List.of()));
+    }
+
+    private static OllamaProvider localProvider() {
+        return new OllamaProvider(new ProviderConfig(
+                "ollama-local", "http://localhost:11434/v1", "ollama-local", List.of()));
     }
 
     private static JsonObject serialize(LlmProvider p, ChatRequest req) throws Exception {
@@ -185,26 +195,40 @@ class OllamaProviderTest extends UnitTest {
         // doesn't pin every model it touches past the daemon's own policy.
         var body = serialize(provider(), withThinking("medium"));
         assertEquals("5m", body.get("keep_alive").getAsString(),
-                "keep_alive must default to 5m when ollama.keepAlive config is unset");
+                "keep_alive must default to 5m when the provider's keepAlive config is unset");
     }
 
     @Test
     void applyCacheDirectivesHonorsConfigOverride() throws Exception {
         // Deliberately not the default value, so this asserts the config is read
         // rather than passing on the fallback path.
-        ConfigService.set("ollama.keepAlive", "30m");
+        ConfigService.set(KEEP_ALIVE_CLOUD, "30m");
         var body = serialize(provider(), withThinking("medium"));
         assertEquals("30m", body.get("keep_alive").getAsString(),
-                "keep_alive must follow the ollama.keepAlive config when set");
+                "keep_alive must follow the provider's keepAlive config when set");
     }
 
     @Test
     void applyCacheDirectivesIgnoresBlankConfigValue() throws Exception {
         // A blank config value should fall back to the default rather than
         // sending an empty string that the Ollama scheduler would reject.
-        ConfigService.set("ollama.keepAlive", "   ");
+        ConfigService.set(KEEP_ALIVE_CLOUD, "   ");
         var body = serialize(provider(), withThinking("medium"));
         assertEquals("5m", body.get("keep_alive").getAsString());
+    }
+
+    @Test
+    void applyCacheDirectivesKeysKeepAlivePerProvider() throws Exception {
+        // The key is provider.<name>.keepAlive, not a shared global: residency
+        // belongs to the daemon behind a provider, so a long pin on a local box
+        // must not leak onto ollama-cloud (or any second local daemon).
+        ConfigService.set(KEEP_ALIVE_LOCAL, "-1");
+        assertEquals("5m", serialize(provider(), withThinking("medium"))
+                        .get("keep_alive").getAsString(),
+                "ollama-cloud must not pick up ollama-local's keepAlive");
+        assertEquals("-1", serialize(localProvider(), withThinking("medium"))
+                        .get("keep_alive").getAsString(),
+                "ollama-local must read its own keepAlive key");
     }
 
     // =====================
