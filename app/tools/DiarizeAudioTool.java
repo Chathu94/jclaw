@@ -128,21 +128,12 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                 audio-capable model configured in Settings (Transcription → Diarization). Use it \
                 when the user asks to identify, separate, or label the speakers in a recording — \
                 ordinary voice notes are already transcribed automatically. The result is a \
-                verbatim transcript, one line per speaker turn. Defaults to the most recent audio \
-                attachment in this conversation; pass 'attachment_uuid' to pick a specific one. \
-                Pass 'speaker_names' when the user has said who is in the recording (e.g. "the \
-                host is Anthony, the guest is Firdaus") so turns carry real names instead of \
-                Speaker 1/Speaker 2. Set 'emotions' true when the user asks for emotions or tone \
-                — each turn gets a perceived-emotion tag judged from the voice. 'language' \
-                (ISO 639-1) hints the recording's language when known. Pass 'num_speakers' when \
-                you know how many people are talking — for a phone call that's usually 2 — so the \
-                on-device diarizer doesn't merge similar voices into one speaker. Known voices are matched \
-                automatically: action 'enroll_voice' with 'speaker_name' saves a short reference \
-                sample of the attachment's voice (use it when the user asks to remember/enroll a \
-                voice — the attachment should contain ONLY that person speaking), and every later \
-                diarization sends the stored samples along so the model labels matching voices by \
-                name without guessing. Requires a configured diarization model; if none is set the \
-                tool says so — relay that to the user rather than retrying.""";
+                verbatim transcript, one line per speaker turn. Enrolled voices are matched \
+                automatically: once action 'enroll_voice' has saved a reference sample under a \
+                'speaker_name' (from an attachment containing ONLY that person), every later \
+                diarization sends the stored samples along so matching voices are labelled by \
+                name without guessing. Requires a configured diarization model; if none is set \
+                the tool says so — relay that to the user rather than retrying.""";
     }
 
     @Override

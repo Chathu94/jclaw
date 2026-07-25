@@ -166,33 +166,21 @@ public class MessageTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
+        // Per-action argument requirements live on the parameters themselves (`message` says
+        // which actions need it, `message_id` likewise, the poll knobs carry their own
+        // bounds). Repeating them here cost ~4x the tokens for no added signal.
         return """
                 Send a message to an external chat channel (Telegram, Slack, or WhatsApp) at any \
                 point during your turn — not just at task / subagent completion. Useful for \
                 pushing progress updates from long-running work (downloads, builds, scans) \
                 back to the user who started the conversation. \
-                For `action="send"`: required `message` (the text to deliver); optional \
-                `channel` (telegram | slack | whatsapp; defaults to the calling agent's \
-                active conversation channel) and `target` (channel-specific peer id — \
-                Telegram chat id, Slack channel id, WhatsApp e.164 phone; defaults to the \
-                active conversation's peer). Subagents spawned in a channel-bound conversation \
-                inherit the parent's channel + target, so they can call this with just \
-                `action` and `message` to reply where the user is. Cross-channel sends are \
-                allowed when both `channel` and `target` are explicit. \
-                For Telegram message actions `reply` / `edit` / `delete` / `pin` / `unpin` / \
-                `react`: required `message_id` (the Telegram message to act on); the chat is \
-                taken from `target` or the active conversation's peer, and the bot token from \
-                the agent's Telegram binding. `reply` sends `message` as a reply to \
-                `message_id`, with an optional `quote` excerpt (a verbatim substring of the \
-                replied-to message) that Telegram highlights above your reply — a non-matching \
-                excerpt is silently dropped and the reply still sends; `edit` replaces a \
-                bot-sent message's text with `message`; both require `message`. `react` takes \
-                an optional `emoji` (a blank/omitted emoji clears the bot's reaction). \
-                For `action="poll"` (Telegram): post a native poll with a required `question` \
-                and `options` (2-10 strings), plus optional `anonymous` (default true), \
-                `allow_multiple` (default false), and `open_period` (seconds, 5-600, before \
-                auto-close). These actions may be disabled by the operator, in which case you \
-                get a `not-enabled` result.""";
+                `send` posts a new message; `reply` / `edit` / `delete` / `pin` / `unpin` / \
+                `react` act on an existing Telegram message (`edit` only on bot-sent ones, and \
+                the bot token comes from the agent's Telegram binding); `poll` posts a native \
+                Telegram poll. `channel` and `target` both default to the calling agent's \
+                active conversation — a subagent inherits its parent's — so only a \
+                cross-channel send needs both passed explicitly. These actions may be disabled \
+                by the operator, in which case you get a `not-enabled` result.""";
     }
 
     @Override

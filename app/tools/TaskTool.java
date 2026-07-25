@@ -118,6 +118,10 @@ public class TaskTool implements ToolRegistry.Tool {
         );
     }
 
+    // Each rule lives in exactly one place: the field it governs. Schedule syntax is on
+    // `schedule`, delivery targets on `delivery`, reminder-fire semantics on `payloadType`,
+    // per-action behaviour in actions(). This text carries only what no single field owns —
+    // routing (Task vs subagent), cross-action hygiene, and the two non-obvious lookups.
     @Override
     public String description() {
         return """
@@ -125,73 +129,21 @@ public class TaskTool implements ToolRegistry.Tool {
                 recurring work. If the operator asks for "a subagent that runs \
                 every X" or "something that fires every X minutes", they mean a \
                 Task: subagents (subagent_spawn) fire ONCE and have no schedule \
-                parameter. Single tool, multiple actions selected via the \
-                'action' parameter. Use createTask with a 'schedule' string: \
-                'now' (IMMEDIATE), '30m'/'2h'/'1d' (SCHEDULED at now+duration), \
-                an absolute ISO date-time '2026-06-13T15:00' (SCHEDULED one-shot \
-                at that specific moment, in the task's timezone), \
-                'every 30m'/'every 2h'/'every 1d' (INTERVAL — minimum 1 minute \
-                via shorthand), or Spring 6-field cron ('0 0 9 * * *' or \
-                '0/30 * * * * *' for every 30 seconds) or at-shortcut ('@daily'). \
-                For a ONE-TIME fire at a specific date/time use the absolute \
-                date-time, NOT a cron (a cron would repeat every year). \
-                Use updateTask to change fields on an existing task by name. \
-                Use pause/resume to toggle a recurring task without losing its \
-                cadence. Use runNow to fire immediately. Use cancelTask to \
-                stop fires while keeping the row (so runNow can revive it \
-                later); use deleteTask to permanently remove the task and \
-                its run history when you're done with it for good. Use \
-                listRecurringTasks to see what's configured. Before creating \
-                a new recurring task, call listRecurringTasks and \
-                cancelTask/deleteTask any prior attempts with similar names \
-                to avoid accumulating duplicates. Tasks run asynchronously \
-                via the agent.
+                parameter. Tasks run asynchronously via the agent; pick the \
+                operation with 'action', and see each parameter for its rules.
 
-                OUTPUT DELIVERY: when you create a task, set the `delivery` \
-                field to where its output should go — a channel \
-                ('telegram:<id>'), a tool the task calls during its run \
-                ('tool:send_gmail_message' to email the result), or 'none' if \
-                the output just stays in the run. This is a typed field the UI \
-                reads AND the engine acts on. Put only the WORK in \
-                `description` — do NOT add a 'send it to <channel>' step: when \
-                the task completes JClaw automatically delivers the run's \
-                output to the `delivery` target (and for a 'tool:' target it \
-                injects the call directive for you), so a manual send step is \
-                redundant and can make the result go out twice. Omit \
-                `delivery` entirely to auto-route output back to this chat. The \
-                same applies when normalizing EXISTING tasks: listRecurringTasks \
-                shows each task's [delivery: …]; for any whose delivery still \
-                lives only in the prose, infer it, set the field with \
-                updateTask, and drop the now-redundant send step from the \
-                description.
+                Before creating a recurring task, call listRecurringTasks and \
+                cancelTask/deleteTask any prior attempts with similar names, so \
+                duplicates don't accumulate. A one-shot reminder is SCHEDULED \
+                rather than recurring, so it does NOT appear in \
+                listRecurringTasks — use listReminders to find one before \
+                updating or cancelling it by name.
 
-                REMINDERS: when the user says "remind me to X" / "remind me \
-                in N minutes to Y" / "remind me tomorrow about Z", create a \
-                task with payloadType="reminder". For a ONE-TIME reminder at a \
-                specific date/time (e.g. "remind me at 3pm on June 13"), pass an \
-                absolute ISO date-time as the schedule (e.g. "2026-06-13T15:00") \
-                so it fires ONCE then completes — do NOT use a cron for a one-off \
-                (that repeats every year). Use a cron only when the user wants it \
-                to REPEAT (e.g. "every Friday"). A one-off reminder auto-deletes \
-                itself after it fires (autoDeleteOnComplete defaults true for \
-                reminders); set autoDeleteOnComplete=false to KEEP a fired \
-                reminder. The `description` IS the \
-                reminder text the user sees verbatim (e.g. "Brush your \
-                teeth", "Pay salaries") — do NOT phrase it as instructions \
-                to yourself. Reminders SKIP the LLM at fire time, so no \
-                agent turn happens; the description goes straight to the \
-                user's notification toast (web) or Telegram chat (with a \
-                🔔 prefix). The reminder description should be 1-2 short \
-                lines, written as if you were the one nudging the user. \
-                Leave `delivery` unset and it auto-routes to the calling \
-                chat — that's almost always what the user wants. To FIND or \
-                MODIFY an existing reminder (e.g. "move my 3pm reminder to \
-                4pm", "cancel the dentist reminder"), call listReminders \
-                first — it returns the agent's upcoming reminders (name, fire \
-                time, status). A one-time reminder is SCHEDULED, so it does \
-                NOT appear in listRecurringTasks; use listReminders for it. \
-                Then address the reminder by its name with updateTask / \
-                cancelTask / deleteTask.""";
+                When the user says "remind me to X", create a task with \
+                payloadType="reminder". When normalizing an EXISTING task whose \
+                delivery target is still described only in its prose, infer it, \
+                set the `delivery` field with updateTask, and drop the \
+                now-redundant send step from the description.""";
     }
 
     @Override
@@ -224,7 +176,8 @@ public class TaskTool implements ToolRegistry.Tool {
                                 + "add a 'send it to <channel>' step — where the output goes is the "
                                 + "`delivery` field's job, delivered automatically after the run. The ONLY "
                                 + "case that passes a single plain string is a reminder, whose description "
-                                + "is the verbatim text the user sees.")),
+                                + "is the verbatim text the user sees (e.g. 'Brush your teeth') — 1-2 short "
+                                + "lines phrased as you nudging the user, NOT instructions to yourself.")),
                 Map.entry(KEY_SCHEDULE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Schedule shorthand: 'now' (IMMEDIATE); a duration like '30m'/'2h'/'1d' for a one-shot N-from-now; an absolute ISO date-time like '2026-06-13T15:00' for a one-shot at a specific moment (interpreted in the task's timezone); 'every <duration>' for INTERVAL; or a Spring 6-field cron / at-shortcut for CRON. Use an absolute date-time (not a cron) for a one-time reminder on a specific date. "
                                 + "Day-of-month modifiers (the cron engine supports them): for 'the last <weekday> of the month' use the L suffix in the day-of-week field, e.g. '0 0 17 * * 5L' = last Friday at 5 PM — do NOT use a day-of-month range like '25-31', which silently skips months where the last weekday falls before the 25th. For the Nth weekday use '#', e.g. '0 0 9 * * 1#2' = 2nd Monday. For the last calendar day of the month use 'L' in the day-of-month field, e.g. '0 0 9 L * *'.")),

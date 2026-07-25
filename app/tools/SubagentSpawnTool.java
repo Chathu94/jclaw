@@ -259,33 +259,20 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
+        // The optional-argument roll-call that used to live here duplicated every parameter's
+        // own description verbatim (context, async and runTimeoutSeconds were word-for-word).
+        // Only the Task-vs-subagent routing rule has no parameter to live on, so it stays.
         return """
                 Spawn a child subagent to carry out a task on your behalf. The child runs \
                 in its own fresh conversation and you receive its final assistant reply. \
+                Use this when a task is well-scoped and benefits from an isolated context \
+                (long research, separate tool surface, exploratory work). \
                 Fires ONCE per call — there is no schedule/interval parameter. For \
                 anything recurring or scheduled ("every 30 seconds", "every minute", \
                 "every day at 9am"), even if the operator describes it as a \
                 "subagent", use the `task` tool's createTask action instead — that \
                 is the abstraction that carries cron/interval and can invoke an agent \
-                on each fire. \
-                Use this when a task is well-scoped and benefits from an isolated context \
-                (long research, separate tool surface, exploratory work). \
-                Required: `task` (the instruction the child should execute). \
-                Optional: `label` (short display name), `agentId` (numeric id of an existing \
-                agent to run as the child; defaults to a fresh clone of the current agent), \
-                `mode` ("session" — default — runs the child in a fresh sidebar conversation; \
-                "inline" runs the child within your own conversation as a collapsible \
-                nested-turn block), \
-                `modelProvider` and `modelId` (override the child's model), \
-                `context` ("fresh" — default — gives the child an empty history; "inherit" \
-                injects a summary of your recent turns into the child's system prompt and \
-                grants it the union of your enabled tools and its own), \
-                `async` (false — default — blocks until the child finishes; true returns the \
-                run id immediately and posts a completion card to your conversation when \
-                the child terminates. Only compatible with mode="session"), \
-                `runTimeoutSeconds` (idle budget — seconds of INACTIVITY before \
-                the run is timed out; an actively-working child resets it, so \
-                this need not cover total runtime, default 300).""";
+                on each fire.""";
     }
 
     @Override
