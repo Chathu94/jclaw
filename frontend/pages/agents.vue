@@ -408,6 +408,10 @@ async function loadPromptBreakdown() {
   promptBreakdownData.value = null
   promptBreakdownError.value = ''
   promptBreakdownLoading.value = true
+  // A channel switch invalidates any prompt text already fetched — Channel
+  // Guidance differs per channel, so the cached copy would misreport.
+  promptTextOpen.value = false
+  promptText.value = ''
   try {
     promptBreakdownData.value = await $fetch<PromptBreakdown>(
       `/api/agents/${promptBreakdownAgent.value.id}/prompt-breakdown?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
@@ -430,6 +434,10 @@ async function openPromptBreakdown(agent: Agent) {
 
 function closePromptBreakdown() {
   promptBreakdownOpen.value = false
+  // Drop the full-text panel too, so re-opening lands on the breakdown rather
+  // than on a stale prompt captured for a different agent or channel.
+  promptTextOpen.value = false
+  promptText.value = ''
 }
 
 // Global Escape handler so the modal dismisses via keyboard (the overlay is
@@ -443,9 +451,43 @@ function handlePromptBreakdownEscape(e: KeyboardEvent) {
 onMounted(() => document.addEventListener('keydown', handlePromptBreakdownEscape))
 onBeforeUnmount(() => document.removeEventListener('keydown', handlePromptBreakdownEscape))
 
-function copyPromptBreakdownJson() {
-  if (!promptBreakdownData.value) return
-  navigator.clipboard.writeText(JSON.stringify(promptBreakdownData.value, null, 2))
+/** Table is the exhaustive view and stays the default; the donut is the
+ *  at-a-glance shape (see PromptSizeDonut for why it collapses the long tail). */
+const promptBreakdownView = ref<'table' | 'chart'>('table')
+
+// Full assembled prompt text. Fetched lazily from its own endpoint rather than
+// riding along on the breakdown: it runs to tens of kilobytes and the dialog is
+// opened to read numbers far more often than to read the prompt.
+const promptTextOpen = ref(false)
+const promptText = ref('')
+const promptTextLoading = ref(false)
+const promptTextError = ref('')
+
+async function openPromptText() {
+  if (!promptBreakdownAgent.value) return
+  promptTextOpen.value = true
+  promptTextError.value = ''
+  promptTextLoading.value = true
+  try {
+    const res = await $fetch<{ text: string }>(
+      `/api/agents/${promptBreakdownAgent.value.id}/prompt-text?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
+    )
+    promptText.value = res.text
+  }
+  catch (e: unknown) {
+    promptTextError.value = e instanceof Error ? e.message : 'Failed to load system prompt'
+  }
+  finally {
+    promptTextLoading.value = false
+  }
+}
+
+function closePromptText() {
+  promptTextOpen.value = false
+}
+
+function copyPromptText() {
+  if (promptText.value) navigator.clipboard.writeText(promptText.value)
 }
 
 const skillsExpanded = ref(true)
@@ -2538,13 +2580,48 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 </option>
               </select>
             </label>
-            <button
-              v-if="promptBreakdownData"
-              class="px-2 py-1 text-xs text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
-              title="Copy the raw breakdown JSON (useful for bug reports)"
-              @click="copyPromptBreakdownJson()"
+            <div
+              v-if="promptBreakdownData && !promptTextOpen"
+              class="flex border border-input"
+              role="group"
+              aria-label="Breakdown view"
             >
-              Copy JSON
+              <button
+                v-for="v in (['table', 'chart'] as const)"
+                :key="v"
+                class="px-2 py-1 text-xs capitalize"
+                :class="promptBreakdownView === v
+                  ? 'bg-muted text-fg-strong'
+                  : 'text-fg-muted hover:text-fg-strong'"
+                :aria-pressed="promptBreakdownView === v"
+                @click="promptBreakdownView = v"
+              >
+                {{ v }}
+              </button>
+            </div>
+            <button
+              v-if="promptBreakdownData && !promptTextOpen"
+              class="px-2 py-1 text-xs text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
+              title="Read the full assembled system prompt for this agent"
+              data-testid="view-full-prompt"
+              @click="openPromptText()"
+            >
+              View Full
+            </button>
+            <button
+              v-if="promptTextOpen"
+              class="px-2 py-1 text-xs text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
+              @click="closePromptText()"
+            >
+              Back
+            </button>
+            <button
+              v-if="promptTextOpen && promptText"
+              class="px-2 py-1 text-xs text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"
+              title="Copy the full system prompt"
+              @click="copyPromptText()"
+            >
+              Copy
             </button>
             <button
               class="p-1 text-fg-muted hover:text-fg-strong"
@@ -2571,6 +2648,40 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="px-4 py-6 text-sm text-red-700 dark:text-red-400"
         >
           {{ promptBreakdownError }}
+        </div>
+
+        <!--
+          Full assembled prompt. Replaces the breakdown body rather than opening a
+          nested dialog — one overlay keeps the Escape handler and focus trap
+          single-owner, and Back returns to the numbers in place.
+        -->
+        <div
+          v-else-if="promptTextOpen"
+          class="px-4 py-4"
+        >
+          <p
+            v-if="promptTextLoading"
+            class="text-sm text-fg-muted"
+          >
+            Loading…
+          </p>
+          <p
+            v-else-if="promptTextError"
+            class="text-sm text-red-700 dark:text-red-400"
+          >
+            {{ promptTextError }}
+          </p>
+          <template v-else>
+            <p class="text-[11px] text-fg-muted mb-2">
+              The exact system prompt string for
+              <span class="font-mono">{{ promptBreakdownChannel }}</span>, as the model
+              receives it. Tool schemas travel separately and are not part of this text.
+            </p>
+            <pre
+              class="max-h-[60vh] overflow-auto bg-muted border border-border p-3 text-[11px] leading-relaxed font-mono text-fg-primary whitespace-pre-wrap break-words"
+              data-testid="full-prompt-text"
+            >{{ promptText }}</pre>
+          </template>
         </div>
 
         <div
@@ -2636,7 +2747,16 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <h4 class="text-[11px] text-fg-muted uppercase tracking-wide mb-1.5">
               Prompt sections
             </h4>
-            <table class="w-full text-xs font-mono table-fixed">
+            <PromptSizeDonut
+              v-if="promptBreakdownView === 'chart'"
+              :entries="promptBreakdownData.sections"
+              :total="promptBreakdownData.totalTokenEstimate"
+              label="Prompt sections"
+            />
+            <table
+              v-else
+              class="w-full text-xs font-mono table-fixed"
+            >
               <colgroup>
                 <col>
                 <col class="w-24">
@@ -2785,7 +2905,16 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <p class="text-[10px] text-fg-muted mb-1">
               Sent separately as the <code class="text-fg-muted">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.
             </p>
-            <table class="w-full text-xs font-mono table-fixed">
+            <PromptSizeDonut
+              v-if="promptBreakdownView === 'chart'"
+              :entries="promptBreakdownData.tools"
+              :total="promptBreakdownData.totalTokenEstimate"
+              label="Tool schemas"
+            />
+            <table
+              v-else
+              class="w-full text-xs font-mono table-fixed"
+            >
               <colgroup>
                 <col>
                 <col class="w-24">

@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -326,6 +327,52 @@ class ApiAgentsControllerTest extends FunctionalTest {
 
     // promptBreakdownReturns404ForUnknownAgent merged into
     // agentGetEndpointReturns404ForUnknownAgent (GET /api/agents/999999/prompt-breakdown?channelType=web).
+
+    // =====================
+    // Prompt text (View Full)
+    // =====================
+
+    @Test
+    void promptTextReturnsAssembledPromptString() {
+        login();
+        var id = createAgent("prompt-text-agent");
+        var response = GET("/api/agents/" + id + "/prompt-text?channelType=web");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+        var text = JsonParser.parseString(getContent(response))
+                .getAsJsonObject().get("text").getAsString();
+        // The assembled prompt always carries the standing sections, so a couple of
+        // stable headers prove we returned the real prompt rather than an empty
+        // payload — without pinning wording that the prompt is free to evolve.
+        assertTrue(text.contains("## Safety"), "prompt text must contain the Safety section");
+        assertTrue(text.contains("## Execution Bias"), "prompt text must contain the Execution Bias section");
+    }
+
+    @Test
+    void promptTextRejectsUnknownChannel() {
+        login();
+        var id = createAgent("prompt-text-bad-channel");
+        // Same validation as prompt-breakdown — both endpoints share
+        // requireBreakdownChannel(), so a bad value must halt identically.
+        assertEquals(400, GET("/api/agents/" + id + "/prompt-text?channelType=carrier-pigeon")
+                .status.intValue());
+        assertEquals(400, GET("/api/agents/" + id + "/prompt-text").status.intValue());
+    }
+
+    @Test
+    void promptTextMatchesBreakdownCacheablePrefixLength() {
+        login();
+        var id = createAgent("prompt-text-consistency");
+        var text = JsonParser.parseString(getContent(GET("/api/agents/" + id + "/prompt-text?channelType=web")))
+                .getAsJsonObject().get("text").getAsString();
+        var breakdown = JsonParser.parseString(getContent(GET("/api/agents/" + id + "/prompt-breakdown?channelType=web")))
+                .getAsJsonObject();
+        // The two endpoints assemble independently; if they ever diverge the dialog
+        // would show numbers describing a different string than "View Full" renders.
+        var marker = breakdown.get("cacheBoundaryMarker").getAsString();
+        assertEquals(breakdown.get("cacheablePrefixChars").getAsInt(), text.indexOf(marker),
+                "breakdown prefix length must match where the marker sits in the returned text");
+    }
 
 // =====================
     // Main-agent invariants

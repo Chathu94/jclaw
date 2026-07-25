@@ -708,6 +708,78 @@ describe('Agents page — Inspect prompt dialog', () => {
     await vi.waitFor(() => expect(calls.some(u => u.includes('channelType=telegram'))).toBe(true))
   })
 
+  it('swaps the sections table for a donut when the chart view is selected', async () => {
+    registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
+      totalChars: 400,
+      totalTokenEstimate: 100,
+      cacheBoundaryMarker: '',
+      cacheablePrefixChars: 320,
+      variableSuffixChars: 80,
+      sections: [
+        { name: 'Identity', chars: 300, tokens: 75 },
+        { name: 'Safety', chars: 100, tokens: 25 },
+      ],
+      skills: [],
+      tools: [],
+    }))
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+    await component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')!.trigger('click')
+    await flushPromises()
+
+    // Table is the default view: the sortable "Chars" column header is present.
+    expect(component.findAll('table').length).toBeGreaterThan(0)
+
+    await component.findAll('button').find(b => b.text().trim() === 'chart')!.trigger('click')
+    await flushPromises()
+
+    // Donut replaces the table; shares come off totalTokenEstimate, not the series.
+    expect(component.findAll('table').length).toBe(0)
+    expect(component.find('svg[role="img"]').exists()).toBe(true)
+    expect(component.text()).toContain('75.0%')
+  })
+
+  it('View Full fetches and renders the assembled prompt text', async () => {
+    registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
+      totalChars: 100,
+      totalTokenEstimate: 25,
+      cacheBoundaryMarker: '',
+      cacheablePrefixChars: 80,
+      variableSuffixChars: 20,
+      sections: [{ name: 'Identity', chars: 100, tokens: 25 }],
+      skills: [],
+      tools: [],
+    }))
+    registerEndpoint('/api/agents/2/prompt-text', () => ({
+      text: '## Role\nYou are a helpful agent.\n## Safety\nBe careful.',
+    }))
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+    await component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')!.trigger('click')
+    await flushPromises()
+
+    const viewFull = component.find('[data-testid="view-full-prompt"]')
+    expect(viewFull.exists()).toBe(true)
+    await viewFull.trigger('click')
+    await flushPromises()
+
+    const pre = component.find('[data-testid="full-prompt-text"]')
+    expect(pre.exists()).toBe(true)
+    expect(pre.text()).toContain('You are a helpful agent.')
+
+    // Back returns to the numbers rather than closing the dialog outright.
+    await component.findAll('button').find(b => b.text().trim() === 'Back')!.trigger('click')
+    await flushPromises()
+    expect(component.find('[data-testid="full-prompt-text"]').exists()).toBe(false)
+    expect(component.findAll('table').length).toBeGreaterThan(0)
+  })
+
   it('closes the dialog when the close button is clicked', async () => {
     registerEndpoint('/api/agents/2/prompt-breakdown', () => ({
       totalChars: 100,

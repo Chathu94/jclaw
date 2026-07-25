@@ -201,15 +201,44 @@ public class ApiAgentsController extends Controller {
     @Operation(summary = "Per-section breakdown of the system prompt this agent would receive next turn")
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
-        // channelType is required: every real chat lives on a channel, so the
-        // UI always sends one. Reject missing/unknown values up-front rather
-        // than silently assembling a prompt that doesn't match any runtime path.
+        var breakdown = SystemPromptAssembler.breakdown(agent, null, requireBreakdownChannel());
+        renderJSON(gson.toJson(breakdown));
+    }
+
+    /**
+     * Return the full assembled system prompt text for this agent — the same string
+     * {@link #promptBreakdown} measures, so the operator can read what the numbers
+     * describe. Kept as its own endpoint rather than a field on the breakdown because
+     * the text runs to tens of kilobytes and the breakdown dialog opens far more often
+     * than the operator asks to read the prompt.
+     *
+     * <p>Memory recall is skipped (null user message) for the same reason as the
+     * breakdown: a deterministic snapshot of the agent's standing prompt, not one
+     * conditioned on a hypothetical query.
+     *
+     * @param id the agent id whose assembled prompt is requested
+     */
+    @SuppressWarnings("java:S2259")
+    @Operation(summary = "Full assembled system prompt text this agent would receive next turn")
+    public static void promptText(Long id) {
+        var agent = requireAgent(id);
+        var assembled = SystemPromptAssembler.assemble(agent, null, null, requireBreakdownChannel());
+        renderJSON(gson.toJson(Map.of("text", assembled.systemPrompt())));
+    }
+
+    /**
+     * Read and validate the {@code channelType} query param shared by the two prompt
+     * introspection endpoints. Required: every real chat lives on a channel, so the UI
+     * always sends one — reject missing/unknown values up-front rather than silently
+     * assembling a prompt that matches no runtime path. Halts via {@code badRequest()}
+     * on a bad value, so callers can use the return value directly.
+     */
+    private static String requireBreakdownChannel() {
         var rawChannel = params.get("channelType");
         if (rawChannel == null || rawChannel.isBlank()) badRequest();
         var channelType = rawChannel.trim().toLowerCase();
         if (!VALID_BREAKDOWN_CHANNELS.contains(channelType)) badRequest();
-        var breakdown = SystemPromptAssembler.breakdown(agent, null, channelType);
-        renderJSON(gson.toJson(breakdown));
+        return channelType;
     }
 
     private static final Set<String> VALID_BREAKDOWN_CHANNELS =
