@@ -2891,7 +2891,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </h4>
             <PromptSizeDonut
               :entries="promptChartEntries"
-              :max-slices="12"
               label="Prompt composition"
             />
           </div>

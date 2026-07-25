@@ -36,29 +36,51 @@ describe('PromptSizeDonut', () => {
     expect(w.text()).toContain('25.0%')
   })
 
-  it('collapses the long tail into a named Other slice', () => {
-    // 12 entries with maxSlices=8 -> 8 arcs + 1 "Other (4)".
-    const entries = Array.from({ length: 12 }, (_, i) => entry(`t${i}`, 100 - i))
+  it('draws every entry rather than collapsing a tail into "Other"', () => {
+    // A real prompt runs to ~50 contributors; the tail is where the surprises
+    // are, so all of it is named.
+    const entries = Array.from({ length: 50 }, (_, i) => entry(`t${i}`, 100 - i))
     const w = mountDonut(entries)
-    const arcs = w.findAll('circle').slice(1)
-    expect(arcs).toHaveLength(9)
-    expect(w.text()).toContain('Other (4)')
-  })
-
-  it('gives every slice its own colour at the largest maxSlices in use', () => {
-    // The palette lookup wraps with `% length`, so a palette shorter than
-    // maxSlices repeats a colour inside one chart. The prompt breakdown asks
-    // for 12 slices, so 12 must stay distinct.
-    const entries = Array.from({ length: 12 }, (_, i) => entry(`t${i}`, 100 - i))
-    const w = mountDonut(entries, { maxSlices: 12 })
-    const colors = w.findAll('circle').slice(1).map(c => c.attributes('stroke'))
-    expect(colors).toHaveLength(12)
-    expect(new Set(colors).size).toBe(12)
-  })
-
-  it('keeps every entry when the count fits under maxSlices', () => {
-    const w = mountDonut([entry('a', 5), entry('b', 4)])
+    expect(w.findAll('circle').slice(1)).toHaveLength(50)
     expect(w.text()).not.toContain('Other')
+    expect(w.text()).toContain('t49')
+  })
+
+  it('gives every slice its own colour past the end of the curated palette', () => {
+    // The 12-colour palette used to wrap with `% length`, painting two slices of
+    // one chart identically. Generated hues have to keep 50 apart.
+    const entries = Array.from({ length: 50 }, (_, i) => entry(`t${i}`, 100 - i))
+    const w = mountDonut(entries)
+    const colors = w.findAll('circle').slice(1).map(c => c.attributes('stroke'))
+    expect(colors).toHaveLength(50)
+    expect(new Set(colors).size).toBe(50)
+  })
+
+  it('closes the legend with a total row that reconciles to 100%', () => {
+    // chars are exact (4 tokens ⇒ 16 chars via the fixture), so the row is
+    // checkable against the dialog header's Total chars / ≈ tokens.
+    const w = mountDonut([entry('a', 300), entry('b', 100)])
+    const total = w.find('[data-testid="donut-total"]')
+    expect(total.exists()).toBe(true)
+    expect(total.text()).toContain('1,600')
+    expect(total.text()).toContain('400')
+    expect(total.text()).toContain('100.0%')
+  })
+
+  it('derives the total tokens from total chars, not by summing rounded rows', () => {
+    // Each row is its own round(chars/4). Three rows of 2 chars each round to
+    // 1 token apiece (3 summed), but the series is 6 chars ⇒ 2 tokens. The
+    // header rounds once over the whole, and the total row has to agree with it.
+    const rows = [
+      { name: 'a', chars: 2, tokens: 1 },
+      { name: 'b', chars: 2, tokens: 1 },
+      { name: 'c', chars: 2, tokens: 1 },
+    ]
+    const w = mountDonut(rows)
+    // Cells: [swatch, label, chars, tokens, share].
+    const cells = w.find('[data-testid="donut-total"]').findAll('span')
+    expect(cells[2]!.text()).toBe('6')
+    expect(cells[3]!.text()).toBe('2')
   })
 
   it('skips zero-token entries so they do not render invisible arcs', () => {
