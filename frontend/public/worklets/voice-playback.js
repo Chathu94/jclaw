@@ -8,17 +8,32 @@
 // Messages in:  { type: 'push', data: Float32Array }  — append decoded PCM
 //               { type: 'flush' }                      — hard-stop, drop all audio
 // Messages out: { type: 'drained' }                    — buffer emptied after playing
+//               { type: 'level', free }                — free sample slots, for backpressure
+//
+// JCLAW-845: the ring holds seconds, but a reply can be minutes. The sidecar
+// synthesises far faster than real-time, so a long answer used to overrun the
+// ring and the writer dropped the OLDEST samples — audio the listener had not
+// heard yet. That is why long replies came out with gaps throughout rather than
+// truncated at the end. The main thread now applies backpressure from the
+// `level` reports and only pushes what fits; `enqueue` additionally refuses to
+// overwrite unplayed audio, so a backpressure bug degrades to a reported drop
+// instead of silent corruption.
+// Render quanta between free-space reports while draining. 16 quanta is ~43 ms
+// at 128 frames / 48 kHz — frequent enough that the writer keeps the ring fed,
+// rare enough not to flood the message port during a multi-minute reply.
+const LEVEL_REPORT_QUANTA = 16
+
 class VoicePlaybackProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super()
-    // ~10 s headroom; TTS chunks arrive faster than real-time, so this only
-    // needs to absorb bursts, never a whole reply.
-    this.capacity = Math.max(1, Math.floor(sampleRate * 10))
+    const seconds = options?.processorOptions?.bufferSeconds || 10
+    this.capacity = Math.max(1, Math.floor(sampleRate * seconds))
     this.ring = new Float32Array(this.capacity)
     this.read = 0
     this.write = 0
     this.filled = 0
     this.hadData = false
+    this.sinceReport = 0
     this.port.onmessage = (e) => {
       const msg = e.data
       if (!msg) return
@@ -30,23 +45,32 @@ class VoicePlaybackProcessor extends AudioWorkletProcessor {
         this.write = 0
         this.filled = 0
         this.hadData = false
+        this.reportLevel()
       }
     }
+    // Seed the writer's view of free space before the first chunk arrives.
+    this.reportLevel()
+  }
+
+  reportLevel() {
+    this.port.postMessage({ type: 'level', free: this.capacity - this.filled })
   }
 
   enqueue(data) {
-    for (let i = 0; i < data.length; i++) {
+    // Accept only what fits. Dropping the tail of an over-long push loses audio
+    // not yet written; dropping the head (the old behaviour) loses audio already
+    // queued for playback, which is strictly worse and silent.
+    const n = Math.min(data.length, this.capacity - this.filled)
+    for (let i = 0; i < n; i++) {
       this.ring[this.write] = data[i]
       this.write = (this.write + 1) % this.capacity
-      if (this.filled < this.capacity) {
-        this.filled++
-      }
-      else {
-        // Overflow (shouldn't happen with 10 s headroom): drop the oldest sample.
-        this.read = (this.read + 1) % this.capacity
-      }
+      this.filled++
     }
-    this.hadData = true
+    if (n > 0) this.hadData = true
+    if (n < data.length) {
+      this.port.postMessage({ type: 'overflow', dropped: data.length - n })
+    }
+    this.reportLevel()
   }
 
   process(_inputs, outputs) {
@@ -68,6 +92,12 @@ class VoicePlaybackProcessor extends AudioWorkletProcessor {
     if (this.hadData && this.filled === 0) {
       this.hadData = false
       this.port.postMessage({ type: 'drained' })
+    }
+    // Report free space periodically while draining so the writer can top up.
+    // Only while there is audio in flight — an idle buffer needs no reports.
+    if (this.filled > 0 && ++this.sinceReport >= LEVEL_REPORT_QUANTA) {
+      this.sinceReport = 0
+      this.reportLevel()
     }
     return true
   }

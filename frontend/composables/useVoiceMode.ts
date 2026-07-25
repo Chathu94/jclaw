@@ -35,6 +35,18 @@ let captureNode: AudioWorkletNode | null = null
 let playCtx: AudioContext | null = null
 let playNode: AudioWorkletNode | null = null
 let bufferEmpty = true // mirrors the worklet ring buffer (drained = true)
+
+/**
+ * Seconds of audio the worklet ring holds. The writer must not exceed it:
+ * the sidecar synthesises faster than real-time, so a long reply produces
+ * audio far quicker than it plays out (JCLAW-845).
+ */
+const PLAYBACK_BUFFER_SECONDS = 10
+/** Decoded chunks waiting for ring space. Unbounded on purpose — this is heap,
+ *  and holding a whole reply here is what stops the ring from overrunning. */
+let pendingAudio: Float32Array[] = []
+/** Free sample slots in the worklet ring, per its last `level` report. */
+let ringFree = 0
 let turnComplete = false
 let currentTurn = -1 // the turn whose audio we currently accept (-1 = none)
 let watchdog: ReturnType<typeof setTimeout> | null = null
@@ -93,6 +105,8 @@ function teardown() {
     }
     ws = null
   }
+  pendingAudio = []
+  ringFree = 0
   bufferEmpty = true
   turnComplete = false
   currentTurn = -1
@@ -172,9 +186,23 @@ async function startPlayback() {
     numberOfInputs: 0,
     numberOfOutputs: 1,
     outputChannelCount: [1],
+    processorOptions: { bufferSeconds: PLAYBACK_BUFFER_SECONDS },
   })
+  pendingAudio = []
+  ringFree = 0
   playNode.port.onmessage = (e) => {
-    if ((e.data as { type?: string })?.type === 'drained') onDrained()
+    const msg = e.data as { type?: string, free?: number, dropped?: number }
+    if (msg?.type === 'drained') onDrained()
+    else if (msg?.type === 'level') {
+      // The worklet is authoritative on free space; adopt its number and top up.
+      ringFree = msg.free ?? 0
+      pumpAudio()
+    }
+    else if (msg?.type === 'overflow') {
+      // Backpressure should make this unreachable; if it fires, audio was lost
+      // and we want it in the console rather than silently missing from playback.
+      console.warn(`voice: playback ring overflowed, dropped ${msg.dropped} samples`)
+    }
   }
   playNode.connect(playCtx.destination)
 }
@@ -248,6 +276,29 @@ async function onMessage(ev: MessageEvent) {
   armWatchdog()
 }
 
+/**
+ * Move queued audio into the worklet ring, never exceeding the free space it
+ * last reported. A chunk bigger than the remaining space is split rather than
+ * held back, so playback stays continuous instead of stalling on a large chunk.
+ */
+function pumpAudio() {
+  if (!playNode) return
+  while (pendingAudio.length > 0 && ringFree > 0) {
+    const head = pendingAudio[0]!
+    if (head.length <= ringFree) {
+      pendingAudio.shift()
+      ringFree -= head.length
+      playNode.port.postMessage({ type: 'push', data: head }, [head.buffer])
+    }
+    else {
+      const fit = head.slice(0, ringFree)
+      pendingAudio[0] = head.slice(ringFree)
+      ringFree = 0
+      playNode.port.postMessage({ type: 'push', data: fit }, [fit.buffer])
+    }
+  }
+}
+
 async function playChunk(b64: string) {
   if (!playCtx || !playNode || !b64) return
   try {
@@ -259,7 +310,10 @@ async function playChunk(b64: string) {
     // match the worklet's output rate. Copy channel 0 to transfer ownership.
     const mono = new Float32Array(audio.getChannelData(0))
     bufferEmpty = false
-    playNode.port.postMessage({ type: 'push', data: mono }, [mono.buffer])
+    // Queue rather than push: the ring holds seconds and a reply can be
+    // minutes, so the writer waits for space instead of overrunning it.
+    pendingAudio.push(mono)
+    pumpAudio()
     armWatchdog()
   }
   catch (e) {
@@ -269,13 +323,21 @@ async function playChunk(b64: string) {
 
 function stopPlayback() {
   if (playNode) playNode.port.postMessage({ type: 'flush' })
+  // Barge-in drops queued audio too — otherwise the interrupted reply would
+  // resume playing behind the user's new turn.
+  pendingAudio = []
+  ringFree = 0
   bufferEmpty = true
   turnComplete = false
 }
 
 function onDrained() {
-  bufferEmpty = true
-  maybeEndTurn()
+  // The ring emptying only ends playback when nothing is queued behind it —
+  // otherwise a momentary underrun mid-reply would hand the floor back to the
+  // mic while the rest of the answer was still waiting for space.
+  pumpAudio()
+  bufferEmpty = pendingAudio.length === 0
+  if (bufferEmpty) maybeEndTurn()
   armWatchdog() // a chunk finishing is progress during a long reply
 }
 
