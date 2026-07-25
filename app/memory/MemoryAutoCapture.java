@@ -7,6 +7,7 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
+import models.ChannelType;
 import models.Memory;
 import play.Play;
 import services.ConfigService;
@@ -157,6 +158,7 @@ public final class MemoryAutoCapture {
                 var ctx = Tx.run(() -> {
                     var conv = ConversationService.findById(conversationId);
                     if (conv == null) return null;
+                    if (!channelEligible(conv.channelType)) return null;
                     var provider = resolveProvider(agent);
                     if (provider == null) return null;
                     return new ExtractContext(provider, resolveModelId(agent), conv.channelType);
@@ -189,6 +191,29 @@ public final class MemoryAutoCapture {
      */
     public static boolean captureEligible(Agent agent) {
         return agent != null && !agent.isSubagent() && agent.memoryAutocaptureEnabled;
+    }
+
+    /**
+     * Whether a turn on {@code channelType} may be auto-captured (JCLAW-866).
+     *
+     * <p>Voice is excluded. Those sessions are ephemeral by design — JCLAW-862
+     * gives each its own conversation and JCLAW-864 deletes it when the dialog
+     * closes — while memories are partitioned by agent, not conversation. Capturing
+     * would leave a permanent derivative of a transcript the operator was told
+     * would vanish, shaping later answers from a source they can no longer inspect.
+     *
+     * <p>Scoped to <em>auto</em>-capture only. The memory tool still works during a
+     * voice conversation: an explicit "remember this" is an instruction, not the
+     * passive distillation being withheld here.
+     *
+     * <p>Split out rather than inlined at the call site because {@code captureAsync}
+     * returns early in test mode, so anything buried in its virtual thread is
+     * unreachable from a unit test — the same reason {@link #captureEligible} was
+     * factored out. An unknown or null channel stays eligible: capture has always
+     * been the default and a channel we don't recognise is not a reason to drop it.
+     */
+    public static boolean channelEligible(String channelType) {
+        return !ChannelType.VOICE.value.equalsIgnoreCase(channelType);
     }
 
     // JCLAW-534: the extractor runs on the agent's per-agent autocapture model —

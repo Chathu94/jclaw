@@ -198,4 +198,33 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertFalse(stored.getFirst().text().contains("ignore all previous"),
                 "the injection payload must not be persisted");
     }
+
+    // ===== Channel eligibility (JCLAW-866) =====
+
+    @Test
+    void voiceTurnsAreNotAutoCaptured() {
+        // Voice sessions are ephemeral: JCLAW-862 gives each its own conversation
+        // and JCLAW-864 deletes it on close. Memories are partitioned by agent, so
+        // capturing here would outlive the transcript it came from and steer later
+        // answers from a source the operator can no longer inspect.
+        assertFalse(MemoryAutoCapture.channelEligible("voice"));
+        assertFalse(MemoryAutoCapture.channelEligible("VOICE"),
+                "channel comparison must not be case-sensitive");
+    }
+
+    @Test
+    void durableChannelsRemainCapturable() {
+        assertTrue(MemoryAutoCapture.channelEligible("web"));
+        assertTrue(MemoryAutoCapture.channelEligible("telegram"));
+        assertTrue(MemoryAutoCapture.channelEligible("slack"));
+        assertTrue(MemoryAutoCapture.channelEligible("whatsapp"));
+    }
+
+    @Test
+    void unknownChannelStaysEligible() {
+        // Capture has always been the default; an unrecognised channel is not a
+        // reason to silently drop memories.
+        assertTrue(MemoryAutoCapture.channelEligible("some-future-channel"));
+        assertTrue(MemoryAutoCapture.channelEligible(null));
+    }
 }

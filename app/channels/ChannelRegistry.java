@@ -72,6 +72,13 @@ public final class ChannelRegistry {
                         : new WhatsAppChannel();
             }
             case WEB -> new WebChannel();
+            // Voice has no out-of-band transport. Replies go over the live
+            // WebSocket that VoiceController owns, and when that closes the
+            // session conversation is deleted outright (JCLAW-864) — so there is
+            // nothing to deliver to and nowhere to deliver it. null is already
+            // the established "no channel" answer here (the Telegram branch
+            // yields it for a missing binding), so callers skip rather than throw.
+            case VOICE -> null;
         };
     }
 }

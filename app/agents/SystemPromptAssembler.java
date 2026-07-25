@@ -416,10 +416,12 @@ public class SystemPromptAssembler {
      * Resolve a per-channel guidance body, or {@link Optional#empty()} when the
      * channel has no registered section (Slack, WhatsApp, unknown types).
      * Web, Telegram, and Voice are the cases that ship today — Slack and WhatsApp
-     * can be added here once we decide what prompt-level tuning they need. Note
-     * that {@code "voice"} is a per-turn surface tag, not a {@link models.ChannelType}
-     * enum value: voice turns live on the shared {@code "web"} conversation but are
-     * assembled with this guidance so the model knows it's in a spoken exchange.
+     * can be added here once we decide what prompt-level tuning they need.
+     *
+     * <p>Matched as string literals rather than {@link models.ChannelType}
+     * constants because a {@code switch} case label must be a compile-time
+     * constant and the enum's {@code value} field is not. The values must
+     * therefore stay in step with that enum by hand.
      */
     private static Optional<String> channelGuidanceFor(String channelType) {
         if (channelType == null) return Optional.empty();

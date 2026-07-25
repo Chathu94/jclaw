@@ -20,7 +20,16 @@ public enum ChannelType implements ValueEnum {
     WEB("web"),
     SLACK("slack"),
     TELEGRAM("telegram"),
-    WHATSAPP("whatsapp");
+    WHATSAPP("whatsapp"),
+    /**
+     * Real-time voice mode. Unlike the others this is not a bindable inbound
+     * channel — there is no connector or credential for it — but since JCLAW-862
+     * a voice session owns a conversation of its own, so the value genuinely
+     * appears in {@code channel_type} and belongs here. Before that it existed
+     * only as a per-turn tag and {@code fromValue("voice")} returned null for a
+     * row that was really in the table.
+     */
+    VOICE("voice");
 
     public final String value;
 

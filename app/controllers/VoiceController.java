@@ -115,7 +115,7 @@ public class VoiceController extends WebSocketController {
      *  hear the user. The conversation used to stay {@code "web"}, shared with the
      *  typed chat — it is now created fresh per session on this channel, so voice
      *  history resets each time the operator opens voice mode. */
-    private static final String VOICE_CHANNEL = "voice";
+    private static final String VOICE_CHANNEL = models.ChannelType.VOICE.value;
 
     /** Server→client frame tokens, de-duplicated per S1192 — the {@code type}
      *  discriminators and the field keys reused across frames. */

@@ -1,5 +1,6 @@
 package jobs;
 
+import models.ChannelType;
 import models.Conversation;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
@@ -33,9 +34,8 @@ import java.util.List;
 @NoTransaction
 public class VoiceConversationSweepJob extends Job<Void> {
 
-    /** Matches {@code VoiceController.VOICE_CHANNEL}; duplicated rather than
-     *  exposed, so a controller constant doesn't become job API. */
-    private static final String VOICE_CHANNEL = "voice";
+    /** The channel voice sessions own their conversations on (JCLAW-862). */
+    private static final String VOICE_CHANNEL = ChannelType.VOICE.value;
 
     @Override
     public void doJob() {
