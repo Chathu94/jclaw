@@ -1,6 +1,8 @@
 package services.tts;
 
+import play.Logger;
 import services.LocalSidecarDaemon;
+import services.Tx;
 import services.UvProbe;
 
 /**
@@ -49,7 +51,59 @@ public final class TtsSidecarManager {
             }
             DAEMON.spawn(IDENTITY, null);
             DAEMON.awaitHealthy();
+            // Only on a fresh spawn — the daemon self-evicts when idle, so a
+            // respawn correctly warms again, while ordinary calls that find it
+            // already healthy short-circuit above and never re-trigger this.
+            prewarmModelAsync();
             return DAEMON.baseUrl();
+        });
+    }
+
+    /** Short utterance used to force a model load. Non-blank because the sidecar
+     *  rejects empty text, and short so the wasted synthesis is negligible. */
+    private static final String PREWARM_TEXT = "ok";
+
+    /**
+     * Load the configured sidecar model off the request path (JCLAW-863).
+     *
+     * <p>The sidecar's own {@code _prewarm} resolves the uv environment but not
+     * the model, which is the expensive half — measured at 51.6s cold for
+     * Chatterbox against 6-7s warm. In voice mode that cold load lands at or past
+     * the client's 60s stall watchdog once STT and generation are added, so the
+     * turn is abandoned with no audio and nothing in the server log, because
+     * nothing actually failed. Kokoro hides the problem by loading quickly.
+     *
+     * <p>Warms via a real (tiny) synthesis rather than a load-only worker op, on
+     * purpose: engines defer work past model construction. Kokoro installs its
+     * spaCy G2P model when the pipeline is first built <em>during synthesis</em> —
+     * the JCLAW-859 incident — so a load-only warm would have left exactly that
+     * step cold. Warming through the same path the first real request takes is
+     * the only way to be sure nothing is left lazy.
+     *
+     * <p>Detached and best-effort. It must not delay {@code awaitHealthy}, and a
+     * model that cannot load is a problem for the request that needs it, not a
+     * reason to fail the spawn. The synthesis takes the normal sidecar lock, so a
+     * real request arriving mid-warm queues behind it rather than racing — which
+     * is the same wait it would have paid loading the model itself.
+     */
+    public static void prewarmModelAsync() {
+        Thread.ofVirtual().name("tts-prewarm").start(() -> {
+            try {
+                // Config reads inside a transaction: this runs off the request
+                // path with no ambient EntityManager, and a cache miss would
+                // otherwise throw (the JCLAW-849 / JCLAW-852 failure mode).
+                var model = Tx.run(() -> TtsRouter.modelFor(TtsEngine.SIDECAR));
+                var voice = Tx.run(() -> TtsRouter.voiceFor(TtsEngine.SIDECAR));
+                if (model == null || model.isBlank()) return;
+
+                long t0 = System.nanoTime();
+                new TtsSidecarClient().synthesize(PREWARM_TEXT, model, voice, "wav");
+                Logger.info("TtsSidecarManager: prewarmed sidecar model '%s' in %.1fs",
+                        model, (System.nanoTime() - t0) / 1e9);
+            } catch (RuntimeException e) {
+                Logger.warn("TtsSidecarManager: prewarm failed (first real synthesis will pay "
+                        + "the load instead): %s", e.getMessage());
+            }
         });
     }
 

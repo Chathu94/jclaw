@@ -11,6 +11,8 @@ import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
+import services.tts.TtsEngine;
+import services.tts.TtsSidecarManager;
 import utils.HttpFactories;
 
 import java.time.Duration;
@@ -192,6 +194,16 @@ public class ConfigService {
         }
 
         set(key, value);
+
+        // JCLAW-863: switching the sidecar TTS model is the moment the operator
+        // declares intent to use it, and the one moment they aren't waiting on a
+        // turn — so pay the load now rather than on their first utterance. Gated
+        // on the sidecar already running: a Settings change should not spawn a
+        // Python process, and a later spawn prewarms on its own.
+        if (key.equals("tts." + TtsEngine.SIDECAR.id() + ".model")
+                && TtsSidecarManager.isRunning()) {
+            TtsSidecarManager.prewarmModelAsync();
+        }
 
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
