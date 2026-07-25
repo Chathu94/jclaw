@@ -46,6 +46,10 @@ DEFAULT_MODEL = "qwen3-0.6b"
 
 _MODEL_CACHE = {}
 
+# Chatterbox's builtin speaker, captured at load time so a cleared reference clip
+# can be undone (JCLAW-867). Set in _load_chatterbox; read in _synthesize_chatterbox.
+_CHATTERBOX_DEFAULT_CONDS = None
+
 # The JSON line protocol lives on fd 1 (real stdout). mlx-audio prints model-load
 # chatter ("Initialized encoder codebooks", "Loaded speech tokenizer ...") to
 # stdout, which would corrupt the protocol — so we dup the real stdout aside and
@@ -139,6 +143,14 @@ def _load_chatterbox():
         sys.stderr.write("[synth] loading chatterbox on %s\n" % device)
         m = ChatterboxTTS.from_pretrained(device=device)
         _MODEL_CACHE["chatterbox"] = m
+        # Keep the builtin speaker so clearing the reference clip can get back to
+        # it (JCLAW-867). from_pretrained loads it from the checkpoint's conds.pt;
+        # once prepare_conditionals overwrites model.conds with a cloned voice
+        # there is no other way back short of reloading the model. Safe to hold by
+        # reference rather than copy: prepare_conditionals REPLACES model.conds
+        # with a new object, so cloning cannot reach into this one.
+        global _CHATTERBOX_DEFAULT_CONDS
+        _CHATTERBOX_DEFAULT_CONDS = getattr(m, "conds", None)
     return m
 
 
@@ -148,7 +160,17 @@ def _synthesize_chatterbox(text, ref_audio):
     voices, so the `voice` field is unused on this path."""
     import numpy as np
     model = _load_chatterbox()
-    kw = {"audio_prompt_path": ref_audio} if ref_audio else {}
+    if ref_audio:
+        kw = {"audio_prompt_path": ref_audio}
+    else:
+        # Restore the builtin speaker (JCLAW-867). Chatterbox's generate() only
+        # prepares conditionals when it is handed a clip; without one it silently
+        # reuses whatever it prepared last. Since the model instance is cached for
+        # the worker's lifetime, a single cloned request would otherwise rebind the
+        # voice permanently and clearing the clip would appear to do nothing.
+        kw = {}
+        if _CHATTERBOX_DEFAULT_CONDS is not None:
+            model.conds = _CHATTERBOX_DEFAULT_CONDS
     wav = model.generate(text, **kw)  # torch tensor, shape (1, N) or (N,)
     audio = np.asarray(wav.detach().to("cpu").numpy(), dtype="float32").reshape(-1)
     sr = int(getattr(model, "sr", 24000) or 24000)
