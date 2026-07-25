@@ -11,12 +11,9 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
-import services.TimezoneResolver;
 import utils.GsonHolder;
 
 import java.time.Instant;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -381,11 +378,12 @@ public class SystemPromptAssembler {
         b.startSection("Cache Boundary");
         appendCacheBoundary(b.sb);
 
-        // 10. Current date and time — per-turn-variable (it changes every
-        // request), so it lives below the cache boundary. The model must read
-        // "now" from here; the cacheable Environment block deliberately omits it.
-        b.startSection("Current Time");
-        appendCurrentTimeSection(b.sb);
+        // 10. Current date and time is no longer assembled here at all — it now
+        // rides the last user message via CurrentTimeInjector. Below the cache
+        // boundary was still ahead of the whole conversation history in the
+        // token stream, so a per-minute value invalidated every history token
+        // on the turn the minute ticked over. See CurrentTimeInjector for the
+        // measurements. The cacheable Environment block still omits the clock.
 
         // 11. Recalled memories — per-turn-variable, placed past the cache
         // boundary so updating it never invalidates the cacheable prefix.
@@ -553,28 +551,6 @@ public class SystemPromptAssembler {
                 System.getProperty("os.name", UNKNOWN).toLowerCase(),
                 System.getProperty("os.arch", UNKNOWN)));
         sb.append("- Runtime: Java %s\n".formatted(Runtime.version().feature()));
-    }
-
-    /** Wall-clock format, e.g. {@code Wednesday, 2026-06-04 14:07 (+08:00)}. */
-    private static final DateTimeFormatter CURRENT_TIME_FORMAT =
-            DateTimeFormatter.ofPattern("EEEE, yyyy-MM-dd HH:mm (xxx)");
-
-    /**
-     * Live current date/time in the operator's configured zone
-     * ({@link TimezoneResolver#appZone()}). Appended below the cache boundary
-     * because it changes every turn — keeping it out of the cacheable prefix.
-     * Captured fresh on each assemble() call (every chat turn, every task fire,
-     * and after compaction), so the model always sees the real wall-clock time
-     * instead of guessing.
-     */
-    private static void appendCurrentTimeSection(StringBuilder sb) {
-        var zone = TimezoneResolver.appZone();
-        var now = ZonedDateTime.now(zone);
-        sb.append("\n## Current Date and Time\n");
-        sb.append("- Now: %s\n".formatted(now.format(CURRENT_TIME_FORMAT)));
-        sb.append("- Timezone: %s\n".formatted(zone.getId()));
-        sb.append("- This is the live wall-clock time captured when this prompt was built. "
-                + "Treat it as the current date and time; do not guess or rely on training-cutoff assumptions.\n");
     }
 
     private static void appendCacheBoundary(StringBuilder sb) {

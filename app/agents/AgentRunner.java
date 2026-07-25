@@ -427,6 +427,9 @@ public class AgentRunner {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(assembled.systemPrompt()));
         messages.add(ChatMessage.user(userPrompt));
+        // Task fires reuse the same clock placement as the streaming path: on
+        // the last user message, not in the system prompt (see CurrentTimeInjector).
+        messages = new ArrayList<>(CurrentTimeInjector.inject(messages));
 
         var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, stubConv));
         var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();

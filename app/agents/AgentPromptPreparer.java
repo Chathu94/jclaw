@@ -175,6 +175,10 @@ final class AgentPromptPreparer {
         // multi-image / text-summary) and splice the content parts in. supportsVision/Audio
         // are threaded so a co-attached downgraded image / voice note survives the rebuild.
         finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, prepared.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
+        // Clock rides the last user message rather than the system prompt (see
+        // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
+        // after compaction/trim/media, since each of those rebuilds the list.
+        finalMessages = CurrentTimeInjector.inject(finalMessages);
         return new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers(), prepared.imageBearers(), prepared.videoBearers());
     }
 
@@ -240,7 +244,12 @@ final class AgentPromptPreparer {
         var captioned = VisionAudioAssembler.applyCaptionsForCapability(rewritten, prepared.imageBearers(),
                 supportsVisionForStream, supportsAudioForStream);
         // JCLAW-224: route video attachments through the dispatcher on the streaming path too.
-        return VisionAudioAssembler.applyVideoForCapability(captioned, prepared.videoBearers(), agent,
+        var finalMessages = VisionAudioAssembler.applyVideoForCapability(captioned, prepared.videoBearers(), agent,
                 supportsAudioForStream, supportsVisionForStream);
+        // The clock rides the last user message instead of the system prompt so
+        // the cacheable prefix — and the whole history sitting behind it — stays
+        // byte-stable across turns. Injected last, after compaction/trim/media
+        // rewrites, so nothing downstream rebuilds the list and drops it.
+        return CurrentTimeInjector.inject(finalMessages);
     }
 }

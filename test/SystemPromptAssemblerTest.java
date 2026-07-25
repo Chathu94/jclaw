@@ -1,3 +1,4 @@
+import agents.CurrentTimeInjector;
 import agents.SystemPromptAssembler;
 import memory.MemoryStore;
 import models.Agent;
@@ -210,35 +211,20 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     // =====================
-    // Current date/time section (below the cache boundary)
+    // Current date/time (no longer part of the system prompt at all)
     // =====================
 
     @Test
-    void currentTimeSectionSitsAfterTheCacheBoundary() {
+    void currentTimeIsAbsentFromTheSystemPrompt() {
         var agent = newAgent("spa-current-time");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
-        int marker = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
-        int timeHeader = prompt.indexOf("## Current Date and Time");
-        assertTrue(timeHeader >= 0, "current date/time section must be present");
-        assertTrue(timeHeader > marker,
-                "current date/time is per-turn-variable and must sit below the cache boundary");
-        // The old cacheable-prefix date line is gone — date/time now lives below.
+        assertFalse(prompt.contains(CurrentTimeInjector.HEADING),
+                "the clock changes every minute, and even below the cache boundary it sat "
+                        + "ahead of the whole conversation history in the token stream — so a "
+                        + "minute rollover re-processed every history token. It now rides the "
+                        + "last user message; see CurrentTimeInjector.");
         assertFalse(prompt.contains("- Current date:"),
-                "the cacheable Environment block must no longer carry the date");
-    }
-
-    @Test
-    void currentTimeSectionHonorsConfiguredAppTimezone() {
-        var agent = newAgent("spa-current-time-tz");
-        ConfigService.set(services.TimezoneResolver.APP_CONFIG_KEY, "Asia/Kuala_Lumpur");
-        try {
-            var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
-            assertTrue(prompt.contains("- Timezone: Asia/Kuala_Lumpur"),
-                    "current-time section must reflect the configured app.timezone");
-        } finally {
-            ConfigService.delete(services.TimezoneResolver.APP_CONFIG_KEY);
-            ConfigService.clearCache();
-        }
+                "the cacheable Environment block must not carry the date either");
     }
 
     // =====================

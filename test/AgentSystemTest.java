@@ -907,9 +907,10 @@ class AgentSystemTest extends UnitTest {
         var assembled = SystemPromptAssembler.assemble(agent, "test query");
         assertNotNull(assembled.systemPrompt());
         assertTrue(assembled.systemPrompt().contains("Be helpful and concise"));
-        // Current date/time moved out of the cacheable Environment block into
-        // its own per-turn section below the cache boundary (operator zone).
-        assertTrue(assembled.systemPrompt().contains("## Current Date and Time"));
+        // Current date/time is no longer in the system prompt at all — it rides
+        // the last user message now (CurrentTimeInjector), so the whole prompt
+        // stays byte-stable across turns.
+        assertFalse(assembled.systemPrompt().contains("## Current Date and Time"));
         assertTrue(assembled.systemPrompt().contains("Platform:"));
     }
 

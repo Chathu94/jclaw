@@ -149,9 +149,18 @@ final class StreamingAgentRunner {
                     if (firstTokenSeen.compareAndSet(false, true)) {
                         trace.mark(LatencyTrace.FIRST_TOKEN);
                     }
+                    // Closes the `prefill` window. mark() is first-writer-wins,
+                    // so both producer callbacks set it unconditionally and
+                    // whichever the model emits first stops the clock.
+                    trace.mark(LatencyTrace.LLM_FIRST_OUTPUT);
                     cb.onToken().accept(token);
                 },
-                cb.onReasoning(),
+                reasoning -> {
+                    // Reasoning models emit thinking deltas before any visible
+                    // token, so this is genuinely the earlier signal for them.
+                    trace.mark(LatencyTrace.LLM_FIRST_OUTPUT);
+                    cb.onReasoning().accept(reasoning);
+                },
                 cb.onStatus(),
                 cb.onToolCall(),
                 content -> {
@@ -283,6 +292,11 @@ final class StreamingAgentRunner {
         // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the
         // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
         // (no-longer-audio) messages rather than re-sending the rejected audio.
+        // Start of the `prefill` segment. Marked here rather than inside
+        // streamRound1WithAudioFallback so neither that method nor
+        // streamFirstRoundWithRetry has to take a trace parameter — both already
+        // carry an S107 suppression for their call surface.
+        trace.mark(LatencyTrace.LLM_REQUEST_SENT);
         var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
                 maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream);
         if (round1 == null) return; // cancelled mid-stream
