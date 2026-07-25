@@ -15,6 +15,7 @@ import play.mvc.WebSocketController;
 import services.AgentService;
 import services.AttachmentService;
 import services.ConfigService;
+import services.ConversationDeletionCascade;
 import services.ConversationService;
 import services.Tx;
 import services.transcription.AsrSidecarClient;
@@ -93,6 +94,11 @@ public class VoiceController extends WebSocketController {
      *  straight to the model, so there is no Whisper transcript to echo. */
     private static final String VOICE_ATTACHMENT_LABEL = "(voice message)";
 
+    /** Grace given to an in-flight turn to observe its cancel flag before the
+     *  session conversation is deleted (JCLAW-864). A cancelled turn stops at its
+     *  next cooperative checkpoint, well inside this. */
+    private static final long CANCEL_SETTLE_MS = 250;
+
     /** Pre-roll windows kept before speech-start so the onset isn't clipped
      *  (~320&nbsp;ms at the 32&nbsp;ms Silero window). */
     private static final int PREROLL_WINDOWS = 10;
@@ -137,6 +143,10 @@ public class VoiceController extends WebSocketController {
         var current = new AtomicReference<AtomicBoolean>();  // in-flight turn's cancel flag
         var turnSeq = new AtomicInteger();
         var sessionRef = new AtomicReference<VoiceSession>(); // per-connection streaming pipeline
+        // JCLAW-864: the session's conversation, so the finally below can discard
+        // it however the socket ends — bye, close, or an exception unwinding the
+        // inbound loop.
+        var bindingRef = new AtomicReference<VoiceBinding>();
 
         try {
             for (Http.WebSocketEvent event : inbound) {
@@ -147,7 +157,7 @@ public class VoiceController extends WebSocketController {
                             var type = msg.has("type") ? msg.get("type").getAsString() : "";
                             switch (type) {
                                 case "init" -> initSession(msg, username, asr, out, writeLock,
-                                        current, turnSeq, sessionRef);
+                                        current, turnSeq, sessionRef, bindingRef);
                                 case "cancel" -> cancelCurrent(current);  // client-initiated stop
                                 case "bye" -> {
                                     cancelCurrent(current);
@@ -179,6 +189,44 @@ public class VoiceController extends WebSocketController {
             cancelCurrent(current);
             var s = sessionRef.getAndSet(null);
             if (s != null) s.close();  // release the native VAD
+            discardSessionConversation(bindingRef.getAndSet(null));
+        }
+    }
+
+    /**
+     * Delete the conversation backing a finished voice session (JCLAW-864).
+     *
+     * <p>Voice interactions are one-off, so the row is discarded with the dialog
+     * rather than left to accumulate — there is no conversation retention job to
+     * prune it later.
+     *
+     * <p>Cancellation is cooperative and checked at specific points, so a turn may
+     * still be persisting when the socket closes. The caller trips the cancel flag
+     * first; this waits briefly for the turn thread to notice before deleting, which
+     * keeps the log clean of errors about a conversation that is being thrown away
+     * anyway. The wait is short and bounded — a cancelled turn stops at its next
+     * checkpoint — and expiring it is not a failure, just a noisier delete.
+     *
+     * <p>Best-effort by design: a failure here must not propagate out of the socket's
+     * finally and mask whatever actually ended the session. The startup sweep in
+     * {@link jobs.BootConsistencyCheck} is the backstop for anything left behind,
+     * including a hard kill that skips this path entirely.
+     */
+    private static void discardSessionConversation(VoiceBinding binding) {
+        if (binding == null || binding.conversationId() == null) return;
+        try {
+            Thread.sleep(CANCEL_SETTLE_MS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();  // fall through and still delete
+        }
+        try {
+            int n = Tx.run(() -> ConversationDeletionCascade.deleteByIds(List.of(binding.conversationId())));
+            if (n > 0) {
+                Logger.info("voice: discarded session conversation %d", binding.conversationId());
+            }
+        } catch (RuntimeException e) {
+            Logger.warn("voice: could not discard session conversation %d: %s",
+                    binding.conversationId(), e.getMessage());
         }
     }
 
@@ -190,7 +238,8 @@ public class VoiceController extends WebSocketController {
     private static void initSession(JsonObject msg, String username, AsrSidecarClient asr,
                                     Http.Outbound out, Object writeLock,
                                     AtomicReference<AtomicBoolean> current, AtomicInteger turnSeq,
-                                    AtomicReference<VoiceSession> sessionRef) {
+                                    AtomicReference<VoiceSession> sessionRef,
+                                    AtomicReference<VoiceBinding> bindingRef) {
         var agent = resolveAgent(msg);
         if (agent == null) {
             send(out, writeLock, Map.of("type", TYPE_ERROR, KEY_MESSAGE, "unknown or missing agentId"));
@@ -230,6 +279,9 @@ public class VoiceController extends WebSocketController {
             // than resolved per turn. create() not findOrCreate() — the latter
             // would hand back the previous session's row and defeat the reset.
             var binding = newSessionBinding(boundAgent, username);
+            // A re-init on the same socket replaces the binding; discard the
+            // superseded conversation rather than orphaning it.
+            discardSessionConversation(bindingRef.getAndSet(binding));
             boolean modelHearsAudio = modelHearsAudioAtInit(binding);
             if (!modelHearsAudio) prewarmAsr(asr);
             boolean partialsOn = !"false".equalsIgnoreCase(String.valueOf(ConfigService.get("voice.partials.enabled")))

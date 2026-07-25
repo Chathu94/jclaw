@@ -1,4 +1,5 @@
 import controllers.VoiceController;
+import jobs.VoiceConversationSweepJob;
 import models.Agent;
 import models.Conversation;
 import org.junit.jupiter.api.Test;
@@ -55,11 +56,21 @@ class VoiceControllerTest extends UnitTest {
     // Per-session conversation — JCLAW-862
     // =====================
 
-    /** Invoke the private session-binding factory the init frame uses. */
-    private static void openVoiceSession(Agent agent, String username) throws Exception {
+    /** Invoke the private session-binding factory the init frame uses, returning
+     *  the opaque binding so the discard path can be driven with it. */
+    private static Object openVoiceSession(Agent agent, String username) throws Exception {
         Method m = VoiceController.class.getDeclaredMethod("newSessionBinding", Agent.class, String.class);
         m.setAccessible(true);
-        m.invoke(null, agent, username);
+        return m.invoke(null, agent, username);
+    }
+
+    /** Invoke the private discard the socket's finally block runs on close. The
+     *  parameter type is read off the binding itself — VoiceBinding is a private
+     *  nested record, so it can't be named here. */
+    private static void closeVoiceSession(Object binding) throws Exception {
+        Method m = VoiceController.class.getDeclaredMethod("discardSessionConversation", binding.getClass());
+        m.setAccessible(true);
+        m.invoke(null, binding);
     }
 
     private static Agent freshAgent() {
@@ -118,5 +129,53 @@ class VoiceControllerTest extends UnitTest {
         for (Object row : rows) peers.add(((Conversation) row).peerId);
 
         assertEquals(2, peers.size(), "each session's conversation needs a distinct peer id");
+    }
+
+    // =====================
+    // Ephemeral sessions — JCLAW-864
+    // =====================
+
+    @Test
+    void closingASessionDiscardsItsConversation() throws Exception {
+        // Voice interactions are one-off, and there is no conversation retention
+        // job, so the row goes with the dialog rather than accumulating.
+        var agent = freshAgent();
+        var binding = openVoiceSession(agent, "admin");
+        assertEquals(1L, Conversation.count("agent = ?1 and channelType = ?2", agent, "voice"),
+                "precondition: the session created a conversation");
+
+        closeVoiceSession(binding);
+
+        assertEquals(0L, Conversation.count("agent = ?1 and channelType = ?2", agent, "voice"),
+                "closing the dialog must leave no voice conversation behind");
+    }
+
+    @Test
+    void discardingIsSafeWhenThereIsNoSession() throws Exception {
+        // The socket's finally runs even when init never landed (rejected agent,
+        // handshake dropped), so a null binding must be a no-op rather than an NPE
+        // that masks whatever actually ended the session.
+        Method m = VoiceController.class.getDeclaredMethod(
+                "discardSessionConversation", Class.forName("controllers.VoiceController$VoiceBinding"));
+        m.setAccessible(true);
+        assertDoesNotThrow(() -> m.invoke(null, new Object[]{null}));
+    }
+
+    @Test
+    void bootSweepRemovesAbandonedVoiceConversationsAndSparesWebOnes() {
+        // A hard kill skips the socket's finally, so rows can survive a crash. No
+        // voice session outlives a restart, which is what makes "delete them all"
+        // exact rather than a heuristic — but it must not touch the typed chat.
+        var agent = freshAgent();
+        ConversationService.create(agent, "voice", "admin#aaaaaaaa");
+        ConversationService.create(agent, "voice", "admin#bbbbbbbb");
+        var web = ConversationService.findOrCreate(agent, "web", "admin");
+
+        new VoiceConversationSweepJob().doJob();
+
+        assertEquals(0L, Conversation.count("agent = ?1 and channelType = ?2", agent, "voice"),
+                "abandoned voice conversations must not survive a boot");
+        assertNotNull(ConversationService.findById(web.id),
+                "the web conversation must be untouched by the voice sweep");
     }
 }
