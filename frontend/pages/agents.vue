@@ -2611,11 +2611,12 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       aria-modal="true"
       @click.self="closePromptBreakdown()"
     >
-      <!-- Wider while the full prompt is open: a side-by-side raw/rendered split
-           at 4xl leaves each pane too narrow for dense monospace text. -->
+      <!-- Wider for the two views that put content side by side: the raw/rendered
+           prompt split, and the chart's legend-donut-legend row. Both leave their
+           columns too narrow at 4xl. -->
       <div
         class="bg-surface-elevated border border-border w-full my-6 text-fg-primary"
-        :class="promptTextOpen ? 'max-w-6xl' : 'max-w-4xl'"
+        :class="promptTextOpen || promptBreakdownView === 'chart' ? 'max-w-6xl' : 'max-w-4xl'"
       >
         <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <div class="min-w-0">

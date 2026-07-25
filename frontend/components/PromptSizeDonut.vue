@@ -99,6 +99,14 @@ const totals = computed(() => ({
   fraction: slices.value.reduce((n, s) => n + s.fraction, 0),
 }))
 
+// Legend flanks the donut, so it splits down the middle and reads the way the
+// arcs are ordered: biggest first, down the left column, then down the right.
+// The larger half goes left when the count is odd.
+const legendColumns = computed(() => {
+  const half = Math.ceil(slices.value.length / 2)
+  return [slices.value.slice(0, half), slices.value.slice(half)]
+})
+
 const pct = (f: number) => `${(f * 100).toFixed(1)}%`
 
 /** Text alternative for the graphic — the donut is decorative on its own, so the
@@ -109,67 +117,77 @@ const summary = computed(() =>
 </script>
 
 <template>
-  <div class="flex flex-col sm:flex-row items-center gap-6 py-4">
-    <svg
-      :viewBox="`0 0 ${(RADIUS + STROKE) * 2} ${(RADIUS + STROKE) * 2}`"
-      class="w-40 h-40 shrink-0 -rotate-90"
-      role="img"
-      :aria-label="summary"
-    >
-      <circle
-        :cx="RADIUS + STROKE"
-        :cy="RADIUS + STROKE"
-        :r="RADIUS"
-        fill="none"
-        stroke="currentColor"
-        class="text-border"
-        :stroke-width="STROKE"
-      />
-      <circle
-        v-for="s in slices"
-        :key="s.name"
-        :cx="RADIUS + STROKE"
-        :cy="RADIUS + STROKE"
-        :r="RADIUS"
-        fill="none"
-        :stroke="s.color"
-        :stroke-width="STROKE"
-        :stroke-dasharray="`${s.dash} ${CIRCUMFERENCE - s.dash}`"
-        :stroke-dashoffset="s.offset"
+  <div class="py-4">
+    <!-- Donut centred between the two legend halves. Stacked below lg — three
+         columns can't hold their widths on a narrow viewport — where `order`
+         floats the donut back above the legend so the graphic still leads. -->
+    <div class="flex flex-col lg:flex-row items-center lg:items-start gap-6">
+      <svg
+        :viewBox="`0 0 ${(RADIUS + STROKE) * 2} ${(RADIUS + STROKE) * 2}`"
+        class="w-40 h-40 shrink-0 -rotate-90 order-1 lg:order-2 lg:self-center"
+        role="img"
+        :aria-label="summary"
       >
-        <title>{{ s.name }} — {{ s.tokens.toLocaleString() }} tokens ({{ pct(s.fraction) }})</title>
-      </circle>
-    </svg>
+        <circle
+          :cx="RADIUS + STROKE"
+          :cy="RADIUS + STROKE"
+          :r="RADIUS"
+          fill="none"
+          stroke="currentColor"
+          class="text-border"
+          :stroke-width="STROKE"
+        />
+        <circle
+          v-for="s in slices"
+          :key="s.name"
+          :cx="RADIUS + STROKE"
+          :cy="RADIUS + STROKE"
+          :r="RADIUS"
+          fill="none"
+          :stroke="s.color"
+          :stroke-width="STROKE"
+          :stroke-dasharray="`${s.dash} ${CIRCUMFERENCE - s.dash}`"
+          :stroke-dashoffset="s.offset"
+        >
+          <title>{{ s.name }} — {{ s.tokens.toLocaleString() }} tokens ({{ pct(s.fraction) }})</title>
+        </circle>
+      </svg>
 
-    <ul class="flex-1 w-full space-y-1 text-xs">
-      <li
-        v-for="s in slices"
-        :key="s.name"
-        class="flex items-center gap-2"
+      <ul
+        v-for="(column, col) in legendColumns"
+        :key="col"
+        class="flex-1 min-w-0 w-full space-y-1 text-xs"
+        :class="col === 0 ? 'order-2 lg:order-1' : 'order-3'"
       >
-        <span
-          class="w-2.5 h-2.5 shrink-0"
-          :style="{ backgroundColor: s.color }"
-          aria-hidden="true"
-        />
-        <span class="flex-1 truncate text-fg-primary font-mono">{{ s.name }}</span>
-        <span class="tabular-nums text-fg-muted w-16 text-right">{{ s.chars.toLocaleString() }}</span>
-        <span class="tabular-nums text-fg-muted w-14 text-right">{{ s.tokens.toLocaleString() }}</span>
-        <span class="tabular-nums text-fg-muted w-12 text-right">{{ pct(s.fraction) }}</span>
-      </li>
-      <li
-        class="flex items-center gap-2 pt-1 mt-1 border-t border-border font-semibold"
-        data-testid="donut-total"
-      >
-        <span
-          class="w-2.5 h-2.5 shrink-0"
-          aria-hidden="true"
-        />
-        <span class="flex-1 truncate text-fg-strong font-mono">Total</span>
-        <span class="tabular-nums text-fg-primary w-16 text-right">{{ totals.chars.toLocaleString() }}</span>
-        <span class="tabular-nums text-amber-300 w-14 text-right">{{ totals.tokens.toLocaleString() }}</span>
-        <span class="tabular-nums text-emerald-700 dark:text-emerald-400 w-12 text-right">{{ pct(totals.fraction) }}</span>
-      </li>
-    </ul>
+        <li
+          v-for="s in column"
+          :key="s.name"
+          class="flex items-center gap-2"
+        >
+          <span
+            class="w-2.5 h-2.5 shrink-0"
+            :style="{ backgroundColor: s.color }"
+            aria-hidden="true"
+          />
+          <span class="flex-1 truncate text-fg-primary font-mono">{{ s.name }}</span>
+          <span class="tabular-nums text-fg-muted w-16 text-right">{{ s.chars.toLocaleString() }}</span>
+          <span class="tabular-nums text-fg-muted w-14 text-right">{{ s.tokens.toLocaleString() }}</span>
+          <span class="tabular-nums text-fg-muted w-12 text-right">{{ pct(s.fraction) }}</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Totals span the full width rather than closing one column: they add up
+         both halves, and tucking them under the right one would read as that
+         column's subtotal. -->
+    <div
+      class="flex items-center gap-2 mt-3 pt-2 border-t border-border text-xs font-semibold"
+      data-testid="donut-total"
+    >
+      <span class="flex-1 truncate text-fg-strong font-mono">Total</span>
+      <span class="tabular-nums text-fg-primary w-16 text-right">{{ totals.chars.toLocaleString() }}</span>
+      <span class="tabular-nums text-amber-300 w-14 text-right">{{ totals.tokens.toLocaleString() }}</span>
+      <span class="tabular-nums text-emerald-700 dark:text-emerald-400 w-12 text-right">{{ pct(totals.fraction) }}</span>
+    </div>
   </div>
 </template>

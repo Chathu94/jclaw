@@ -56,6 +56,27 @@ describe('PromptSizeDonut', () => {
     expect(new Set(colors).size).toBe(50)
   })
 
+  it('splits the legend into two columns flanking the donut', () => {
+    const entries = Array.from({ length: 7 }, (_, i) => entry(`t${i}`, 100 - i))
+    const w = mountDonut(entries)
+    const columns = w.findAll('ul')
+    expect(columns).toHaveLength(2)
+    // Biggest first, down the left column then down the right; the odd row goes
+    // left so the taller column is the one that starts the reading order.
+    expect(columns[0]!.findAll('li')).toHaveLength(4)
+    expect(columns[1]!.findAll('li')).toHaveLength(3)
+    expect(columns[0]!.text()).toContain('t0')
+    expect(columns[1]!.text()).toContain('t6')
+    expect(columns[1]!.text()).not.toContain('t0')
+  })
+
+  it('still totals 100% once the slices are spread across both columns', () => {
+    // Shares are per-slice, so splitting the list must not change the sum.
+    const entries = Array.from({ length: 50 }, (_, i) => entry(`t${i}`, 100 - i))
+    const w = mountDonut(entries)
+    expect(w.find('[data-testid="donut-total"]').text()).toContain('100.0%')
+  })
+
   it('closes the legend with a total row that reconciles to 100%', () => {
     // chars are exact (4 tokens ⇒ 16 chars via the fixture), so the row is
     // checkable against the dialog header's Total chars / ≈ tokens.
@@ -77,10 +98,10 @@ describe('PromptSizeDonut', () => {
       { name: 'c', chars: 2, tokens: 1 },
     ]
     const w = mountDonut(rows)
-    // Cells: [swatch, label, chars, tokens, share].
+    // Cells: [label, chars, tokens, share].
     const cells = w.find('[data-testid="donut-total"]').findAll('span')
-    expect(cells[2]!.text()).toBe('6')
-    expect(cells[3]!.text()).toBe('2')
+    expect(cells[1]!.text()).toBe('6')
+    expect(cells[2]!.text()).toBe('2')
   })
 
   it('skips zero-token entries so they do not render invisible arcs', () => {
