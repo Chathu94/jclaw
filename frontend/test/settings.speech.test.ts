@@ -154,4 +154,55 @@ describe('Settings page — Speech (JCLAW-789/793)', () => {
     const c = await mountSettingsSection('speech')
     expect(c.find('select[aria-label="Text-to-speech speaker voice"]').exists()).toBe(false)
   })
+
+  // ===== Keep-warm window (JCLAW-863) =====
+  //
+  // The key was always read at spawn but reachable only by editing the database,
+  // so the one setting that governs first-reply latency was invisible. These pin
+  // that it is now operable and that a stray value cannot reach the daemon.
+
+  it('shows the keep-warm control for the sidecar engine, defaulting to 15', async () => {
+    setupApi({ engine: 'sidecar' })
+    const c = await mountSettingsSection('speech')
+
+    const input = c.find<HTMLInputElement>('input[aria-label="Minutes the TTS sidecar stays loaded while idle"]')
+    expect(input.exists()).toBe(true)
+    expect(input.element.value).toBe('15')
+  })
+
+  it('hides the keep-warm control for the JVM engine, which has no daemon to idle', async () => {
+    setupApi({ engine: 'jvm' })
+    const c = await mountSettingsSection('speech')
+
+    expect(c.find('input[aria-label="Minutes the TTS sidecar stays loaded while idle"]').exists()).toBe(false)
+  })
+
+  it('POSTs tts.local.idleTimeoutMinutes when changed', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ engine: 'sidecar', capturePost: b => captured.push(b) })
+    const c = await mountSettingsSection('speech')
+
+    const input = c.find<HTMLInputElement>('input[aria-label="Minutes the TTS sidecar stays loaded while idle"]')
+    input.element.value = '120'
+    await input.trigger('change')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'tts.local.idleTimeoutMinutes')
+    expect(hit).toBeTruthy()
+    expect(hit!.value).toBe('120')
+  })
+
+  it('clamps an out-of-range keep-warm value instead of persisting nonsense', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ engine: 'sidecar', capturePost: b => captured.push(b) })
+    const c = await mountSettingsSection('speech')
+
+    const input = c.find<HTMLInputElement>('input[aria-label="Minutes the TTS sidecar stays loaded while idle"]')
+    input.element.value = '-5'
+    await input.trigger('change')
+    await flushPromises()
+
+    const hit = captured.find(b => b.key === 'tts.local.idleTimeoutMinutes')
+    expect(hit!.value).toBe('0')
+  })
 })

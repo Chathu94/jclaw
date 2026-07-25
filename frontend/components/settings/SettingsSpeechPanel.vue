@@ -64,6 +64,20 @@ async function setModel(engine: string, value: string) {
 async function setVoice(value: string) {
   await saveField(`tts.${selectedEngine.value}.voice`, value)
 }
+
+// JCLAW-863: how long the sidecar keeps the model loaded while idle. The key has
+// always existed and been read at spawn (LocalSidecarDaemon), but was reachable
+// only by editing the database — so the one setting that actually governs
+// first-reply latency was invisible. Default mirrors the backend's.
+const idleTimeoutMinutes = computed(() => configValue('tts.local.idleTimeoutMinutes', '15'))
+
+async function setIdleTimeout(value: string) {
+  // Clamp rather than reject: the field is a nudge, and a stray keystroke should
+  // not persist something the daemon will read as nonsense. 0 means never unload.
+  const n = Number.parseInt(value, 10)
+  const safe = Number.isNaN(n) ? 15 : Math.min(1440, Math.max(0, n))
+  await saveField('tts.local.idleTimeoutMinutes', String(safe))
+}
 async function downloadModel(id: string) {
   if (!id) return
   saving.value = true
@@ -260,6 +274,44 @@ onUnmounted(() => stopTtsPolling())
           </select>
         </div>
 
+        <!--
+          Keep-warm window (JCLAW-863). The sidecar unloads its model after this
+          many idle minutes, and reloading is the expensive part — a heavy model
+          like Chatterbox measures ~18-52s cold versus ~2-4s warm. Prewarming can
+          only hide that when it gets a head start, so for a genuinely responsive
+          first turn the model has to still be resident. That costs RAM for as
+          long as it is held, which is the operator's call, not a default.
+          Sidecar-only: the JVM engine loads in-process and has no daemon to idle.
+        -->
+        <div
+          v-if="selectedEngine === 'sidecar'"
+          class="px-4 py-2.5 flex items-center gap-3 border-t border-border"
+        >
+          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Keep warm</span>
+          <input
+            :value="idleTimeoutMinutes"
+            type="number"
+            min="0"
+            max="1440"
+            step="5"
+            aria-label="Minutes the TTS sidecar stays loaded while idle"
+            class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            :disabled="saving"
+            @change="setIdleTimeout(($event.target as HTMLInputElement).value)"
+          >
+          <span class="text-[11px] text-fg-muted">
+            minutes idle before the model unloads — 0 never unloads
+          </span>
+        </div>
+        <p
+          v-if="selectedEngine === 'sidecar'"
+          class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
+        >
+          Longer keeps the first reply fast but holds the model in RAM
+          (Chatterbox is ~3&nbsp;GB); shorter frees memory but makes the next
+          reply after a gap pay the load again. Takes effect the next time the
+          sidecar starts.
+        </p>
         <p
           v-if="selectedEngine === 'sidecar'"
           class="px-4 pb-2.5 -mt-1 text-[11px] text-fg-muted"
