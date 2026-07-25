@@ -97,12 +97,15 @@ public class VoiceController extends WebSocketController {
      *  (~320&nbsp;ms at the 32&nbsp;ms Silero window). */
     private static final int PREROLL_WINDOWS = 10;
 
-    /** Per-turn channel identity handed to the streaming runner. The conversation
-     *  itself stays {@code "web"} (voice and typed chat share history), but tagging
-     *  the turn {@code "voice"} makes {@link agents.SystemPromptAssembler} inject
-     *  spoken-conversation guidance instead of the web-UI markdown guidance —
+    /** Channel identity for a voice session — both the per-turn tag handed to the
+     *  streaming runner AND, since JCLAW-862, the conversation's own channel.
+     *
+     *  <p>Tagging the turn {@code "voice"} makes {@link agents.SystemPromptAssembler}
+     *  inject spoken-conversation guidance instead of the web-UI markdown guidance;
      *  otherwise the model reads the transcript as a text chat and denies it can
-     *  hear the user. */
+     *  hear the user. The conversation used to stay {@code "web"}, shared with the
+     *  typed chat — it is now created fresh per session on this channel, so voice
+     *  history resets each time the operator opens voice mode. */
     private static final String VOICE_CHANNEL = "voice";
 
     /** Server→client frame tokens, de-duplicated per S1192 — the {@code type}
@@ -223,7 +226,11 @@ public class VoiceController extends WebSocketController {
             // audio vs local ASR) and whether interim transcripts run — resolve it
             // once. When the model is text-only, warm the local ASR now so the
             // first utterance doesn't eat the worker+model cold start (JCLAW-800).
-            boolean modelHearsAudio = modelHearsAudioAtInit(boundAgent, username);
+            // JCLAW-862: one conversation per voice session, created here rather
+            // than resolved per turn. create() not findOrCreate() — the latter
+            // would hand back the previous session's row and defeat the reset.
+            var binding = newSessionBinding(boundAgent, username);
+            boolean modelHearsAudio = modelHearsAudioAtInit(binding);
             if (!modelHearsAudio) prewarmAsr(asr);
             boolean partialsOn = !"false".equalsIgnoreCase(String.valueOf(ConfigService.get("voice.partials.enabled")))
                     && !modelHearsAudio;
@@ -267,7 +274,7 @@ public class VoiceController extends WebSocketController {
                     int turnId = turnSeq.incrementAndGet();
                     send(out, writeLock, Map.of("type", "state", "value", "thinking"));
                     Thread.ofVirtual().name("voice-turn-" + turnId).start(() ->
-                            runTurn(boundAgent, username, asr, wav, cancel, turnId, out, writeLock));
+                            runTurn(binding, asr, wav, cancel, turnId, out, writeLock));
                 }
             }, partialSink, ConfigService.getInt("voice.partials.intervalMs", 1200));
             handedOff = true; // the session now owns the VAD; socket()'s finally closes it
@@ -302,8 +309,10 @@ public class VoiceController extends WebSocketController {
     /** One voice turn: STT → agent → sentence-chunked streaming TTS. Bails at each
      *  step if superseded (barge-in), and never emits {@code turn_complete} for a
      *  cancelled turn. */
-    private static void runTurn(Agent agent, String username, AsrSidecarClient asr, byte[] wav,
+    private static void runTurn(VoiceBinding binding, AsrSidecarClient asr, byte[] wav,
                                 AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
+        var agent = binding.agent();
+        var username = binding.username();
         try {
             long t0 = System.nanoTime(); // ≈ endpoint: the utterance is now in hand
             // Per-stage voice latency (JCLAW-800): STT, first-chunk TTS synth, and the
@@ -313,10 +322,19 @@ public class VoiceController extends WebSocketController {
             int maxRunOn = ConfigService.getInt("voice.tts.maxRunOnChars", 220);
             // One transaction resolves the shared web conversation AND whether the
             // active model hears audio natively (both walk agent/conversation).
+            // JCLAW-862: the session's own conversation, created at init. Audio
+            // capability is still resolved per turn so switching the model mid-
+            // session takes effect on the next utterance, as it did before.
             var plan = Tx.run(() -> {
-                var conv = ConversationService.findOrCreate(agent, "web", username);
+                var conv = ConversationService.findById(binding.conversationId());
+                if (conv == null) return null;  // deleted mid-session
                 return new TurnPlan(conv.id, modelHearsAudio(agent, conv));
             });
+            if (plan == null) {
+                Logger.warn("voice: turn %d aborted — session conversation %d is gone",
+                        turnId, binding.conversationId());
+                return;
+            }
             if (cancel.get()) return;
 
             // Input leg. An audio-capable model receives the raw speech as a native
@@ -536,7 +554,23 @@ public class VoiceController extends WebSocketController {
         return Tx.run(() -> AgentService.findById(agentId));
     }
 
-    /** Per-turn plan: the shared web conversation id + whether the active model
+    /**
+     * Per-session binding: the agent, the operator, and the conversation created
+     * for <em>this</em> voice session (JCLAW-862).
+     *
+     * <p>Voice used to resolve {@code findOrCreate(agent, "web", username)} on
+     * every turn, so it had no conversation of its own — it joined the text
+     * chat's. History therefore survived closing and reopening the voice UI, and
+     * the two surfaces shared one context. Creating a conversation once per
+     * session resets the history simply by existing: nothing is deleted, and the
+     * operator's typed chat is untouched.
+     *
+     * <p>Also collapses what were three separate {@code runTurn} parameters, so
+     * threading the conversation through doesn't push that signature to nine.
+     */
+    private record VoiceBinding(Agent agent, String username, Long conversationId) {}
+
+    /** Per-turn plan: the session conversation id + whether the active model
      *  accepts audio natively (drives native-audio vs Whisper input). */
     private record TurnPlan(Long conversationId, boolean nativeAudio) {}
 
@@ -551,10 +585,36 @@ public class VoiceController extends WebSocketController {
                 .map(ModelInfo::supportsAudio).orElse(false);
     }
 
-    /** Resolve audio-capability once at session start (creates the shared web
-     *  conversation, which the first turn reuses) — gates interim transcripts. */
-    private static boolean modelHearsAudioAtInit(Agent agent, String username) {
-        return Tx.run(() -> modelHearsAudio(agent, ConversationService.findOrCreate(agent, "web", username)));
+    /**
+     * Create the conversation backing one voice session (JCLAW-862).
+     *
+     * <p>The peer id carries a per-session suffix so each row is individually
+     * addressable and {@code findByAgentChannelPeer} is never left choosing
+     * between sessions — a plain username would accumulate indistinguishable
+     * rows on the same key.
+     */
+    private static VoiceBinding newSessionBinding(Agent agent, String username) {
+        // Random suffix rather than a timestamp: two sessions opened in the same
+        // millisecond would otherwise share a peer id and leave
+        // findByAgentChannelPeer choosing between them.
+        var peer = username + "#" + UUID.randomUUID().toString().substring(0, 8);
+        var id = Tx.run(() -> ConversationService.create(agent, VOICE_CHANNEL, peer).id);
+        Logger.info("voice: session conversation %d created for agent '%s' (peer %s)",
+                id, agent.name, peer);
+        return new VoiceBinding(agent, username, id);
+    }
+
+    /** Resolve audio-capability once at session start — gates interim transcripts.
+     *
+     *  <p>Reads the session's own conversation, not the web one. Beyond tidiness:
+     *  {@code ModelResolver} honours a per-conversation model override, so probing
+     *  the web conversation would apply the text chat's override to voice. A fresh
+     *  conversation carries none and falls back to the agent default. */
+    private static boolean modelHearsAudioAtInit(VoiceBinding binding) {
+        return Tx.run(() -> {
+            var conv = ConversationService.findById(binding.conversationId());
+            return conv != null && modelHearsAudio(binding.agent(), conv);
+        });
     }
 
     /** Stage the utterance WAV as an audio attachment the streaming runner can

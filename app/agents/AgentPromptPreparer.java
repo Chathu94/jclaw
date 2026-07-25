@@ -190,9 +190,10 @@ final class AgentPromptPreparer {
      *
      * <p>{@code channelType} is the inbound surface of <em>this</em> turn, which
      * drives the assembler's channel guidance. It is normally identical to the
-     * conversation's stored {@code channelType}; voice mode is the exception —
-     * the turn is tagged {@code "voice"} while its history lives on the shared
-     * {@code "web"} conversation, so the model gets spoken-conversation guidance.
+     * conversation's stored {@code channelType} — including for voice mode, which
+     * since JCLAW-862 creates its own {@code "voice"} conversation per session
+     * rather than borrowing the shared {@code "web"} one. The parameter stays
+     * explicit because the turn's surface is the assembler's input, not the row's.
      * Falls back to the stored channel when null.
      */
     static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
