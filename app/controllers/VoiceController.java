@@ -25,23 +25,22 @@ import services.tts.TtsEngine;
 import services.tts.TtsException;
 import services.tts.TtsRouter;
 import services.tts.TtsSidecarManager;
-import services.tts.TtsText;
 import services.voice.TextTurnConfirmer;
 import services.voice.TurnEndpointer;
 import services.voice.VoiceSession;
 import services.voice.VoiceTurnMetrics;
+import services.voice.VoiceTurnSpeaker;
 import services.voice.VoiceVad;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -89,9 +88,6 @@ import java.util.stream.Collectors;
  * {@code {"type":"turn_complete","turn":t}}, {@code {"type":"error","message":..}}.
  */
 public class VoiceController extends WebSocketController {
-
-    /** Queue sentinel marking the end of a turn's streamed sentence sequence. */
-    private static final String END_OF_TURN = "";
 
     /** Overlay "You:" placeholder for the native-audio path — the raw speech went
      *  straight to the model, so there is no Whisper transcript to echo. */
@@ -399,6 +395,7 @@ public class VoiceController extends WebSocketController {
                                 AtomicBoolean cancel, int turnId, Http.Outbound out, Object lock) {
         var agent = binding.agent();
         var username = binding.username();
+        var sink = sinkFor(out, lock);
         try {
             long t0 = System.nanoTime(); // ≈ endpoint: the utterance is now in hand
             // Per-stage voice latency (JCLAW-800): STT, first-chunk TTS synth, and the
@@ -423,29 +420,8 @@ public class VoiceController extends WebSocketController {
             }
             if (cancel.get()) return;
 
-            // Input leg. An audio-capable model receives the raw speech as a native
-            // audio attachment (the chat pipeline transcodes it to input_audio, and
-            // auto-falls back to a Whisper transcript only if the provider rejects
-            // the format), so tone and non-lexical cues reach the model. A text-only
-            // model gets a local-ASR transcript. Either way the reply is text and is
-            // spoken via TTS below.
-            String userMessage;
-            List<AttachmentService.Input> attachments;
-            if (plan.nativeAudio()) {
-                attachments = List.of(stageVoiceAudio(agent, wav));
-                userMessage = "";
-                send(out, lock, Map.of("type", TYPE_TRANSCRIPT, "turn", turnId, "text", VOICE_ATTACHMENT_LABEL));
-            } else {
-                var transcript = transcribe(asr, wav);
-                if (cancel.get()) return;
-                send(out, lock, Map.of("type", TYPE_TRANSCRIPT, "turn", turnId, "text", transcript));
-                if (transcript.isBlank()) {
-                    send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
-                    return;
-                }
-                attachments = List.of();
-                userMessage = transcript;
-            }
+            var input = resolveInput(agent, asr, wav, plan.nativeAudio(), cancel, turnId, sink);
+            if (input.isEmpty()) return; // cancelled, or nothing was said
 
             long inputMs = (System.nanoTime() - t0) / 1_000_000L; // STT / attachment staging
             metrics.sttDone();
@@ -458,105 +434,116 @@ public class VoiceController extends WebSocketController {
             // synthesizes them — so audio starts on the first sentence instead of
             // after the whole reply.
             var sentences = new LinkedBlockingQueue<String>();
-            var pending = new StringBuilder();
-            var cb = new AgentRunner.StreamingCallbacks(
-                    c -> { },
-                    token -> {
-                        synchronized (pending) {
-                            pending.append(token);
-                            drainSentences(pending, sentences, maxRunOn);
-                        }
-                    },
-                    r -> { }, s -> { }, tc -> { },
-                    full -> {
-                        synchronized (pending) {
-                            var tail = pending.toString().strip();
-                            if (!tail.isEmpty()) sentences.offer(tail);
-                            pending.setLength(0);
-                        }
-                        sentences.offer(END_OF_TURN);
-                    },
-                    err -> sentences.offer(END_OF_TURN),
-                    () -> sentences.offer(END_OF_TURN));
-            AgentRunner.runStreaming(agent, plan.conversationId(), VOICE_CHANNEL, username, userMessage,
-                    cancel, cb, System.nanoTime(), attachments);
+            AgentRunner.runStreaming(agent, plan.conversationId(), VOICE_CHANNEL, username,
+                    input.get().userMessage(), cancel, sentenceChunking(sentences, maxRunOn),
+                    System.nanoTime(), input.get().attachments());
 
-            // Consumer: synthesize + stream each sentence as it arrives; grow the
-            // displayed reply with the spoken (plain) text as we go.
-            var enc = Base64.getEncoder();
-            var spoken = new StringBuilder();
-            // Latched so a dead engine logs once per turn rather than once per
-            // sentence — every utterance after the first will fail the same way.
-            boolean audioDegraded = false;
-            int i = 0;
-            while (!cancel.get()) {
-                String sentence;
-                try {
-                    sentence = sentences.poll(10, TimeUnit.MINUTES);
-                } catch (InterruptedException _) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                if (sentence == null || END_OF_TURN.equals(sentence)) break;
-                var speakable = TtsText.toSpeakable(sentence);
-                if (!speakable.isBlank()) { // skip whitespace-only chunks (e.g. stripped emoji)
-                    if (cancel.get() || !out.isOpen()) return;
-
-                    // JCLAW-860: text first, and independent of audio. The reply
-                    // exists whether or not it can be spoken — emitting it only
-                    // after a successful synthesize meant a TTS failure discarded
-                    // an answer the model had already produced and the operator
-                    // had already paid for. A text-only turn is a supported client
-                    // state: turn_complete with nothing queued for playback hands
-                    // the floor straight back to the mic.
-                    spoken.append(!spoken.isEmpty() ? " " : "").append(speakable);
-                    send(out, lock, Map.of("type", "reply", "turn", turnId, "text", spoken.toString()));
-
-                    long synthStart = System.nanoTime();
-                    TtsRouter.Spoken synth;
-                    try {
-                        synth = TtsRouter.synthesizeForVoice(speakable);
-                    } catch (RuntimeException e) {
-                        // One utterance losing its audio must not abandon the rest
-                        // of the turn, and must not raise to the handler below —
-                        // that sends an `error` frame, which the client treats as
-                        // fatal and tears the whole session down. Text keeps
-                        // streaming; the turn degrades to transcript-only.
-                        if (!audioDegraded) {
-                            audioDegraded = true;
-                            Logger.warn("voice: turn %d — audio unavailable, continuing text-only: %s",
-                                    turnId, e.getMessage());
-                        }
-                        continue;
-                    }
-                    long synthMs = (System.nanoTime() - synthStart) / 1_000_000L;
-                    if (cancel.get()) return;
-                    send(out, lock, Map.of("type", "audio", "turn", turnId, "index", i++,
-                            "audio", enc.encodeToString(synth.audio()),
-                            // Which engine actually spoke, so downgraded audio is
-                            // identifiable on the wire rather than passed off as
-                            // the operator's choice (JCLAW-861).
-                            "engine", synth.engine().id(), "degraded", synth.fellBack()));
-                    if (i == 1) { // first audio out — the voice-to-voice metric that matters most
-                        metrics.ttsSynth(synthMs);
-                        metrics.firstAudioSent();
-                        Logger.info("voice: turn %d — stt %dms, first audio %dms after endpoint",
-                                turnId, inputMs, (System.nanoTime() - t0) / 1_000_000L);
-                    }
-                }
-            }
-            if (!cancel.get()) {
-                send(out, lock, Map.of("type", "turn_complete", "turn", turnId));
+            // Consumer: speak each sentence as it arrives. The loop and its
+            // degradation rules live in VoiceTurnSpeaker (JCLAW-869), where they are
+            // reachable by a test — they encode four separate bug fixes.
+            var speaker = new VoiceTurnSpeaker(sink, turnId, cancel,
+                    TtsRouter::synthesizeForVoice);
+            boolean ended = speaker.speakAll(sentences, synthMs -> {
+                // First audio out — the voice-to-voice metric that matters most.
+                metrics.ttsSynth(synthMs);
+                metrics.firstAudioSent();
+                Logger.info("voice: turn %d — stt %dms, first audio %dms after endpoint",
+                        turnId, inputMs, (System.nanoTime() - t0) / 1_000_000L);
+            });
+            if (ended && !cancel.get()) {
+                sink.send(Map.of("type", "turn_complete", "turn", turnId));
                 metrics.turnComplete();
                 Logger.info("voice: turn %d complete — %dms end-to-end, %d chunk(s)",
-                        turnId, (System.nanoTime() - t0) / 1_000_000L, i);
+                        turnId, (System.nanoTime() - t0) / 1_000_000L, speaker.chunksSent());
             }
         } catch (RuntimeException e) {
             Logger.warn("voice: turn %d failed: %s", turnId, e.getMessage());
             if (!cancel.get()) {
-                send(out, lock, Map.of("type", TYPE_ERROR, "turn", turnId, KEY_MESSAGE, String.valueOf(e.getMessage())));
+                sink.send(Map.of("type", TYPE_ERROR, "turn", turnId, KEY_MESSAGE,
+                        String.valueOf(e.getMessage())));
             }
         }
+    }
+
+    /** What the agent is asked with, once the input leg has run. */
+    private record TurnInput(String userMessage, List<AttachmentService.Input> attachments) {}
+
+    /**
+     * Run the input leg and emit the transcript frame.
+     *
+     * <p>An audio-capable model receives the raw speech as a native audio attachment
+     * (the chat pipeline transcodes it to {@code input_audio}, falling back to a
+     * Whisper transcript only if the provider rejects the format), so tone and
+     * non-lexical cues reach the model. A text-only model gets a local-ASR
+     * transcript. Either way the reply is text and is spoken via TTS.
+     *
+     * <p>Empty when the turn is already over: cancelled mid-transcription, or nothing
+     * intelligible was said — in which case {@code turn_complete} has been sent, since
+     * the floor still has to go back to the mic.
+     */
+    private static Optional<TurnInput> resolveInput(Agent agent, AsrSidecarClient asr, byte[] wav,
+                                                    boolean nativeAudio, AtomicBoolean cancel,
+                                                    int turnId, VoiceTurnSpeaker.Sink sink) {
+        if (nativeAudio) {
+            // Staged before the frame goes out: a staging failure should abort the
+            // turn rather than announce an utterance that never reached the model.
+            var staged = List.of(stageVoiceAudio(agent, wav));
+            sink.send(Map.of("type", TYPE_TRANSCRIPT, "turn", turnId, "text", VOICE_ATTACHMENT_LABEL));
+            return Optional.of(new TurnInput("", staged));
+        }
+        var transcript = transcribe(asr, wav);
+        if (cancel.get()) return Optional.empty();
+        sink.send(Map.of("type", TYPE_TRANSCRIPT, "turn", turnId, "text", transcript));
+        if (transcript.isBlank()) {
+            sink.send(Map.of("type", "turn_complete", "turn", turnId));
+            return Optional.empty();
+        }
+        return Optional.of(new TurnInput(transcript, List.of()));
+    }
+
+    /**
+     * Streaming callbacks that sentence-chunk the reply as it arrives, so audio can
+     * start on the first sentence instead of after the whole reply.
+     *
+     * <p>Every terminal callback — completion, error, cancellation — queues
+     * {@code END_OF_TURN}. A consumer blocked on the queue would otherwise wait out
+     * its whole timeout on any path that is not a clean finish.
+     */
+    private static AgentRunner.StreamingCallbacks sentenceChunking(Queue<String> sentences, int maxRunOn) {
+        var pending = new StringBuilder();
+        return new AgentRunner.StreamingCallbacks(
+                c -> { },
+                token -> {
+                    synchronized (pending) {
+                        pending.append(token);
+                        drainSentences(pending, sentences, maxRunOn);
+                    }
+                },
+                r -> { }, s -> { }, tc -> { },
+                full -> {
+                    synchronized (pending) {
+                        var tail = pending.toString().strip();
+                        if (!tail.isEmpty()) sentences.offer(tail);
+                        pending.setLength(0);
+                    }
+                    sentences.offer(VoiceTurnSpeaker.END_OF_TURN);
+                },
+                err -> sentences.offer(VoiceTurnSpeaker.END_OF_TURN),
+                () -> sentences.offer(VoiceTurnSpeaker.END_OF_TURN));
+    }
+
+    /** Adapt the voice socket to the speaker's sink: same write lock, same
+     *  closed-socket check every other frame on this connection goes through. */
+    private static VoiceTurnSpeaker.Sink sinkFor(Http.Outbound out, Object lock) {
+        return new VoiceTurnSpeaker.Sink() {
+            @Override public boolean isOpen() {
+                return out.isOpen();
+            }
+
+            @Override public void send(Map<String, Object> frame) {
+                VoiceController.send(out, lock, frame);
+            }
+        };
     }
 
     /** Move complete sentences from the streaming token buffer into the queue,
