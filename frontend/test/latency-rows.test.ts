@@ -110,15 +110,36 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     expect(totalIdx).toBe(tailIdx + 1)
   })
 
-  it('appends unknown non-prologue top-level keys at the bottom', () => {
+  it('renders unknown non-prologue keys immediately above Total, never below it (JCLAW-870)', () => {
+    // A reverted `prefill` segment left rows behind and rendered under Total,
+    // lowercase — the summary row was last only while TOP_LEVEL_ORDER happened
+    // to enumerate everything the backend emitted.
     const rows = buildLatencyRows({
       prologue: h(3, 20),
       total: h(3, 100),
       some_future_segment: h(3, 42),
     })
     const keys = rows.map(r => r.key)
-    expect(keys).toEqual(['prologue', 'total', 'some_future_segment'])
+    expect(keys).toEqual(['prologue', 'some_future_segment', 'total'])
     expect(rows.find(r => r.key === 'some_future_segment')!.isChild).toBe(false)
+  })
+
+  it('keeps Total last even when several segments are unrecognised', () => {
+    const rows = buildLatencyRows({
+      queue_wait: h(3, 5),
+      total: h(3, 100),
+      zzz_late_alphabetically: h(3, 42),
+      aaa_early_alphabetically: h(3, 7),
+    })
+    const keys = rows.map(r => r.key)
+    expect(keys[keys.length - 1]).toBe('total')
+    expect(keys).toContain('zzz_late_alphabetically')
+    expect(keys).toContain('aaa_early_alphabetically')
+  })
+
+  it('still puts Total last when it is the only known segment present', () => {
+    const rows = buildLatencyRows({ mystery: h(3, 9), total: h(3, 100) })
+    expect(rows.map(r => r.key)).toEqual(['mystery', 'total'])
   })
 
   it('skips prologue entirely if its histogram is absent but still surfaces children', () => {
@@ -133,7 +154,10 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
 })
 
 describe('buildLatencyRows (JCLAW-800 voice group)', () => {
-  it('groups voice_* under a Voice parent immediately above Total', () => {
+  it('leads with the Voice group, above the chat chain it encloses (JCLAW-870)', () => {
+    // voice_turn is endpoint→complete and wraps the LLM leg; voice_stt precedes
+    // every chat segment. Emitting the group above Total instead read as if STT
+    // happened after terminal delivery, and split Terminal delivery from Total.
     const rows = buildLatencyRows({
       queue_wait: h(3, 5),
       dispatcher_wait: h(3, 2),
@@ -146,12 +170,12 @@ describe('buildLatencyRows (JCLAW-800 voice group)', () => {
       total: h(3, 3000),
     })
     const keys = rows.map(r => r.key)
-    expect(keys[keys.length - 1]).toBe('total') // Total stays last
-    const voiceIdx = keys.indexOf('voice')
-    expect(keys.slice(voiceIdx, voiceIdx + 4)).toEqual([
+    expect(keys.slice(0, 4)).toEqual([
       'voice', 'voice_stt', 'voice_tts_synth', 'voice_reply',
     ])
-    expect(keys.indexOf('total')).toBe(voiceIdx + 4) // group sits right above Total
+    expect(keys[keys.length - 1]).toBe('total')
+    // The additive chain stays contiguous, ending at the row Total sums to.
+    expect(keys.indexOf('total')).toBe(keys.indexOf('terminal_tail') + 1)
   })
 
   it('makes Voice the parent (voice_turn) with the stages as labelled children', () => {

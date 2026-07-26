@@ -10,10 +10,22 @@
  * Three consumer-facing functions:
  *
  * - **`buildLatencyRows(metrics)`** — build the table rows for one channel,
- *   in request-lifetime order, with `prologue_*` children nested under
- *   their parent (`isChild: true`). Terminal delivery sits immediately
- *   above Total so the summary row remains the last thing a reader scans.
- *   Unknown keys still surface so data never silently disappears.
+ *   with `prologue_*` children nested under their parent (`isChild: true`).
+ *   The order is fixed (JCLAW-870):
+ *
+ *     1. the Voice group, when present — `voice_turn` *encloses* the LLM leg
+ *        rather than sitting beside it, and `voice_stt` precedes every chat
+ *        segment, so the enclosing span leads its children
+ *     2. the chat pipeline in request-lifetime order, `queue_wait` through
+ *        `terminal_tail` — the additive chain Total sums
+ *     3. any segment this file has no ordering for, keyed by its raw name so
+ *        data never silently disappears
+ *     4. **Total, always last** — structurally, not by luck
+ *
+ *   Rule 4 is the invariant worth protecting: Total is the summary row and a
+ *   reader scans to the bottom for it. It used to hold only because
+ *   `TOP_LEVEL_ORDER` happened to enumerate everything the backend emitted, so
+ *   a segment the frontend didn't know about pushed itself *below* the summary.
  *
  * - **`buildChartSeries(metrics)`** — top-level segments only, for the
  *   overlay chart. `prologue_*` children are suppressed because their
@@ -79,8 +91,9 @@ function labelForChannel(channel: string): string {
 }
 
 /**
- * Canonical top-level segment order. Terminal delivery is rendered just
- * above Total (JCLAW-102) — Total is the summary row and belongs last.
+ * Canonical order for the additive chat chain. Terminal delivery is the last
+ * stage before the summary (JCLAW-102); unknown segments render between it and
+ * Total (JCLAW-870), so the two are adjacent only when there are none.
  */
 export const TOP_LEVEL_ORDER = [
   'queue_wait',
@@ -94,6 +107,11 @@ export const TOP_LEVEL_ORDER = [
   'terminal_tail',
   'total',
 ] as const
+
+/** Membership test for {@link TOP_LEVEL_ORDER}, so the unknown-segment pass can
+ *  tell "this file has no ordering for it" from "its turn in the walk hasn't
+ *  come up yet". */
+const TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(TOP_LEVEL_ORDER)
 
 export const TOP_LEVEL_LABELS: Record<string, string> = {
   queue_wait: 'Queue wait',
@@ -139,7 +157,16 @@ function labelForChild(key: string): string {
  * Voice-pipeline group (JCLAW-800). The `voice_*` segments render as a "Voice"
  * parent carrying the full-turn total ({@link VOICE_PARENT_SEGMENT} = voice_turn)
  * with the stage breakdown nested under it as children, mirroring the Prologue
- * grouping. Emitted just above Total so Total stays the final summary row.
+ * grouping.
+ *
+ * <p>Rendered at the TOP of the table (JCLAW-870), which is where the spans put
+ * it. These are cumulative-from-endpoint measurements, not disjoint stages that
+ * sum toward Total: `voice_stt` is endpoint → transcript and so precedes every
+ * chat segment, while `voice_turn` is endpoint → turn complete and *encloses*
+ * the whole LLM leg below it — measured at p50 6.4&nbsp;s against a chat Total of
+ * 2.1&nbsp;s. It was previously emitted just above Total, which read as if STT
+ * happened after terminal delivery and split Terminal delivery from the summary
+ * row it feeds.
  */
 const VOICE_PARENT_SEGMENT = 'voice_turn'
 export const VOICE_CHILDREN_ORDER = ['voice_stt', 'voice_tts_synth', 'voice_reply'] as const
@@ -210,15 +237,45 @@ function appendVoiceGroup<H extends { count: number }>(
   }
 }
 
+/**
+ * Emit every sampled segment this file has no ordering for, keyed by its raw
+ * name. Called immediately before Total (JCLAW-870) rather than after the
+ * canonical walk, so an unrecognised segment can never displace the summary row.
+ *
+ * <p>Deliberately not a hard-coded skip list: a segment added backend-first,
+ * before the frontend learns its label, should still be visible — just not
+ * below the row that is supposed to close the table. Mutates {@code rows} and
+ * {@code seen}.
+ */
+function appendUnknownSegments<H extends { count: number }>(
+  metrics: Record<string, H | undefined>,
+  rows: LatencyRow<H>[],
+  seen: Set<string>,
+): void {
+  for (const [key, h] of Object.entries(metrics)) {
+    // `seen` is not enough on its own: this runs partway through the canonical
+    // walk, so Total — and any known segment still ahead of it — has not been
+    // emitted yet and would otherwise be mistaken for an unknown and duplicated.
+    if (seen.has(key) || TOP_LEVEL_KEYS.has(key) || !hasSamples(h)) continue
+    rows.push({ key, label: key, h, isChild: false })
+    seen.add(key)
+  }
+}
+
 export function buildLatencyRows<H extends { count: number } = LatencyHistogram>(
   metrics: Record<string, H | undefined>,
 ): LatencyRow<H>[] {
   const rows: LatencyRow<H>[] = []
   const seen = new Set<string>()
 
+  // The enclosing span leads (JCLAW-870): a voice turn starts with STT and ends
+  // after the chat pipeline it wraps, so the group belongs above that pipeline
+  // rather than wedged between its last stage and its summary.
+  appendVoiceGroup(metrics, rows, seen)
+
   for (const key of TOP_LEVEL_ORDER) {
-    // The voice-pipeline group renders just above Total so Total stays last (JCLAW-800).
-    if (key === 'total') appendVoiceGroup(metrics, rows, seen)
+    // Anything unrecognised goes here — immediately before Total, never after.
+    if (key === 'total') appendUnknownSegments(metrics, rows, seen)
     const h = metrics[key]
     const parentEmitted = hasSamples(h)
     if (parentEmitted) {
@@ -227,16 +284,11 @@ export function buildLatencyRows<H extends { count: number } = LatencyHistogram>
     }
     // Nest prologue children immediately under the parent — only when the
     // parent was actually emitted. If prologue is absent, any stray
-    // prologue_* keys fall through to the unknown-key catch-all below so
-    // the operator still sees the data instead of it silently disappearing.
+    // prologue_* keys fall through to the unknown-segment block so the
+    // operator still sees the data instead of it silently disappearing.
     if (key === 'prologue' && parentEmitted) {
       appendPrologueChildren(metrics, rows, seen)
     }
-  }
-
-  for (const [key, h] of Object.entries(metrics)) {
-    if (seen.has(key) || !hasSamples(h)) continue
-    rows.push({ key, label: key, h, isChild: false })
   }
 
   return rows
