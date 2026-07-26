@@ -2,11 +2,13 @@ package tools;
 
 import agents.GeneratedAttachment;
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import play.Logger;
 import services.ConfigService;
+import services.ConversationService;
 import services.Tx;
 import services.tts.TtsRouter;
 import services.tts.VoiceNoteEncoder;
@@ -99,6 +101,24 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
         return executeRich(argsJson, agent).text();
     }
 
+    /**
+     * Which channel will deliver this reply, so the audio can be encoded in the
+     * container that client actually plays inline — Telegram and WhatsApp render
+     * OGG/Opus as a voice note, Slack only inlines MP3.
+     *
+     * <p>Null when there is no conversation in scope (a scheduled task run), which
+     * the encoder treats as "assume nothing" and takes the broadly-playable path.
+     * Own transaction: tool execution runs off the request path.
+     */
+    private static String deliveringChannel() {
+        var conversationId = ToolContext.conversationId();
+        if (conversationId == null) return null;
+        return Tx.run(() -> {
+            var conversation = ConversationService.findById(conversationId);
+            return conversation == null ? null : conversation.channelType;
+        });
+    }
+
     @Override
     public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         String text;
@@ -124,7 +144,7 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
 
         try {
             var wav = TtsRouter.synthesize(text);
-            var encoded = VoiceNoteEncoder.toVoiceNote(wav);
+            var encoded = VoiceNoteEncoder.forChannel(wav, deliveringChannel());
             var filename = "reply." + encoded.extension();
             Logger.info("generate_audio: spoke %d chars -> %d bytes (%s)",
                     text.length(), encoded.bytes().length, encoded.mimeType());
