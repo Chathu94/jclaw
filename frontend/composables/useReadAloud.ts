@@ -9,6 +9,11 @@
 
 const playingKey = ref<string | null>(null) // a chunk is scheduled/playing
 const loadingKey = ref<string | null>(null) // requested, no audio yet
+// Why the last read-aloud stopped, keyed by message (JCLAW-880). Failures used
+// to reach console.error only, so a rejected request was indistinguishable from
+// a click that did nothing — the server's reason existed and was thrown away.
+const errorKey = ref<string | null>(null)
+const errorMessage = ref<string | null>(null)
 
 let audioCtx: AudioContext | null = null
 let controller: AbortController | null = null
@@ -115,8 +120,7 @@ async function handleEvent(key: string, ev: { type?: string, audio?: string, mes
     maybeFinish()
   }
   else if (ev.type === 'error') {
-    console.error('read-aloud error:', ev.message)
-    stop()
+    fail(key, ev.message)
   }
 }
 
@@ -127,8 +131,17 @@ async function toggle(key: string, rawText: string) {
     return
   }
   stop()
+  // A fresh attempt clears whatever the last one reported.
+  errorKey.value = null
+  errorMessage.value = null
+
   const text = stripMarkdown(rawText)
-  if (!text) return
+  if (!text) {
+    // Also a silent return until JCLAW-880: clicking a message that is entirely
+    // code or emoji looked identical to the button being broken.
+    fail(key, 'nothing to read aloud in this message')
+    return
+  }
 
   activeKey = key
   loadingKey.value = key
@@ -176,13 +189,24 @@ async function toggle(key: string, rawText: string) {
     }
   }
   catch (e) {
-    if ((e as { name?: string })?.name !== 'AbortError') {
-      console.error('read-aloud stream failed:', e)
+    // An abort is the operator stopping playback, not a failure — say nothing.
+    if ((e as { name?: string })?.name === 'AbortError') {
+      stop()
+      return
     }
-    stop()
+    fail(key, (e as { data?: { message?: string } })?.data?.message || (e as Error)?.message)
   }
 }
 
+/** Stop playback and record why, so the caller can show it. */
+function fail(key: string, message?: string | null) {
+  const reason = message || 'read-aloud failed'
+  console.error('read-aloud error:', reason)
+  stop()
+  errorKey.value = key
+  errorMessage.value = reason
+}
+
 export function useReadAloud() {
-  return { playingKey, loadingKey, toggle, stop }
+  return { playingKey, loadingKey, errorKey, errorMessage, toggle, stop }
 }

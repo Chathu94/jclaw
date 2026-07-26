@@ -1,3 +1,4 @@
+import com.google.gson.Gson;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -77,6 +78,67 @@ class ApiTtsControllerTest extends FunctionalTest {
         login();
         assertEquals(400,
                 POST("/api/tts/stream", "application/json", "{\"text\":\"   \"}").status.intValue());
+    }
+
+    private static final Gson GSON = new Gson();
+
+    /** Longer than the 5000-char default cap. */
+    private static String longSpeakableText() {
+        return "This is an ordinary sentence in a long answer. ".repeat(150); // ~7050 chars
+    }
+
+    /**
+     * Run {@code body} with the sidecar forced unavailable, so a request that gets
+     * PAST validation fails fast at the engine instead of spawning uv and pulling a
+     * model. Keeps the "passes validation" assertions hermetic, which is the whole
+     * premise of this class — the default engine is the sidecar, so this is the one
+     * switch that stops the suite reaching the network.
+     */
+    private static void withoutSidecar(Runnable body) {
+        services.UvProbe.setForTest(new services.UvProbe.ProbeResult(false, "forced off in test"));
+        try {
+            body.run();
+        } finally {
+            services.UvProbe.setForTest(null);
+        }
+    }
+
+    @Test
+    void streamAcceptsTextBeyondTheOneShotCap() {
+        // JCLAW-880: the cap used to live here too and refused input this endpoint is
+        // built to handle — it sentence-chunks below the guard and streams each chunk.
+        // A 5.7k-character reply is a long answer, not abuse. Not-400 is the assertion
+        // that matters: the request is no longer turned away for its length.
+        login();
+        withoutSidecar(() -> {
+            var body = GSON.toJson(java.util.Map.of("text", longSpeakableText()));
+            var resp = POST("/api/tts/stream", "application/json", body);
+            assertNotEquals(400, resp.status.intValue());
+        });
+    }
+
+    @Test
+    void synthesizeStillRejectsTextBeyondTheCap() {
+        // The cap stays on the one-shot path: it holds the JVM-wide sidecar lock for
+        // the whole synthesis with nothing to interleave and no way to cancel. This
+        // one is rejected during validation, so no engine is touched either way.
+        login();
+        var body = GSON.toJson(java.util.Map.of("text", longSpeakableText()));
+        assertEquals(400, POST("/api/tts/synthesize", "application/json", body).status.intValue());
+    }
+
+    @Test
+    void synthesizeMeasuresTheCapAgainstSpeakableTextNotRawMarkdown() {
+        // A message whose bulk is a code fence strips to almost nothing before being
+        // spoken. Counting the raw markdown rejected messages for length they would
+        // never have uttered.
+        login();
+        withoutSidecar(() -> {
+            var text = "Here is the answer.\n\n```\n" + "x".repeat(6000) + "\n```\n";
+            var resp = POST("/api/tts/synthesize", "application/json",
+                    GSON.toJson(java.util.Map.of("text", text)));
+            assertNotEquals(400, resp.status.intValue());
+        });
     }
 
     @Test

@@ -152,14 +152,21 @@ public class ApiTtsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
         var text = JsonBodyReader.requiredOr400(body, "text");
-        int maxChars = ConfigService.getInt("tts.maxChars", 5000);
-        if (text.length() > maxChars) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "text too long for read-aloud (%d > %d chars)".formatted(text.length(), maxChars));
-        }
         var speakable = TtsText.toSpeakable(text);
         if (speakable.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "no speakable text after stripping markup");
+        }
+        // The cap belongs on THIS endpoint and not on stream() (JCLAW-880): one
+        // synthesize call for the whole text holds the JVM-wide sidecar lock for its
+        // full duration, with nothing to interleave against and no way to cancel it
+        // mid-flight. Measured against the speakable text, not the raw markdown —
+        // code fences and URLs are stripped before speaking, so counting them
+        // rejected messages for length they would never have spoken.
+        int maxChars = ConfigService.getInt("tts.maxChars", 5000);
+        if (speakable.length() > maxChars) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "text too long for one-shot synthesis (%d > %d chars) — use the streaming endpoint"
+                            .formatted(speakable.length(), maxChars));
         }
         byte[] audio;
         try {
@@ -185,12 +192,17 @@ public class ApiTtsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
         var text = JsonBodyReader.requiredOr400(body, "text");
-        int maxChars = ConfigService.getInt("tts.maxChars", 5000);
-        if (text.length() > maxChars) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "text too long for read-aloud (%d > %d chars)".formatted(text.length(), maxChars));
-        }
+        // Deliberately uncapped (JCLAW-880). This endpoint already handles arbitrary
+        // length by construction: the text is sentence-chunked below, each chunk is
+        // synthesized separately, and the per-chunk sidecar lock is fair, so a long
+        // read-aloud interleaves with voice mode rather than starving it. Cancellation
+        // is honoured between chunks, so an operator who changes their mind stops the
+        // work within one sentence. A length cap here refused input the loop underneath
+        // it was built to stream — a 5.7k-character reply is a long answer, not abuse.
         var chunks = TtsSentenceChunker.chunk(TtsText.toSpeakable(text));
+        if (chunks.isEmpty()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "no speakable text after stripping markup");
+        }
         SseStream sse = openSSE().heartbeat(Duration.ofSeconds(15)).timeout(Duration.ofMinutes(10));
         var cancelled = new AtomicBoolean(false);
         sse.onClose(() -> cancelled.set(true));

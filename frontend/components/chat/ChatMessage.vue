@@ -89,7 +89,9 @@ function formatModelLabel(msg: Message): string {
 
 // Read-aloud (TTS) playback, shared across messages so only one plays at a time
 // (JCLAW-789/793). The engine is the operator's Settings > Speech selection.
-const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey, toggle: toggleReadAloud } = useReadAloud()
+const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
+  errorKey: readAloudErrorKey, errorMessage: readAloudErrorMessage,
+  toggle: toggleReadAloud } = useReadAloud()
 </script>
 
 <template>
@@ -441,7 +443,9 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey, toggle
             type="button"
             :disabled="readAloudLoadingKey === String(msg.id ?? msg._key)"
             class="p-1 text-fg-muted hover:text-fg-primary disabled:cursor-not-allowed transition-colors"
-            :title="readAloudPlayingKey === String(msg.id ?? msg._key) ? 'Stop reading' : 'Read aloud'"
+            :title="readAloudErrorKey === String(msg.id ?? msg._key)
+              ? readAloudErrorMessage ?? 'Read aloud failed'
+              : (readAloudPlayingKey === String(msg.id ?? msg._key) ? 'Stop reading' : 'Read aloud')"
             :aria-label="readAloudPlayingKey === String(msg.id ?? msg._key) ? 'Stop reading aloud' : 'Read message aloud'"
             @click="toggleReadAloud(String(msg.id ?? msg._key), msg.content)"
           >
@@ -458,9 +462,19 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey, toggle
             <SpeakerWaveIcon
               v-else
               class="w-4 h-4"
+              :class="readAloudErrorKey === String(msg.id ?? msg._key)
+                ? 'text-red-600 dark:text-red-400' : ''"
               aria-hidden="true"
             />
           </button>
+          <!-- JCLAW-880: the server's reason, shown rather than logged. Without this
+               a refused read-aloud was indistinguishable from a dead button. -->
+          <span
+            v-if="readAloudErrorKey === String(msg.id ?? msg._key) && readAloudErrorMessage"
+            role="status"
+            aria-live="polite"
+            class="text-[11px] text-red-600 dark:text-red-400"
+          >{{ readAloudErrorMessage }}</span>
           <button
             type="button"
             :disabled="streaming"
