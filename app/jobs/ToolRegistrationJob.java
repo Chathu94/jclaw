@@ -14,6 +14,7 @@ import tools.ConversationListTool;
 import tools.ConversationSendTool;
 import tools.DateTimeTool;
 import tools.DiarizeAudioTool;
+import tools.GenerateAudioTool;
 import tools.DocumentsTool;
 import tools.FileSystemTools;
 import tools.GenerateImageTool;
@@ -51,6 +52,9 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new DateTimeTool());
         toolList.add(new GenerateImageTool()); // JCLAW-228: default-off per agent (opt-in)
         toolList.add(new GenerateVideoTool()); // JCLAW-235: async video gen; default-off per agent (opt-in)
+        // JCLAW-876: speak a reply aloud as an audio attachment. Default-off per
+        // agent — synthesis costs seconds and can trigger a sidecar model load.
+        toolList.add(new GenerateAudioTool());
         // JCLAW-559: on-demand speaker diarization of an uploaded recording.
         // Default-on: local CPU only, and the tool description steers the
         // model away from invoking it on ordinary voice notes.

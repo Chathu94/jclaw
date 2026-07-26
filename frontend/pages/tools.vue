@@ -15,6 +15,7 @@ import {
   GlobeAltIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
+  SpeakerWaveIcon,
   PaperAirplaneIcon,
   PauseIcon,
   PhotoIcon,
@@ -55,6 +56,7 @@ const TOOL_ICONS: Record<string, FunctionalComponent> = {
   'list': QueueListIcon,
   'chat-bubble': ChatBubbleLeftRightIcon,
   'mic': MicrophoneIcon,
+  'speaker': SpeakerWaveIcon,
 }
 // Per-icon-key class overrides. Heroicons' PaperAirplaneIcon points up-and-
 // right at ~45° by default; mirror chat.vue:3751's `-rotate-45` so the

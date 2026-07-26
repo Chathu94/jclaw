@@ -551,6 +551,9 @@ public class ToolRegistry {
     private static final String GENERATE_IMAGE_TOOL = "generate_image";
     /** JCLAW-235: {@code generate_video} is default-OFF for every agent (opt-in, like generate_image). */
     private static final String GENERATE_VIDEO_TOOL = "generate_video";
+    /** JCLAW-876: {@code generate_audio} is default-OFF for every agent (opt-in) — speaking a
+     *  reply costs seconds of synthesis and can trigger a sidecar model load. */
+    private static final String GENERATE_AUDIO_TOOL = "generate_audio";
 
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
@@ -570,6 +573,11 @@ public class ToolRegistry {
         // JCLAW-235: video generation is likewise default-off (costly / slow); opt-in per agent.
         if (!Boolean.TRUE.equals(explicitState.get(GENERATE_VIDEO_TOOL))) {
             disabled.add(GENERATE_VIDEO_TOOL);
+        }
+        // JCLAW-876: speaking a reply is slow (seconds, plus a possible sidecar model
+        // load) and changes the shape of an answer, so an agent opts in to it.
+        if (!Boolean.TRUE.equals(explicitState.get(GENERATE_AUDIO_TOOL))) {
+            disabled.add(GENERATE_AUDIO_TOOL);
         }
         if (!agent.isMain()) {
             addMcpDefaultDisabled(disabled, explicitState);
