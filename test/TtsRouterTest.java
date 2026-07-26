@@ -21,14 +21,12 @@ import java.lang.reflect.Method;
  */
 class TtsRouterTest extends UnitTest {
 
+    /** Cleared on both sides of every test: the config is process-global, so a test
+     *  must neither inherit a selection from a previous one nor leave one behind for
+     *  the next. One method carrying both annotations rather than two identical ones. */
     @BeforeEach
-    void clearEngine() {
-        ConfigService.delete("tts.engine");
-        ConfigService.clearCache();
-    }
-
     @AfterEach
-    void cleanup() {
+    void clearEngine() {
         ConfigService.delete("tts.engine");
         ConfigService.clearCache();
     }
