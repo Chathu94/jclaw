@@ -156,7 +156,7 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
                     + "attached — do not link or embed it; just say what you sent, briefly.";
             return new ToolRegistry.ToolResult(summary, null,
                     List.of(new GeneratedAttachment(encoded.bytes(), encoded.mimeType(),
-                            "generate_audio", filename)),
+                            NAME, filename)),
                     null);
         } catch (RuntimeException e) {
             // The engine is the operator's to fix, and the model can still answer in

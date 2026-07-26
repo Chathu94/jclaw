@@ -109,7 +109,7 @@ public final class VoiceNoteEncoder {
             // view; an encoder can exit 0 having written nothing on odd inputs.
             if (encoded.length == 0) return wav(wavBytes);
             return new Encoded(encoded, mimeType, extension);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return wav(wavBytes);
         } catch (IOException | RuntimeException e) {
