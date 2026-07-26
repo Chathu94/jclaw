@@ -37,7 +37,7 @@ export function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob
   const buffer = new ArrayBuffer(44 + samples.length * 2)
   const view = new DataView(buffer)
   const ascii = (offset: number, text: string) => {
-    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.charCodeAt(i))
+    for (let i = 0; i < text.length; i++) view.setUint8(offset + i, text.codePointAt(i)!)
   }
 
   ascii(0, 'RIFF')
