@@ -78,20 +78,17 @@ onMounted(() => {
   appearTimer = setTimeout(tryShow, APPEAR_DELAY_MS)
 })
 
-// The layout persists across route changes, so onMounted fires once per full
-// page load — without this watch, a nudge held back by the tour would wait for
-// the user's next reload. Both directions matter:
-//   • suppression lifts (tour finished) → try again, since bailing above left
-//     the seen flag untouched;
-//   • suppression arrives late → stand down. The first-login intro dialog
-//     opens off an async status call, so it can land *after* the nudge is up.
+// Stand down if the tour arrives after the nudge is already up — the
+// first-login intro opens off an async status call, which on a cold boot can
+// resolve later than the appear delay.
+//
+// Deliberately one-directional: there is no retry when suppression lifts. A
+// nudge held back by the tour waits for the next page load rather than
+// appearing the instant the walkthrough ends, so it never lands on a user who
+// is still reading the last tour step. Bailing in tryShow leaves the seen flag
+// unspent, which is what makes that next load show it.
 watch(() => props.suppressed, (suppressed) => {
-  if (suppressed) {
-    dismiss()
-    return
-  }
-  clearTimeout(appearTimer)
-  appearTimer = setTimeout(tryShow, APPEAR_DELAY_MS)
+  if (suppressed) dismiss()
 })
 
 onUnmounted(() => {

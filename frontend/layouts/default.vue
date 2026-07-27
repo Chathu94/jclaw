@@ -649,7 +649,7 @@ const navGroups: NavGroup[] = [
          login session. Held back for the whole guided tour — the intro dialog
          AND the walkthrough that follows it — so a first-run user, who lands
          straight in the tour, doesn't spend the one showing behind its
-         overlay. -->
+         overlay. A held-back nudge waits for the next page load. -->
     <GithubStarNudge :suppressed="tourIntroOpen || tourActive" />
 
     <!-- Command Palette -->
