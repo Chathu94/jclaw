@@ -22,6 +22,33 @@ describe('useAuth', () => {
     expect(username.value).toBe('admin')
   })
 
+  // The "Leave a star!" nudge is scoped to a login session, not to a browser:
+  // signing back in has to surface it again rather than it being spent forever
+  // on whichever load happened to fire it first.
+  it('login re-arms the star nudge for the new session', async () => {
+    registerEndpoint('/api/auth/login', {
+      method: 'POST',
+      handler: () => ({ status: 'ok', username: 'admin' }),
+    })
+    localStorage.setItem('jclaw-star-nudge-seen', '1')
+
+    await useAuth().login('admin', 'password')
+
+    expect(localStorage.getItem('jclaw-star-nudge-seen')).toBeNull()
+  })
+
+  it('a failed login leaves the star-nudge flag alone', async () => {
+    registerEndpoint('/api/auth/login', {
+      method: 'POST',
+      handler: () => { throw createError({ statusCode: 401 }) },
+    })
+    localStorage.setItem('jclaw-star-nudge-seen', '1')
+
+    await useAuth().login('admin', 'wrong')
+
+    expect(localStorage.getItem('jclaw-star-nudge-seen')).toBe('1')
+  })
+
   it('login returns false on failure', async () => {
     registerEndpoint('/api/auth/login', {
       method: 'POST',

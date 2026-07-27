@@ -44,6 +44,7 @@ const {
   confirmStart: onTourStart,
   dismissIntro: onTourSkip,
   introOpen: tourIntroOpen,
+  isActive: tourActive,
 } = useGuidedTour()
 installGuidedTourHooks()
 
@@ -644,10 +645,12 @@ const navGroups: NavGroup[] = [
       </main>
     </div>
 
-    <!-- One-time "Leave a star!" pointer at the header's GitHub link. Held
-         back while the tour intro is up so the two don't fight for a first-run
-         user's attention. -->
-    <GithubStarNudge :suppressed="tourIntroOpen" />
+    <!-- "Leave a star!" pointer at the header's GitHub link, shown once per
+         login session. Held back for the whole guided tour — the intro dialog
+         AND the walkthrough that follows it — so a first-run user, who lands
+         straight in the tour, doesn't spend the one showing behind its
+         overlay. -->
+    <GithubStarNudge :suppressed="tourIntroOpen || tourActive" />
 
     <!-- Command Palette -->
     <CommandPalette v-model:open="paletteOpen" />

@@ -1,17 +1,18 @@
 <script setup lang="ts">
 const props = defineProps<{
   /**
-   * Hold the nudge back — the layout passes the guided-tour intro dialog's
-   * open state. On a fresh install that modal auto-opens on first load, and a
-   * hand-drawn arrow pointing at the header from behind a dimmed overlay is
-   * the worst possible first impression. While suppressed the nudge doesn't
-   * render and doesn't burn its once-ever flag, so it appears on the next load
-   * instead.
+   * Hold the nudge back while the guided tour owns the screen. The layout
+   * passes intro-dialog-open OR walkthrough-active: on a fresh install the
+   * intro modal auto-opens on first load and the user goes straight into the
+   * tour, so a nudge that only dodged the dialog would fire behind the
+   * walkthrough's overlay, spend its one showing unseen, and get dismissed by
+   * the tour's next navigation.
+   *
+   * While suppressed the nudge doesn't render and doesn't set its seen flag,
+   * so it still has its showing waiting once the tour is done.
    */
   suppressed?: boolean
 }>()
-
-const SEEN_KEY = 'jclaw-star-nudge-seen'
 // Long enough for the layout's `loadTourStatus()` call (a local endpoint,
 // single-digit ms in practice) to have resolved, so `suppressed` is settled
 // before we decide. Doubles as a beat after paint — appearing mid-render
@@ -60,19 +61,37 @@ function dismiss() {
   document.removeEventListener('click', dismiss)
 }
 
+function tryShow() {
+  if (visible.value) return
+  if (localStorage.getItem(STAR_NUDGE_SEEN_KEY)) return
+  if (props.suppressed || !placeAtAnchor()) return
+
+  anchored.value = true
+  visible.value = true
+  localStorage.setItem(STAR_NUDGE_SEEN_KEY, '1')
+
+  hideTimer = setTimeout(dismiss, VISIBLE_MS)
+  document.addEventListener('click', dismiss)
+}
+
 onMounted(() => {
-  if (localStorage.getItem(SEEN_KEY)) return
+  appearTimer = setTimeout(tryShow, APPEAR_DELAY_MS)
+})
 
-  appearTimer = setTimeout(() => {
-    if (props.suppressed || !placeAtAnchor()) return
-
-    anchored.value = true
-    visible.value = true
-    localStorage.setItem(SEEN_KEY, '1')
-
-    hideTimer = setTimeout(dismiss, VISIBLE_MS)
-    document.addEventListener('click', dismiss)
-  }, APPEAR_DELAY_MS)
+// The layout persists across route changes, so onMounted fires once per full
+// page load — without this watch, a nudge held back by the tour would wait for
+// the user's next reload. Both directions matter:
+//   • suppression lifts (tour finished) → try again, since bailing above left
+//     the seen flag untouched;
+//   • suppression arrives late → stand down. The first-login intro dialog
+//     opens off an async status call, so it can land *after* the nudge is up.
+watch(() => props.suppressed, (suppressed) => {
+  if (suppressed) {
+    dismiss()
+    return
+  }
+  clearTimeout(appearTimer)
+  appearTimer = setTimeout(tryShow, APPEAR_DELAY_MS)
 })
 
 onUnmounted(() => {

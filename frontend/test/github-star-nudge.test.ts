@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import GithubStarNudge from '~/components/GithubStarNudge.vue'
 
+// Literal on purpose: asserting against the shared constant would pass even
+// if that constant were renamed, which would silently orphan every flag
+// already written into real users' browsers.
 const SEEN_KEY = 'jclaw-star-nudge-seen'
 const APPEAR_DELAY_MS = 1200
 const VISIBLE_MS = 8000
@@ -95,10 +98,49 @@ describe('GithubStarNudge', () => {
     expect(c.text()).not.toContain('Leave a star!')
   })
 
-  it('does not burn its once-ever flag while suppressed', async () => {
+  it('does not burn its seen flag while suppressed', async () => {
     plantAnchor()
     await mountAndSettle({ suppressed: true })
     expect(localStorage.getItem(SEEN_KEY)).toBeNull()
+  })
+
+  // The fresh-install path: intro dialog auto-opens, the user goes straight
+  // into the walkthrough, and the nudge must sit out the whole thing — then
+  // still get its showing, without waiting for a page reload.
+  it('appears once the tour ends, without needing a reload', async () => {
+    plantAnchor()
+    const c = await mountAndSettle({ suppressed: true })
+    expect(c.text()).not.toContain('Leave a star!')
+
+    await c.setProps({ suppressed: false })
+    await vi.advanceTimersByTimeAsync(APPEAR_DELAY_MS)
+    await c.vm.$nextTick()
+
+    expect(c.text()).toContain('Leave a star!')
+    expect(localStorage.getItem(SEEN_KEY)).toBe('1')
+  })
+
+  it('stands down if the tour starts after it is already up', async () => {
+    plantAnchor()
+    const c = await mountAndSettle()
+    expect(c.text()).toContain('Leave a star!')
+
+    await c.setProps({ suppressed: true })
+    await c.vm.$nextTick()
+    expect(c.text()).not.toContain('Leave a star!')
+  })
+
+  it('does not reappear after the tour if it already had its showing', async () => {
+    plantAnchor()
+    const c = await mountAndSettle()
+    expect(c.text()).toContain('Leave a star!')
+
+    await c.setProps({ suppressed: true })
+    await c.setProps({ suppressed: false })
+    await vi.advanceTimersByTimeAsync(APPEAR_DELAY_MS)
+    await c.vm.$nextTick()
+
+    expect(c.text()).not.toContain('Leave a star!')
   })
 
   it('stays hidden when the GitHub pill is not on the page', async () => {

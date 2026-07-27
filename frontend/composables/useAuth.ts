@@ -60,6 +60,11 @@ export function useAuth() {
       })
       authenticated.value = true
       username.value = user
+      // A new session re-arms the first-run nudges. The "Leave a star!"
+      // pointer is scoped to a login, not to a browser, so signing back in
+      // surfaces it again rather than it being spent forever on whichever
+      // load happened to fire it first.
+      resetStarNudge()
       return true
     }
     catch {
