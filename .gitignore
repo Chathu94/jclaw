@@ -234,3 +234,6 @@ build/
 
 # PlayWright files
 .playwright-mcp/
+
+# graphify knowledge graph — rebuilt locally from source, per-machine
+graphify-out/

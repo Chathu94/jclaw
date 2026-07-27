@@ -2051,6 +2051,52 @@ do_setup() {
     fi
 
     echo ""
+    echo "==> Registering graphify PreToolUse hook (.claude/settings.json)..."
+    # graphify's knowledge-graph hook lives in .claude/settings.json, which is
+    # gitignored (.claude/*), so it doesn't survive a fresh clone — the same
+    # reason BMAD is reinstalled above. graphify is an optional per-machine
+    # tool, so a clone without it still completes setup.
+    #
+    # `graphify claude install --project` is the only supported way to register
+    # the hook, but it also (a) appends an always-on block to the *tracked*
+    # CLAUDE.md and (b) installs a project-scoped skill duplicating the global
+    # one in ~/.claude/skills/. AGENTS.md is this repo's canonical agent guide
+    # and CLAUDE.md only points there, so we snapshot CLAUDE.md, let the
+    # installer run, then restore it and drop the duplicate skill. That keeps
+    # graphify authoritative for the hook's shape (upgrades land automatically)
+    # without letting it edit files git tracks.
+    if ! command -v graphify &>/dev/null; then
+        echo "    Skipped: graphify not on PATH (optional)."
+        echo "             Install with: uv tool install graphifyy"
+    else
+        local claude_md_snapshot
+        claude_md_snapshot="$(mktemp)"
+        [[ -f CLAUDE.md ]] && cp CLAUDE.md "$claude_md_snapshot"
+
+        graphify claude install --project >/dev/null 2>&1
+
+        # Restore only on a real difference, so an unchanged CLAUDE.md keeps its mtime.
+        if [[ -f "$claude_md_snapshot" ]] && ! cmp -s "$claude_md_snapshot" CLAUDE.md; then
+            cp "$claude_md_snapshot" CLAUDE.md
+        fi
+        rm -f "$claude_md_snapshot"
+        rm -rf .claude/skills/graphify .claude/CLAUDE.md
+
+        # Verify by outcome, not exit code — the hook is the only thing we want.
+        if grep -q "hook-guard" .claude/settings.json 2>/dev/null; then
+            echo "    PreToolUse hooks registered (Bash|Grep + Read|Glob)"
+            if [[ -f graphify-out/graph.json ]]; then
+                echo "    Graph present at graphify-out/ — hook is active."
+            else
+                echo "    No graph yet — hook stays inert until you run: /graphify ."
+            fi
+        else
+            echo "    Warning: hook registration did not take."
+            echo "             Run manually: graphify claude install --project"
+        fi
+    fi
+
+    echo ""
     echo "==> Checking git remotes..."
     if /usr/bin/git remote get-url origin >/dev/null 2>&1; then
         echo "    origin: $(/usr/bin/git remote get-url origin)"
