@@ -36,6 +36,10 @@ public final class EvalRunner {
     }
 
     private static final String DEFAULT_SUITE_DIR = "evals/suites";
+    private static final String OPT_SUITES = "--suites";
+    private static final String OPT_RESPONSES = "--responses";
+    private static final String OPT_BASELINE = "--baseline";
+    private static final String OPT_OUT = "--out";
 
     private EvalRunner() {}
 
@@ -73,7 +77,7 @@ public final class EvalRunner {
             var failures = EvalScorer.failures(testCase, response);
             return new EvalReport.CaseResult(testCase.id(), failures.isEmpty(), failures,
                     elapsedMs(startNs), response.llmCalls());
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return failed(testCase, startNs, "responder interrupted");
         } catch (Exception e) {
@@ -114,7 +118,7 @@ public final class EvalRunner {
         }
 
         List<EvalSuite> suites;
-        var dir = Path.of(opts.getOrDefault("--suites", DEFAULT_SUITE_DIR));
+        var dir = Path.of(opts.getOrDefault(OPT_SUITES, DEFAULT_SUITE_DIR));
         try {
             suites = EvalDatasetLoader.loadAll(dir);
         } catch (RuntimeException e) {
@@ -123,7 +127,7 @@ public final class EvalRunner {
             return;
         }
 
-        var responsesPath = opts.get("--responses");
+        var responsesPath = opts.get(OPT_RESPONSES);
         if (responsesPath == null) {
             printDatasetSummary(suites);
             return;
@@ -176,7 +180,7 @@ public final class EvalRunner {
         });
         System.out.println(report.summary());
 
-        var out = opts.get("--out");
+        var out = opts.get(OPT_OUT);
         if (out != null) {
             var outPath = Path.of(out);
             if (outPath.getParent() != null) Files.createDirectories(outPath.getParent());
@@ -185,7 +189,7 @@ public final class EvalRunner {
         }
 
         var exit = report.passed() == report.results().size() ? 0 : 1;
-        var baseline = opts.get("--baseline");
+        var baseline = opts.get(OPT_BASELINE);
         if (baseline != null) {
             var regressions = report.regressionsAgainst(EvalReport.fromJson(Files.readString(Path.of(baseline))));
             if (!regressions.isEmpty()) {
@@ -197,14 +201,14 @@ public final class EvalRunner {
     }
 
     private static Map<String, String> parseOptions(String[] args) {
-        var known = List.of("--suites", "--responses", "--baseline", "--out");
+        var known = List.of(OPT_SUITES, OPT_RESPONSES, OPT_BASELINE, OPT_OUT);
         var opts = new HashMap<String, String>();
         for (var i = 0; i < args.length; i += 2) {
             if (!known.contains(args[i])) throw new IllegalArgumentException("Unknown option: " + args[i]);
             if (i + 1 >= args.length) throw new IllegalArgumentException("Missing value for " + args[i]);
             opts.put(args[i], args[i + 1]);
         }
-        if (opts.containsKey("--baseline") && !opts.containsKey("--responses")) {
+        if (opts.containsKey(OPT_BASELINE) && !opts.containsKey(OPT_RESPONSES)) {
             throw new IllegalArgumentException("--baseline needs --responses (there is nothing to compare otherwise)");
         }
         return opts;

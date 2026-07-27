@@ -31,7 +31,11 @@ import java.util.regex.PatternSyntaxException;
 public final class EvalDatasetLoader {
 
     /** Suite and case ids: lowercase kebab-case, so they are safe in filenames and report keys. */
-    private static final Pattern ID = Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*$");
+    // Possessive outer repetition: java.util.regex backtracks by recursion, so a
+    // greedy `(...)*` over a long id can overflow the stack (java:S5998). The
+    // separator and the segment classes are disjoint, so nothing that matched
+    // before can fail now.
+    private static final Pattern ID = Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*+$");
 
     /** {@code <id>.v<version>.json} — the version is in the name so suites can sit side by side. */
     private static final Pattern FILE_NAME = Pattern.compile("^([a-z0-9-]+)\\.v(\\d+)\\.json$");
@@ -48,7 +52,8 @@ public final class EvalDatasetLoader {
 
     private static final Set<String> SUITE_KEYS = Set.of("id", "version", "description", "cases");
     private static final Set<String> CASE_KEYS = Set.of("id", "input", "rubric", "checks");
-    private static final Set<String> CHECK_KEYS = Set.of("kind", "args", "schema", "limit");
+    private static final String SCHEMA_KEY = "schema";
+    private static final Set<String> CHECK_KEYS = Set.of("kind", "args", SCHEMA_KEY, "limit");
 
     private EvalDatasetLoader() {}
 
@@ -175,11 +180,11 @@ public final class EvalDatasetLoader {
             }
             case TOOL_CALLED, TOOL_NOT_CALLED -> EvalCheck.of(kind, requireArgs(ctx, obj, kind, 1));
             case JSON_SCHEMA -> {
-                var schemaEl = obj.get("schema");
+                var schemaEl = obj.get(SCHEMA_KEY);
                 if (schemaEl == null || !schemaEl.isJsonObject()) {
                     throw new IllegalArgumentException(ctx + ": json_schema: 'schema' must be an object");
                 }
-                validateSchema(ctx, schemaEl.getAsJsonObject(), "schema");
+                validateSchema(ctx, schemaEl.getAsJsonObject(), SCHEMA_KEY);
                 yield EvalCheck.schema(schemaEl.getAsJsonObject());
             }
             case MAX_LLM_CALLS -> {

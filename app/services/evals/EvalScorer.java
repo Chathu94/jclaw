@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -34,6 +35,9 @@ public final class EvalScorer {
             toolsCalled = toolsCalled == null ? List.of() : List.copyOf(toolsCalled);
         }
     }
+
+    /** Prefix tagging every {@code json_schema} failure with the check that produced it. */
+    private static final String JSON_SCHEMA = "json_schema: ";
 
     private EvalScorer() {}
 
@@ -97,10 +101,15 @@ public final class EvalScorer {
         } catch (JsonParseException e) {
             // Deliberately no fence-stripping or brace-hunting: a caller asking for
             // structured output gets the raw body, so prose around it is the defect.
-            failures.add("json_schema: response is not valid JSON — " + e.getMessage());
+            failures.add(JSON_SCHEMA + "response is not valid JSON — " + e.getMessage());
             return;
         }
-        validate(body, check.schema(), "$", failures);
+        // EvalCheck.schema is @Nullable across the vocabulary, but a JSON_SCHEMA check
+        // can only be built by EvalCheck.schema(JsonObject), and the loader rejects one
+        // whose 'schema' is not an object — so it holds here by construction. Assert the
+        // invariant instead of dereferencing a nullable field on faith.
+        var schema = Objects.requireNonNull(check.schema(), "json_schema check without a schema");
+        validate(body, schema, "$", failures);
     }
 
     /**
@@ -112,12 +121,12 @@ public final class EvalScorer {
     private static void validate(JsonElement value, JsonObject schema, String path, List<String> failures) {
         var type = schema.has(SchemaKeys.TYPE) ? schema.get(SchemaKeys.TYPE).getAsString() : null;
         if (type != null && !typeMatches(value, type)) {
-            failures.add("json_schema: " + path + ": expected " + type + ", got " + describe(value));
+            failures.add(JSON_SCHEMA + path + ": expected " + type + ", got " + describe(value));
             return; // the nested keywords all assume the type held
         }
         var allowed = schema.getAsJsonArray(SchemaKeys.ENUM);
         if (allowed != null && !allowed.contains(value)) {
-            failures.add("json_schema: " + path + ": " + value + " is not one of " + allowed);
+            failures.add(JSON_SCHEMA + path + ": " + value + " is not one of " + allowed);
         }
         if (value.isJsonObject()) {
             validateObject(value.getAsJsonObject(), schema, path, failures);
@@ -133,29 +142,40 @@ public final class EvalScorer {
     }
 
     private static void validateObject(JsonObject obj, JsonObject schema, String path, List<String> failures) {
+        checkRequired(obj, schema, path, failures);
+        checkProperties(obj, schema, path, failures);
+        checkExtraProperties(obj, schema, path, failures);
+    }
+
+    private static void checkRequired(JsonObject obj, JsonObject schema, String path, List<String> failures) {
         var required = schema.getAsJsonArray(SchemaKeys.REQUIRED);
-        if (required != null) {
-            for (var req : required) {
-                if (!obj.has(req.getAsString())) {
-                    failures.add("json_schema: " + path + ": missing required property '" + req.getAsString() + "'");
-                }
+        if (required == null) return;
+        for (var req : required) {
+            if (!obj.has(req.getAsString())) {
+                failures.add(JSON_SCHEMA + path + ": missing required property '" + req.getAsString() + "'");
             }
         }
+    }
+
+    private static void checkProperties(JsonObject obj, JsonObject schema, String path, List<String> failures) {
         var props = schema.getAsJsonObject(SchemaKeys.PROPERTIES);
-        if (props != null) {
-            for (var entry : props.entrySet()) {
-                var child = obj.get(entry.getKey());
-                if (child != null) {
-                    validate(child, entry.getValue().getAsJsonObject(), path + "." + entry.getKey(), failures);
-                }
+        if (props == null) return;
+        for (var entry : props.entrySet()) {
+            var child = obj.get(entry.getKey());
+            if (child != null) {
+                validate(child, entry.getValue().getAsJsonObject(), path + "." + entry.getKey(), failures);
             }
         }
+    }
+
+    /** {@code additionalProperties: false} only bites when the schema also lists the properties it allows. */
+    private static void checkExtraProperties(JsonObject obj, JsonObject schema, String path, List<String> failures) {
+        var props = schema.getAsJsonObject(SchemaKeys.PROPERTIES);
         var additional = schema.get(SchemaKeys.ADDITIONAL_PROPERTIES);
-        if (props != null && additional != null && !additional.getAsBoolean()) {
-            for (var key : obj.keySet()) {
-                if (!props.has(key)) {
-                    failures.add("json_schema: " + path + ": unexpected property '" + key + "'");
-                }
+        if (props == null || additional == null || additional.getAsBoolean()) return;
+        for (var key : obj.keySet()) {
+            if (!props.has(key)) {
+                failures.add(JSON_SCHEMA + path + ": unexpected property '" + key + "'");
             }
         }
     }

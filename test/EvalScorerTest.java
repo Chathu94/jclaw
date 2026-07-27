@@ -45,7 +45,7 @@ class EvalScorerTest extends UnitTest {
                 caseWith(EvalCheck.of(EvalCheck.Kind.CONTAINS_ALL, List.of("209", "days"))),
                 text("the transfer took 211 days"));
 
-        assertEquals(1, failures.size(), () -> failures.toString());
+        assertEquals(1, failures.size(), failures::toString);
         assertTrue(failures.getFirst().contains("missing \"209\""), failures.getFirst());
     }
 
@@ -115,7 +115,7 @@ class EvalScorerTest extends UnitTest {
         var failures = EvalScorer.failures(caseWith(EvalCheck.schema(schema(INVOICE_SCHEMA))),
                 text("{\"invoiceNumber\": \"INV-2041\", \"total\": 128.5, \"paid\": true}"));
 
-        assertTrue(failures.isEmpty(), () -> failures.toString());
+        assertTrue(failures.isEmpty(), failures::toString);
     }
 
     @Test
@@ -123,7 +123,7 @@ class EvalScorerTest extends UnitTest {
         var failures = EvalScorer.failures(caseWith(EvalCheck.schema(schema(INVOICE_SCHEMA))),
                 text("{\"invoiceNumber\": \"INV-2041\", \"total\": \"128.50\", \"paid\": true}"));
 
-        assertEquals(1, failures.size(), () -> failures.toString());
+        assertEquals(1, failures.size(), failures::toString);
         assertTrue(failures.getFirst().contains("$.total: expected number, got string"), failures.getFirst());
     }
 
@@ -132,7 +132,7 @@ class EvalScorerTest extends UnitTest {
         var failures = EvalScorer.failures(caseWith(EvalCheck.schema(schema(INVOICE_SCHEMA))),
                 text("{\"invoiceNumber\": \"INV-2041\", \"total\": 128.5, \"currency\": \"USD\"}"));
 
-        assertEquals(2, failures.size(), () -> failures.toString());
+        assertEquals(2, failures.size(), failures::toString);
         assertTrue(failures.stream().anyMatch(f -> f.contains("missing required property 'paid'")), failures.toString());
         assertTrue(failures.stream().anyMatch(f -> f.contains("unexpected property 'currency'")), failures.toString());
     }
@@ -165,7 +165,7 @@ class EvalScorerTest extends UnitTest {
         var failures = EvalScorer.failures(caseWith(EvalCheck.schema(arraySchema)),
                 text("{\"planets\": [{\"name\": \"Jupiter\", \"rank\": 1}, {\"name\": \"Saturn\", \"rank\": 2.5}]}"));
 
-        assertEquals(1, failures.size(), () -> failures.toString());
+        assertEquals(1, failures.size(), failures::toString);
         assertTrue(failures.getFirst().contains("$.planets[1].rank: expected integer"), failures.getFirst());
     }
 
