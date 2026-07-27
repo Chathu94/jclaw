@@ -102,9 +102,6 @@ export const TOP_LEVEL_ORDER = [
   'ttft',
   'stream_body',
   'tool_exec',
-  'tool_round_count',
-  'llm_call_count',
-  'llm_call_cached',
   'persist',
   'terminal_tail',
   'total',
@@ -124,22 +121,25 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   tool_exec: 'Tool execution',
   persist: 'Persist',
   total: 'Total',
-  tool_round_count: 'Tool rounds / turn',
-  llm_call_count: 'LLM calls / turn',
-  llm_call_cached: 'Cache-served calls / turn',
   terminal_tail: 'Terminal delivery',
 }
 
 /**
- * Segments whose samples are cardinalities, not durations (JCLAW-882). They ride
- * the same histogram pipeline as the latency segments — that is what gives them
- * percentiles and the agent/channel filters for free — but rendering them through
- * the ms formatter would print "4 ms" for four tool rounds.
+ * Segments whose samples are cardinalities, not durations (JCLAW-882, split out
+ * by JCLAW-884). They ride the same histogram pipeline as the latency segments —
+ * that is what gives them percentiles and the agent/channel filters for free —
+ * but they do not belong in the same *table*.
  *
- * `llm_call_cached` is emitted only on turns that had at least one cache-served
- * call: the backend clamps recorded values to a minimum of 1, so a literal zero
- * would read back as one. Its share of all calls is therefore the ratio of the two
- * segments' sums, not a difference of their percentiles.
+ * Two reasons they are their own view rather than rows with a different unit:
+ * the latency table's Total sums the additive chain, and a cardinality has no
+ * relationship to that summary; and counts want an aggregate durations do not,
+ * the sum across the window, which is the cost number for LLM calls and is
+ * meaningless for a duration.
+ *
+ * The `_count` suffix is honoured as well as the explicit list so a segment the
+ * backend adds later lands in the right view instead of appearing as an unknown
+ * row in the latency table. `llm_call_cached` is named for what it counts rather
+ * than suffixed, so it is listed explicitly.
  */
 const COUNT_SEGMENTS: ReadonlySet<string> = new Set([
   'tool_round_count',
@@ -148,7 +148,64 @@ const COUNT_SEGMENTS: ReadonlySet<string> = new Set([
 ])
 
 export function isCountSegment(key: string): boolean {
-  return COUNT_SEGMENTS.has(key)
+  return COUNT_SEGMENTS.has(key) || key.endsWith('_count')
+}
+
+/** Order of the counts view. Calls first — it is the number the JCLAW-833
+ *  efficiency NFR is written against — then what it decomposes into. */
+export const COUNT_ORDER = ['llm_call_count', 'llm_call_cached', 'tool_round_count'] as const
+
+export const COUNT_LABELS: Record<string, string> = {
+  llm_call_count: 'LLM calls / turn',
+  llm_call_cached: 'Cache-served calls / turn',
+  tool_round_count: 'Tool rounds / turn',
+}
+
+/** Histograms carry a windowed sum alongside the percentiles. Meaningless for a
+ *  duration, which is why nothing surfaced it before; for a count it is the total
+ *  over the window. */
+interface HasSum { count: number, sum_ms?: number }
+
+/**
+ * Share of LLM calls served from the provider's prompt cache, or null when there
+ * is nothing to divide.
+ *
+ * A ratio of SUMS, deliberately — not a difference of percentiles, and not a
+ * ratio of sample counts. Both segments are suppressed at zero and the backend
+ * clamps recorded values to a minimum of 1, so a turn with no cache-served call
+ * emits no `llm_call_cached` sample at all. Comparing p50s or sample counts would
+ * therefore compare different populations; only the summed cardinalities are
+ * commensurable. Do not "simplify" this into a percentile comparison.
+ */
+export function cachedCallShare<H extends HasSum>(metrics: Record<string, H | undefined>): number | null {
+  const total = metrics.llm_call_count?.sum_ms ?? 0
+  const cached = metrics.llm_call_cached?.sum_ms ?? 0
+  if (!total) return null
+  return Math.min(1, cached / total)
+}
+
+/**
+ * Build the rows for the counts view. Mirrors {@link buildLatencyRows} but over
+ * {@link COUNT_ORDER}, and surfaces any unrecognised count-suffixed segment after
+ * the known ones so a new backend counter shows up rather than vanishing between
+ * the two views (the JCLAW-870 rule, applied per-kind).
+ */
+export function buildCountRows<H extends { count: number } = LatencyHistogram>(
+  metrics: Record<string, H | undefined>,
+): LatencyRow<H>[] {
+  const rows: LatencyRow<H>[] = []
+  const seen = new Set<string>()
+  for (const key of COUNT_ORDER) {
+    const h = metrics[key]
+    if (!hasSamples(h)) continue
+    rows.push({ key, label: COUNT_LABELS[key] ?? key, h, isChild: false })
+    seen.add(key)
+  }
+  for (const [key, h] of Object.entries(metrics)) {
+    if (seen.has(key) || !isCountSegment(key) || !hasSamples(h)) continue
+    rows.push({ key, label: COUNT_LABELS[key] ?? key, h, isChild: false })
+  }
+  return rows
 }
 
 /**
@@ -282,6 +339,10 @@ function appendUnknownSegments<H extends { count: number }>(
     // walk, so Total — and any known segment still ahead of it — has not been
     // emitted yet and would otherwise be mistaken for an unknown and duplicated.
     if (seen.has(key) || TOP_LEVEL_KEYS.has(key) || !hasSamples(h)) continue
+    // A cardinality belongs to the counts view (JCLAW-884). Without this it would
+    // land here as an unknown row, which is exactly the mixing the split removes —
+    // and it would sit inside a table whose Total does not summarise it.
+    if (isCountSegment(key)) continue
     rows.push({ key, label: key, h, isChild: false })
     seen.add(key)
   }

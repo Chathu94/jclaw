@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildLatencyRows,
+  buildCountRows,
+  cachedCallShare,
   buildChartSeries,
   isCountSegment,
   listAvailableChannels,
@@ -266,8 +268,11 @@ describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
   })
 })
 
-describe('buildLatencyRows (JCLAW-882 LLM call counts)', () => {
-  it('renders the call counts beside Tool rounds, still above Total', () => {
+describe('count segments live in their own view (JCLAW-884)', () => {
+  it('keeps cardinalities out of the latency table, so Total summarises every row above it', () => {
+    // They used to sit between Tool execution and Persist. The latency table's
+    // Total sums an additive chain of durations and has no meaning for a count,
+    // so three of its own rows were excluded from its organising idea.
     const rows = buildLatencyRows({
       ttft: h(3, 50),
       tool_exec: h(3, 400),
@@ -278,29 +283,76 @@ describe('buildLatencyRows (JCLAW-882 LLM call counts)', () => {
       total: h(3, 800),
     })
     const keys = rows.map(r => r.key)
-    expect(keys).toEqual([
-      'ttft', 'tool_exec', 'tool_round_count',
-      'llm_call_count', 'llm_call_cached',
-      'persist', 'total',
-    ])
+    expect(keys).toEqual(['ttft', 'tool_exec', 'persist', 'total'])
+    expect(keys[keys.length - 1]).toBe('total')
+  })
+
+  it('puts the counts in buildCountRows, calls first', () => {
+    const rows = buildCountRows({
+      ttft: h(3, 50),
+      tool_round_count: h(3, 4),
+      llm_call_count: h(3, 6),
+      llm_call_cached: h(2, 2),
+      total: h(3, 800),
+    })
+    expect(rows.map(r => r.key)).toEqual(['llm_call_count', 'llm_call_cached', 'tool_round_count'])
     expect(rows.find(r => r.key === 'llm_call_count')!.label).toBe('LLM calls / turn')
     expect(rows.find(r => r.key === 'llm_call_cached')!.label).toBe('Cache-served calls / turn')
   })
 
-  it('renders the total without the cached companion, which turns omit at zero', () => {
+  it('omits the cached companion when turns recorded none', () => {
     // The backend clamps recorded values to a minimum of 1, so a turn with no
     // cache hits omits llm_call_cached entirely rather than recording a 0 that
     // would read back as 1.
-    const rows = buildLatencyRows({ llm_call_count: h(3, 1), total: h(3, 800) })
-    expect(rows.map(r => r.key)).toEqual(['llm_call_count', 'total'])
+    expect(buildCountRows({ llm_call_count: h(3, 1) }).map(r => r.key)).toEqual(['llm_call_count'])
   })
 
-  it('classifies count segments so the table can skip the ms unit', () => {
+  it('routes an unrecognised _count segment to the counts view, not the latency table', () => {
+    // The JCLAW-870 rule (nothing silently disappears) applied per-kind: a new
+    // backend counter must surface somewhere, and the right somewhere is here.
+    const metrics = { ttft: h(3, 50), total: h(3, 800), planner_call_count: h(3, 2) }
+    expect(buildLatencyRows(metrics).map(r => r.key)).toEqual(['ttft', 'total'])
+    expect(buildCountRows(metrics).map(r => r.key)).toEqual(['planner_call_count'])
+  })
+
+  it('classifies count segments by explicit name and by _count suffix', () => {
     expect(isCountSegment('llm_call_count')).toBe(true)
     expect(isCountSegment('llm_call_cached')).toBe(true)
     expect(isCountSegment('tool_round_count')).toBe(true)
+    expect(isCountSegment('future_thing_count')).toBe(true)
     expect(isCountSegment('ttft')).toBe(false)
     expect(isCountSegment('total')).toBe(false)
+  })
+})
+
+describe('cachedCallShare (JCLAW-884)', () => {
+  const withSum = (count: number, sum: number) => ({ count, sum_ms: sum })
+
+  it('divides summed cardinalities, not percentiles', () => {
+    // Both segments are suppressed at zero and clamped to a minimum of 1, so a
+    // turn with no cached call emits no sample. Comparing p50s or sample counts
+    // would compare different populations; only the sums are commensurable.
+    const share = cachedCallShare({
+      llm_call_count: withSum(10, 40),
+      llm_call_cached: withSum(6, 10),
+    })
+    expect(share).toBeCloseTo(0.25)
+  })
+
+  it('returns null when no LLM call has been recorded', () => {
+    expect(cachedCallShare({})).toBeNull()
+    expect(cachedCallShare({ llm_call_cached: withSum(2, 3) })).toBeNull()
+  })
+
+  it('treats an absent cached segment as zero rather than undefined', () => {
+    expect(cachedCallShare({ llm_call_count: withSum(4, 9) })).toBe(0)
+  })
+
+  it('clamps to 1 so a clamped-sample artefact cannot report over 100%', () => {
+    expect(cachedCallShare({
+      llm_call_count: withSum(2, 3),
+      llm_call_cached: withSum(2, 5),
+    })).toBe(1)
   })
 })
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ChartBarIcon,
+  HashtagIcon,
   QueueListIcon,
   TableCellsIcon,
   TrashIcon,
@@ -12,7 +13,7 @@ import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
-import { buildLatencyRows, buildChartSeries, isCountSegment, UNKNOWN_CHANNEL } from '~/utils/latency-rows'
+import { buildLatencyRows, buildCountRows, buildChartSeries, cachedCallShare, isCountSegment, UNKNOWN_CHANNEL } from '~/utils/latency-rows'
 
 interface ActiveChannelsResponse {
   count: number
@@ -161,13 +162,24 @@ watch(latencyChannels, (list) => {
 const latencyRows = computed(() =>
   buildLatencyRows<LatencyHistogram>(latencySegments.value),
 )
+const countRows = computed(() =>
+  buildCountRows<LatencyHistogram>(latencySegments.value),
+)
+/** Ratio of summed cardinalities — see cachedCallShare for why it is not a
+ *  percentile comparison. Null when no LLM call has been recorded yet. */
+const cachedShare = computed(() => cachedCallShare(latencySegments.value))
+const hasCountData = computed(() => countRows.value.length > 0,
+)
 const latencyChartSeries = computed(() =>
   buildChartSeries<LatencyHistogram>(latencySegments.value),
 )
 
 const hasLatencyData = computed(() => Object.keys(latencySegments.value).length > 0)
 
-type LatencyView = 'table' | 'chart'
+// JCLAW-884: counts are a third view, not extra rows. The latency table's Total
+// summarises an additive chain of durations; a cardinality has no relationship to
+// it, and counts want an aggregate durations do not — the windowed sum.
+type LatencyView = 'table' | 'chart' | 'counts'
 const latencyView = ref<LatencyView>('table')
 
 // Recent Activity has two views: the EventLog feed ('all') and a video-job status table ('video').
@@ -457,6 +469,22 @@ onBeforeUnmount(() => {
                 aria-hidden="true"
               />
             </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="latencyView === 'counts'"
+              class="p-1.5 transition-colors"
+              :class="latencyView === 'counts'
+                ? 'bg-muted text-fg-strong'
+                : 'text-fg-muted hover:text-fg-strong'"
+              title="Call &amp; round counts"
+              @click="latencyView = 'counts'"
+            >
+              <HashtagIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+            </button>
           </div>
         </div>
         <!-- Window + agent + channel filters, centered — mirrors Chat Compression / Chat Cost. -->
@@ -526,6 +554,93 @@ onBeforeUnmount(() => {
         class="px-4 py-8 text-center text-sm text-fg-muted"
       >
         No latency samples in this window.
+      </div>
+
+      <div
+        v-else-if="latencyView === 'counts'"
+        class="overflow-x-auto"
+      >
+        <!--
+          JCLAW-884: cardinalities live here rather than in the latency table.
+          They ride the same histograms (hence the same percentiles and the same
+          agent/channel/window filters), but the latency table's Total summarises
+          an additive chain of durations and has no meaning for a count — and the
+          windowed Total column below is meaningless for a duration, which is why
+          it appears only in this view.
+        -->
+        <div
+          v-if="!hasCountData"
+          class="px-4 py-8 text-center text-sm text-fg-muted"
+        >
+          No call or round samples in this window.
+        </div>
+        <table
+          v-else
+          class="w-full text-xs"
+        >
+          <thead>
+            <tr class="text-fg-muted border-b border-border">
+              <th class="text-left font-normal px-4 py-2">
+                Metric
+              </th>
+              <th class="text-right font-normal px-3 py-2">
+                turns
+              </th>
+              <th class="text-right font-normal px-3 py-2">
+                total
+              </th>
+              <th class="text-right font-normal px-3 py-2">
+                p50
+              </th>
+              <th class="text-right font-normal px-3 py-2">
+                p90
+              </th>
+              <th class="text-right font-normal px-3 py-2">
+                p99
+              </th>
+              <th class="text-right font-normal px-3 py-2">
+                max
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="row in countRows"
+              :key="row.key"
+              class="border-b border-border last:border-b-0"
+            >
+              <td class="px-4 py-2 text-fg-strong">
+                {{ row.label }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                {{ row.h.count }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ Math.round(row.h.sum_ms ?? 0) }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono">
+                {{ Math.round(row.h.p50_ms) }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono">
+                {{ Math.round(row.h.p90_ms) }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono">
+                {{ Math.round(row.h.p99_ms) }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                {{ Math.round(row.h.max_ms) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p
+          v-if="cachedShare !== null"
+          class="px-4 py-2 text-[11px] text-fg-muted border-t border-border"
+        >
+          {{ (cachedShare * 100).toFixed(1) }}% of LLM calls were served from the
+          provider's prompt cache — a ratio of summed calls, not of percentiles,
+          because a turn with no cached call emits no sample at all.
+        </p>
       </div>
 
       <div

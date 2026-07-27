@@ -102,26 +102,40 @@ describe('Dashboard — Chat Performance latency filters (JCLAW-515)', () => {
     expect(channelOpts).toContain('telegram')
   })
 
-  it('renders LLM calls / turn as a count, not a duration (JCLAW-882)', async () => {
-    const hist = (p50: number) => ({
-      count: 10, sum_ms: 1000, min_ms: p50, max_ms: p50,
+  it('hides count metrics from the latency table and shows them in the counts view (JCLAW-884)', async () => {
+    const hist = (p50: number, sum = 1000) => ({
+      count: 10, sum_ms: sum, min_ms: p50, max_ms: p50,
       p50_ms: p50, p90_ms: p50, p99_ms: p50, p999_ms: p50, buckets: [],
     })
     setupApi({
       latency: {
         since: '2026-06-01T00:00:00Z',
         channels: ['web'],
-        segments: { llm_call_count: hist(3), ttft: hist(30), total: hist(100) },
+        segments: {
+          llm_call_count: hist(3, 40),
+          llm_call_cached: hist(1, 10),
+          ttft: hist(30),
+          total: hist(100),
+        },
       },
     })
     const c = await mountSuspended(Index, { global: { stubs: STUBS } })
     await flushPromises()
 
+    // Default (latency) view: durations only — Total summarises what is above it.
+    expect(c.text()).toContain('Time to first token')
+    expect(c.text()).not.toContain('LLM calls / turn')
+
+    // Switching to the counts view surfaces them, with the cache share derived
+    // from summed calls (10/40 = 25%), not from a percentile comparison.
+    const countsTab = c.findAll('button[role="tab"]').at(2)!
+    await countsTab.trigger('click')
+    await flushPromises()
+
     expect(c.text()).toContain('LLM calls / turn')
-    // The count segments share the latency histogram pipeline, so the ms
-    // formatter would render three model calls as "3 ms".
+    expect(c.text()).toContain('25.0%')
+    // A cardinality must never render through the ms formatter.
     expect(c.text()).not.toContain('3 ms')
-    expect(c.text()).toContain('30 ms')
   })
 })
 
