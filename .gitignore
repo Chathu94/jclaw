@@ -46,6 +46,11 @@ precompiled/
 # `play javadoc` output
 javadoc/
 
+# Eval run output (JCLAW-875). The suites in evals/suites/ ARE tracked — they
+# are the measuring stick. Reports are per-run measurements: keep the ones you
+# want to compare against out of band, not in the history.
+evals/reports/
+
 # Claude Code and OpenAI Codex config.
 # Note: `.claude/*` (contents) instead of `.claude/` (directory) so git can
 # still descend into .claude/ and apply the negations below — git can't

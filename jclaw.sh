@@ -60,7 +60,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|test|dist|bundle|completion|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -97,6 +97,8 @@ Commands:
   status    Show whether backend and frontend are running
   logs      Tail the production application log
   loadtest  Drive the in-process load-test harness against /api/chat/stream
+  evals     Validate the versioned eval dataset in evals/suites, and score a
+            recorded agent run against it. Offline — no backend, no model.
   test      Run backend tests (play autotest), frontend tests (pnpm test),
             and frontend quality gates (stylelint, lint, typecheck), and
             report a consolidated pass/fail summary. Exits non-zero on any
@@ -262,7 +264,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|test|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -288,6 +290,7 @@ usage_for() {
         status)   usage_status   ;;
         logs)     usage_logs     ;;
         loadtest) usage_loadtest ;;
+        evals)    usage_evals    ;;
         test)     usage_test     ;;
         dist)     usage_dist     ;;
         bundle)   usage_bundle   ;;
@@ -745,6 +748,52 @@ EOF
     fi
 }
 
+usage_evals() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: ${INVOKE} evals [--suites <dir>] [--responses <file>] [--baseline <file>] [--out <file>]
+
+Work with the versioned eval dataset in evals/suites (JCLAW-875). Entirely
+offline: it starts no backend, calls no model, and touches no database, so
+running it costs nothing on the serving path.
+
+With no --responses it validates the dataset — every suite parses, every
+check kind is one the scorer implements, every JSON Schema keyword is one it
+enforces — and prints the case/check counts. That is the same validation
+'play autotest' runs, so a malformed suite fails the build, not the next
+eval run.
+
+With --responses it scores a recorded agent run: pass rate, per-case
+latency, failed checks by name, and the LLM calls the run spent.
+
+Options:
+  --suites <dir>     Suite directory (default: evals/suites)
+  --responses <file> A recorded run: {"suite":…, "version":…, "responses":
+                     {"<caseId>": {"output":…, "toolsCalled":[…], "llmCalls":N}}}
+  --baseline <file>  An earlier --out report; exits non-zero if a case that
+                     passed there fails now
+  --out <file>       Write the report as JSON (feed it back as --baseline)
+
+Exit codes: 0 clean, 1 invalid dataset / failing case / regression, 2 usage.
+
+Examples:
+  ${INVOKE} evals                                              # validate the dataset
+  ${INVOKE} evals --responses run.json --out report.json       # score a recorded run
+  ${INVOKE} evals --responses run.json --baseline report.json  # catch regressions
+EOF
+    else
+        cat <<EOF
+Usage: ${INVOKE} evals
+
+Not available in this distribution. The 'evals' command reads the
+evals/ dataset and the compiled app classes from a developer checkout;
+neither ships in a 'play dist' tarball.
+
+For the full list of commands in this distribution: ${INVOKE} help
+EOF
+    fi
+}
+
 usage_test() {
     if is_developer_clone; then
         cat <<EOF
@@ -963,6 +1012,8 @@ LT_PROMPTS_JSON=""
 # outside this repo and can prompt for admin auth — running it should
 # be a deliberate operator choice, not a side-effect of cert rotation.
 HTTPS_INSTALL_CA=false
+# Arguments forwarded verbatim to the eval CLI (services.evals.EvalRunner).
+EVAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1049,6 +1100,24 @@ while [[ $# -gt 0 ]]; do
                 COMPLETION_SHELL="$1"
                 shift
             fi
+            ;;
+        evals)
+            # Developer-only, like the block below — but its flags are NOT
+            # re-declared here. Everything after `evals` is forwarded verbatim
+            # to the Java CLI, which owns the option vocabulary; duplicating it
+            # in this parser would give the two sides a chance to disagree.
+            if ! is_developer_clone; then
+                echo "Error: 'evals' is a developer-only command, not available in this distribution."
+                exit 1
+            fi
+            COMMAND="$1"
+            shift
+            if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+                usage_evals
+                exit 0
+            fi
+            EVAL_ARGS=("$@")
+            break
             ;;
         setup|init-worktree|loadtest|test|dist|bundle)
             # Developer-only commands. Available on a `git clone` because
@@ -3013,6 +3082,41 @@ if segs:
     echo "==> Tip: GET /api/metrics/latency for per-segment histograms"
 }
 
+# ─── Eval dataset (JCLAW-875) ───
+
+# Runs services.evals.EvalRunner over the versioned suites in evals/. Offline:
+# no backend, no model, no DB — so it can run on a laptop mid-edit and costs
+# nothing on the serving path.
+#
+# Invoked as a plain `java -cp`, not through `play`, because the eval classes
+# deliberately depend on nothing from the Play runtime; booting the framework
+# just to read JSON files would trade a 200 ms command for a multi-second one.
+do_evals() {
+    cd "$SCRIPT_DIR"
+
+    local classes="$SCRIPT_DIR/precompiled/java"
+    if [[ ! -d "$classes" ]]; then
+        echo "==> No compiled classes yet — running 'play precompile' first..."
+        check_play
+        play precompile
+    fi
+
+    # Gson ships in the framework's lib/, which is exactly where the H2 jar the
+    # reset path needs lives — reuse that resolver rather than re-deriving the
+    # play install location (it already handles dist, bundle, and jenv-shim
+    # layouts).
+    local h2_jar lib_dir
+    h2_jar=$(locate_h2_jar || true)
+    if [[ -z "$h2_jar" ]]; then
+        echo "Error: cannot locate the Play framework lib/ directory (needed for Gson)."
+        echo "       Ensure 'play' is on PATH: https://github.com/tsukhani/play1"
+        exit 1
+    fi
+    lib_dir=$(dirname "$h2_jar")
+
+    java -cp "$classes:$lib_dir/*" services.evals.EvalRunner ${EVAL_ARGS[@]+"${EVAL_ARGS[@]}"}
+}
+
 # ─── Consolidated test runner ───
 
 # Runs the full pre-push validation suite: backend tests (play autotest),
@@ -3192,6 +3296,7 @@ do_completion() {
             setup         "One-time per-clone bootstrap"
             init-worktree "Per-worktree bootstrap"
             loadtest      "Run the load-test harness"
+            evals         "Validate or score the eval dataset"
             test          "Run backend + frontend tests"
             dist          "Build the developer-distribution zip"
             bundle        "Build the self-contained bundle zip"
@@ -3515,6 +3620,9 @@ case "$COMMAND" in
         ;;
     loadtest)
         do_loadtest
+        ;;
+    evals)
+        do_evals
         ;;
     test)
         check_prereqs

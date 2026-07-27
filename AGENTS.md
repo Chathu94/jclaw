@@ -46,6 +46,19 @@ pnpm audit                # pnpm audit --prod --audit-level=moderate
 pnpm test                 # Vitest (unit)
 ```
 
+### Evals
+```bash
+./jclaw.sh evals                                       # validate the eval dataset
+./jclaw.sh evals --responses run.json --out rep.json   # score a recorded agent run
+```
+
+Versioned agent-behaviour datasets live in `evals/suites/` (`<id>.v<N>.json`);
+`evals/README.md` is the format contract. Runs are offline — no backend, no
+model call, no DB — and `play autotest` validates the dataset via
+`EvalSuiteConformanceTest`, so a malformed suite fails the build. Suites are
+measuring sticks: add cases freely, but change or delete one only by publishing
+a new `.v<N+1>` file beside it, or past pass rates stop comparing.
+
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.
 

@@ -10,6 +10,9 @@ docs/architecture/
 docs/spikes/
 test/
 loadtest/
+# The eval dataset (JCLAW-875) is a development measuring stick — the runner
+# reads it from a checkout, never from a running install.
+evals/
 app/
 frontend/
 AGENTS.md

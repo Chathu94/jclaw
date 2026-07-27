@@ -141,6 +141,7 @@ jclaw/
 │   ├── middleware/               # Global route middleware (auth guard)
 │   ├── public/                   # Static assets
 │   └── nuxt.config.ts            # Nuxt configuration
+├── evals/                        # Versioned agent-behaviour eval datasets
 ├── lib/                          # Custom JARs (if needed)
 ├── modules/                      # Play modules (auto-managed)
 ├── public/                       # Static web assets
@@ -454,6 +455,18 @@ This runs `play autotest` (backend JUnit + functional tests), `pnpm test` (front
 ```
 
 Each check writes its full output to `logs/test-<check>.log` (e.g. `logs/test-backend.log`, `logs/test-typecheck.log`) for post-mortem on failure. The command exits non-zero if any check failed, so it's safe to wire into git hooks or CI.
+
+#### Evals
+
+Agent behaviour is measured against versioned datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
+
+```bash
+./jclaw.sh evals                                              # validate the dataset
+./jclaw.sh evals --responses run.json --out reports/now.json  # score a recorded run
+./jclaw.sh evals --responses run.json --baseline reports/last.json  # catch regressions
+```
+
+Eval runs are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. See [evals/README.md](evals/README.md) for the format and for why a published suite is versioned rather than edited.
 
 #### Pre-push hook (optional)
 
