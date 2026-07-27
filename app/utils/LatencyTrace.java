@@ -38,7 +38,20 @@ public final class LatencyTrace {
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
     private final AtomicLong toolExecMs = new AtomicLong();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
+    private final AtomicInteger llmCallCount = new AtomicInteger();
+    private final AtomicInteger llmCachedCallCount = new AtomicInteger();
     private final AtomicBoolean ended = new AtomicBoolean();
+
+    // Turn binding for the provider dispatch point (JCLAW-882). LlmProvider holds
+    // no reference to the turn's trace, and threading one through every chat /
+    // stream signature would put the counter at N call sites — exactly where a
+    // later planner or critic story could add an uncounted one. A thread binding
+    // lets the single dispatch point resolve the owning turn instead.
+    //
+    // Deliberately a plain ThreadLocal, not inheritable: a thread the turn does
+    // not explicitly hand the binding to (an async subagent running its own turn)
+    // must open its own trace rather than silently billing the parent's.
+    private static final ThreadLocal<LatencyTrace> CURRENT = new ThreadLocal<>();
 
     public LatencyTrace() {
         this(null, 0L);
@@ -114,6 +127,68 @@ public final class LatencyTrace {
     }
 
     /**
+     * Bind {@code trace} to the calling thread so {@link #countLlmCall()} at the
+     * provider dispatch point can attribute a call to it. Close the returned
+     * binding on the same thread — it restores whatever was bound before, so a
+     * nested turn (a subagent turn running inline on a parent's tool thread)
+     * unwinds back to the parent's trace instead of leaving the thread unbound.
+     *
+     * <p>{@code null} is accepted and binds nothing, so dispatch paths that may
+     * or may not be inside a turn need no guard of their own.
+     */
+    public static @NonNull Binding bind(@Nullable LatencyTrace trace) {
+        var prev = CURRENT.get();
+        if (trace == null) CURRENT.remove();
+        else CURRENT.set(trace);
+        return () -> {
+            if (prev == null) CURRENT.remove();
+            else CURRENT.set(prev);
+        };
+    }
+
+    /** Restores the thread's previous trace binding. See {@link #bind}. */
+    @FunctionalInterface
+    public interface Binding extends AutoCloseable {
+        @Override void close();
+    }
+
+    /** The trace bound to the calling thread, or {@code null} outside a turn. */
+    public static @Nullable LatencyTrace current() {
+        return CURRENT.get();
+    }
+
+    /**
+     * Count one chat request dispatched to a provider against the turn bound to
+     * the calling thread (JCLAW-882). Called from the provider's two dispatch
+     * entrypoints, so a planner pass, a critic pass, or a best-of-N sample cannot
+     * add a model call without moving this counter — which is the whole point:
+     * {@code tool_round_count} misses every one of them.
+     *
+     * <p>Counts logical dispatches, not HTTP attempts. A transport retry inside a
+     * single dispatch (5xx, clamped 429 backoff) is latency, not a call the
+     * harness chose to make; failing over to a second provider is a second
+     * dispatch and does count, because a second model genuinely ran.
+     *
+     * <p>No-op outside a turn — skill promotion, prompt generation and scheduled
+     * summarization are not part of anyone's turn, so they have nothing to bill.
+     */
+    public static void countLlmCall() {
+        var trace = CURRENT.get();
+        if (trace != null) trace.llmCallCount.incrementAndGet();
+    }
+
+    /**
+     * Note that the call that just completed had its prompt served (at least in
+     * part) from the provider's cache. An instance method rather than a lookup of
+     * {@link #current()} because the streaming completion callback fires on the
+     * provider's IO thread, which carries no turn binding — the streaming path
+     * captures the trace at dispatch and calls this on it.
+     */
+    public void noteCachedLlmCall() {
+        llmCachedCallCount.incrementAndGet();
+    }
+
+    /**
      * Finalize the trace and submit segment durations to {@link LatencyStats}.
      * Idempotent. Early-exit traces (no {@code PROLOGUE_DONE}) are skipped so
      * histograms reflect actual end-to-end streams, not queue rejections or
@@ -145,6 +220,7 @@ public final class LatencyTrace {
         recordPrologueSubSegments(prologueDone);
         recordStreamSegments(prologueDone);
         recordToolSegments();
+        recordLlmCallSegments();
     }
 
     /**
@@ -215,6 +291,30 @@ public final class LatencyTrace {
             emit("tool_exec", toolExecMs.get());
             emit("tool_round_count", toolRoundCount.get());
         }
+    }
+
+    /**
+     * Per-turn LLM call counts (JCLAW-882) — the measurement basis for the
+     * JCLAW-833 efficiency NFR, which {@code tool_round_count} cannot serve:
+     * it misses the turn's first model call, and it misses every planner,
+     * critic and best-of-N call, none of which is a tool round.
+     *
+     * <p>Both segments are suppressed at zero because {@link LatencyStats}
+     * clamps recorded values to a minimum of 1 (HdrHistogram takes positive
+     * values only), so emitting "0 cache-served calls" would record as 1 and
+     * overstate the cheap share. Read that share as
+     * {@code sum(llm_call_cached) / sum(llm_call_count)} across turns —
+     * percentiles are not additive, so subtracting them would not give it.
+     */
+    private void recordLlmCallSegments() {
+        int calls = llmCallCount.get();
+        if (calls == 0) return;
+        emit("llm_call_count", calls);
+        // A provider can report cached tokens on a call the counter never saw
+        // (a stream that started before the binding was in place); clamp so the
+        // cache-served share can never exceed the calls it is a share of.
+        int cached = Math.min(llmCachedCallCount.get(), calls);
+        if (cached > 0) emit("llm_call_cached", cached);
     }
 
     /** Record one segment to both the live histogram and the persisted time-series. */

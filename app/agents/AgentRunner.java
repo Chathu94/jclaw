@@ -479,7 +479,11 @@ public class AgentRunner {
         var trace = LatencyTrace.forTurn(conversation.channelType, null);
         trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
 
-        try {
+        // JCLAW-882: bind the turn to this thread so every provider dispatch below
+        // — the tool loop's rounds, plus any compaction/summarization call the
+        // prologue makes — counts against this turn's llm_call_count. The binding
+        // closes before the finally block ends the trace.
+        try (var _ = LatencyTrace.bind(trace)) {
             // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
             // boundary. If a /subagent kill landed between queue acquire and now,
             // bail before we burn any LLM budget or persist any state. Inside the

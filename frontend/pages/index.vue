@@ -12,7 +12,7 @@ import type { Agent, LatencyHistogram, LogEvent } from '~/types/api'
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
-import { buildLatencyRows, buildChartSeries, UNKNOWN_CHANNEL } from '~/utils/latency-rows'
+import { buildLatencyRows, buildChartSeries, isCountSegment, UNKNOWN_CHANNEL } from '~/utils/latency-rows'
 
 interface ActiveChannelsResponse {
   count: number
@@ -197,6 +197,15 @@ function formatMs(ms: number): string {
   if (ms < 1) return '<1 ms'
   if (ms < 1000) return `${Math.round(ms)} ms`
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
+}
+
+/**
+ * Format one percentile cell of the Chat Performance table. Count segments
+ * (tool rounds, LLM calls per turn) share the latency histogram pipeline but are
+ * cardinalities — `formatMs` would render four tool rounds as "4 ms".
+ */
+function formatStat(key: string, value: number): string {
+  return isCountSegment(key) ? String(Math.round(value)) : formatMs(value)
 }
 
 async function resetLatency() {
@@ -584,22 +593,22 @@ onBeforeUnmount(() => {
                 {{ row.h.count }}
               </td>
               <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatMs(row.h.p50_ms) }}
+                {{ formatStat(row.key, row.h.p50_ms) }}
               </td>
               <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatMs(row.h.p90_ms) }}
+                {{ formatStat(row.key, row.h.p90_ms) }}
               </td>
               <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatMs(row.h.p99_ms) }}
+                {{ formatStat(row.key, row.h.p99_ms) }}
               </td>
               <td class="text-right font-mono text-fg-primary px-3 py-2">
-                {{ formatMs(row.h.p999_ms) }}
+                {{ formatStat(row.key, row.h.p999_ms) }}
               </td>
               <td class="text-right font-mono text-fg-muted px-3 py-2">
-                {{ formatMs(row.h.min_ms) }}
+                {{ formatStat(row.key, row.h.min_ms) }}
               </td>
               <td class="text-right font-mono text-fg-muted px-3 py-2">
-                {{ formatMs(row.h.max_ms) }}
+                {{ formatStat(row.key, row.h.max_ms) }}
               </td>
             </tr>
           </tbody>

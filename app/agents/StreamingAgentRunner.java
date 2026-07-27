@@ -77,7 +77,11 @@ final class StreamingAgentRunner {
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
             var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, queueReleased);
-            try {
+            // JCLAW-882: bind the turn to this virtual thread so every provider
+            // dispatch on it — round 1, each tool-loop continuation, the empty-
+            // continuation retry, any prologue compaction call — counts against
+            // this turn's llm_call_count.
+            try (var _ = LatencyTrace.bind(trace)) {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments);

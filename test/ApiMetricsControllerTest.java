@@ -91,6 +91,12 @@ class ApiMetricsControllerTest extends FunctionalTest {
         trace.mark(LatencyTrace.STREAM_BODY_END);
         trace.mark(LatencyTrace.PERSIST_DONE);
         trace.addToolRound(2);
+        // JCLAW-882: the call counter rides the same emit, so it must reach the
+        // dashboard through the same endpoint as every other segment.
+        try (var _ = LatencyTrace.bind(trace)) {
+            LatencyTrace.countLlmCall();
+        }
+        trace.noteCachedLlmCall();
         trace.end();
 
         var response = GET("/api/metrics/latency");
@@ -103,6 +109,8 @@ class ApiMetricsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"persist\""), body);
         assertTrue(body.contains("\"tool_exec\""), body);
         assertTrue(body.contains("\"tool_round_count\""), body);
+        assertTrue(body.contains("\"llm_call_count\""), body);
+        assertTrue(body.contains("\"llm_call_cached\""), body);
         assertTrue(body.contains("\"p50_ms\""), body);
         assertTrue(body.contains("\"p99_ms\""), body);
         // Log-bucket distribution is emitted so the dashboard can render a PDF.

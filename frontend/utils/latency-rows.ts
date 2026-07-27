@@ -103,6 +103,8 @@ export const TOP_LEVEL_ORDER = [
   'stream_body',
   'tool_exec',
   'tool_round_count',
+  'llm_call_count',
+  'llm_call_cached',
   'persist',
   'terminal_tail',
   'total',
@@ -123,7 +125,30 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   persist: 'Persist',
   total: 'Total',
   tool_round_count: 'Tool rounds / turn',
+  llm_call_count: 'LLM calls / turn',
+  llm_call_cached: 'Cache-served calls / turn',
   terminal_tail: 'Terminal delivery',
+}
+
+/**
+ * Segments whose samples are cardinalities, not durations (JCLAW-882). They ride
+ * the same histogram pipeline as the latency segments — that is what gives them
+ * percentiles and the agent/channel filters for free — but rendering them through
+ * the ms formatter would print "4 ms" for four tool rounds.
+ *
+ * `llm_call_cached` is emitted only on turns that had at least one cache-served
+ * call: the backend clamps recorded values to a minimum of 1, so a literal zero
+ * would read back as one. Its share of all calls is therefore the ratio of the two
+ * segments' sums, not a difference of their percentiles.
+ */
+const COUNT_SEGMENTS: ReadonlySet<string> = new Set([
+  'tool_round_count',
+  'llm_call_count',
+  'llm_call_cached',
+])
+
+export function isCountSegment(key: string): boolean {
+  return COUNT_SEGMENTS.has(key)
 }
 
 /**
