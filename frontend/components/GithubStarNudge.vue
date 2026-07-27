@@ -96,7 +96,7 @@ router.afterEach(dismiss)
     <div
       v-if="anchored && visible"
       class="fixed z-40 flex items-end gap-1 pointer-events-none select-none
-             text-[#d94f2f] dark:text-[#f4795c]"
+             text-emerald-700 dark:text-emerald-400"
       :style="{ top: `${pos.top}px`, right: `${pos.right}px` }"
       aria-hidden="true"
     >
