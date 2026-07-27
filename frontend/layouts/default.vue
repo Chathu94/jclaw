@@ -644,6 +644,11 @@ const navGroups: NavGroup[] = [
       </main>
     </div>
 
+    <!-- One-time "Leave a star!" pointer at the header's GitHub link. Held
+         back while the tour intro is up so the two don't fight for a first-run
+         user's attention. -->
+    <GithubStarNudge :suppressed="tourIntroOpen" />
+
     <!-- Command Palette -->
     <CommandPalette v-model:open="paletteOpen" />
 

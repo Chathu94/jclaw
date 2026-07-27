@@ -72,6 +72,7 @@ const ariaLabel = computed(() =>
     rel="noopener"
     :aria-label="ariaLabel"
     title="Star JClaw on GitHub"
+    data-star-anchor
     class="flex items-center gap-1.5 shrink-0 pl-2 pr-2.5 py-1.5
            border border-fg-muted/40 rounded-full text-sm
            text-fg-muted hover:text-fg-strong hover:border-ring transition-colors"
