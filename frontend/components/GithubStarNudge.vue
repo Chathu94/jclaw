@@ -120,17 +120,9 @@ router.afterEach(dismiss)
 </template>
 
 <style scoped>
-/* Handwriting comes from whatever the OS already ships rather than a bundled
-   webfont — one decorative element each user sees once didn't justify the
-   dependency. Consequence: the glyphs differ per platform. Bradley Hand
-   (macOS) is the closest to a marker hand; Ink Free and Segoe Print cover
-   Windows. Most Linux boxes ship no handwriting face at all and fall through
-   to generic `cursive`, which fontconfig may resolve to a formal chancery
-   script or to the default sans — the nudge still reads, it just loses the
-   annotated-screenshot feel. */
 .nudge-label {
-  font-family: "Bradley Hand", "Ink Free", "Segoe Print", "Comic Sans MS", cursive;
-  font-weight: 700;
+  font-family: Caveat, cursive;
+  font-weight: 600;
 }
 
 .nudge-enter-active,

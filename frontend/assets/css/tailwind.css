@@ -12,6 +12,14 @@
    plus the woff2 files; Vite picks them up automatically. */
 @import "@fontsource-variable/inter";
 
+/* Handwriting face, used by exactly one element: the "Leave a star!" nudge
+   that points at the header's GitHub link on first load. Imported as the
+   single latin/600 subset (50 KB woff2) rather than the whole family — the
+   nudge renders four words, so the other weights and scripts are dead
+   weight. Self-hosted for the same reason Inter is: instances run
+   air-gapped and can't reach a font CDN. */
+@import "@fontsource/caveat/latin-600.css";
+
 /* Class-based dark mode (preserves v3 darkMode: 'class' behavior).
    The <html> element carries the 'dark' class; useTheme() manages it. */
 @custom-variant dark (&:where(.dark, .dark *));
