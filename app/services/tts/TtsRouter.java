@@ -2,6 +2,7 @@ package services.tts;
 
 import play.Logger;
 import services.ConfigService;
+import services.UvProbe;
 
 /**
  * Dispatches read-aloud synthesis to whichever engine the operator has selected
@@ -132,7 +133,19 @@ public final class TtsRouter {
         var model = modelFor(engine);
         var voice = voiceFor(engine);
         return switch (engine) {
-            case SIDECAR -> SIDECAR.synthesize(text, model, voice, "wav", refAudioFor(engine));
+            case SIDECAR -> {
+                // Without uv the sidecar cannot start, but the client discovers that only
+                // after minutes of building the environment and pulling weights — holding
+                // the JVM-wide sidecar lock throughout. The probe is cached, so checking it
+                // first costs nothing and turns that stall into the same actionable reason
+                // Settings already displays. It also lets synthesizeForVoice reach its JVM
+                // fallback while the turn is still worth saving, which is the entire point
+                // of having a fallback (JCLAW-885).
+                if (!UvProbe.isAvailable()) {
+                    throw new TtsException("TTS sidecar needs 'uv' on PATH: " + UvProbe.lastResult().reason());
+                }
+                yield SIDECAR.synthesize(text, model, voice, "wav", refAudioFor(engine));
+            }
             case JVM -> TtsJvmEngine.synthesize(text, model, voice, null);
         };
     }
