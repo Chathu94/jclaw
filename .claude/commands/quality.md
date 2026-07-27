@@ -101,7 +101,7 @@ Goal: upgrade stale syntax to modern Java 25, behavior-preserving. This codebase
 
 Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the highest-risk pass — a dep can be needed at *runtime* with no compile-time import, so a dropped dep may only fail under `play autotest`, not `compileJava`.
 
-12. **Enumerate** the declared dependencies (per configuration: `implementation`, `testImplementation`, `runtimeOnly`, `compileOnly`, annotation processors, and the composite `/opt/play1` plugin deps). For each, search app + test for imports and reflective/string usage of its packages.
+12. **Enumerate** the declared dependencies (per configuration: `implementation`, `testImplementation`, `runtimeOnly`, `compileOnly`, annotation processors, and the deps the `/opt/play1` plugin contributes). For each, search app + test for imports and reflective/string usage of its packages.
 13. **A dependency is a removal candidate only if** it has zero compile-time imports **and** is not a known runtime-only kind:
     - JDBC drivers (H2, Postgres), logging backends/bridges, SPI/`ServiceLoader` providers, Play 1.x plugins, Gradle plugins, annotation processors (used at build time, not imported), and anything pulled in a resource/config file (`application.conf`, `META-INF/services`).
     - Framework-provided deps: much of the stack (JPA, Play, JUnit) is transitively provided by the `play1` plugin — don't "remove" something the framework owns.

@@ -110,7 +110,8 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - **Play 1.x** conventions: controllers are static methods in `app/controllers/`, models in `app/models/`, views (Groovy templates) in `app/views/`
 - Routes defined in `conf/routes` — uses Play's `{controller}.{action}` catch-all pattern
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
-- Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork (composite build wired in `settings.gradle.kts`)
+- Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork. `settings.gradle.kts` resolves that plugin from a flat `file:///opt/play1/framework/gradle-plugin-repo` Maven repo — **not** `includeBuild("/opt/play1")`, which builds the plugin from source and needs write access into the fork, so it fails on read-only installs. The plugin version is read from the installed fork's `framework/src/play/version`, and `build.gradle.kts` cross-checks that against `.play-version` (plus a pinned range), failing the build on drift. To bump the fork: edit `.play-version` **and** check out the matching version in `/opt/play1`.
+  - Consequence: `/opt/play1` is a separate root build with its own Gradle wrapper, so builds there start their own daemon. `./gradlew --stop` in this repo does not stop it — run it from `/opt/play1` too.
 - Tests in `test/` — JUnit 6 (Jupiter 6.1.0, bundled by the play1 fork in `framework/lib`), extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
