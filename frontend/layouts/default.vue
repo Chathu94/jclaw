@@ -574,7 +574,7 @@ const navGroups: NavGroup[] = [
           </nav>
         </div>
 
-        <!-- Right: search + theme toggle -->
+        <!-- Right: search + theme toggle + GitHub stars -->
         <div class="flex items-center gap-3 min-w-0">
           <button
             class="w-64 min-w-0 flex items-center justify-between pl-3 pr-2.5 py-1.5
@@ -621,6 +621,7 @@ const navGroups: NavGroup[] = [
               />
             </button>
           </div>
+          <GithubStarsButton />
         </div>
       </header>
 
