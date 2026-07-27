@@ -1,6 +1,6 @@
 # JCLAW-881 — Nub as a pnpm replacement (spike)
 
-**Date**: 2026-07-27 · **Verdict: NO for package management and installation. Possible narrow follow-up for script execution only (`nub run` / `nubx`), unbenchmarked.**
+**Date**: 2026-07-27 · **Verdict: NO for package management and installation. Also NO for `nub run` — benchmarked against this repo, it changes test outcomes. `nubx` is sound but the win is ~0.24 s per invocation.**
 
 The blocker is not that Nub is bad. Its pnpm compatibility surface is genuinely
 good, and it clears the one gap that would have ended the evaluation outright.
@@ -89,17 +89,70 @@ Against real numbers from this repo rather than vendor benchmarks:
 pnpm is not the bottleneck. The wins are milliseconds on operations that gate
 nothing; the cost is a supply-chain guard and a deps-cooldown setting.
 
-## Possible follow-up
+## Benchmarked: `nub run` / `nubx` against this repo
 
-`nubx` / `nub run` for **script execution only**, leaving installation on
-corepack + pnpm. That captures the largest claimed multiplier (24×/19×) without
-touching dependency resolution or the integrity guard, and is reversible — it
-changes how scripts are invoked, not what lands in `node_modules`.
+The follow-up proposed above — keep pnpm for installs, use Nub only to *run*
+scripts — was benchmarked with Nub **v0.6.0** on Node v24.18.0, pnpm 11.17.0.
+**It is rejected.** `nub run` is not a transparent substitute for `pnpm run`
+here: it changes test outcomes.
 
-Not benchmarked against this repo. Worth doing before considering, since the
-~2 s figure above is derived from Nub's published numbers rather than measured
-here, and script-runner overhead is only visible when it dominates the script
-itself — which for `vitest`, `vue-tsc` and `nuxi build` it does not.
+### Correctness first — `nub run test` fails 5 files that pnpm passes
+
+| runner | exit | result |
+|---|---|---|
+| `pnpm test` (control) | 0 | `Test Files 111 passed (111)` · 1197 tests |
+| `nub run test` | **1** | `Test Files 5 failed \| 106 passed (111)` · 1192 passed |
+
+Deterministic — the identical five files fail on repeated runs:
+`chat.appcreator-prefill`, `chat.flows`, `chat.page`, `chat`,
+`subagent-rendering`. All five die the same way, a Vue *"Unhandled error during
+execution of render function"* on `modelAutocomplete.open.value` in `chat.vue`.
+
+The likely mechanism: Nub transpiles TS/JSX itself through its Rust oxc addon,
+so running vitest under `nub run` puts a different transpiler in the path than
+the Vite/Nuxt pipeline the suite is written against. That is not a bug to report
+so much as a statement that the runner is not neutral — and a script runner that
+is not neutral cannot be swapped in under a test suite.
+
+### Performance — real, and far too small to matter
+
+Runner overhead in isolation, measured against the tool invoked directly
+(`esbuild --version`, their own headline example):
+
+| invocation | total | overhead above the binary |
+|---|---|---|
+| `./node_modules/.bin/esbuild --version` | 0.346 s | — |
+| `nubx esbuild --version` | 0.373 s | **~27 ms** |
+| `pnpm exec esbuild --version` | 0.609 s | **~263 ms** |
+
+So Nub's overhead claim replicates: roughly 10× less runner overhead, ~236 ms
+saved per invocation, and identical output (`0.28.1` both ways). Note the *19×*
+headline is overhead-only — end to end this is 1.6×, because the binary itself
+costs 346 ms.
+
+Per-run on real gate scripts (derived from timed loops, 3 runs each):
+
+| script | `pnpm` | `nub run` | delta |
+|---|---|---|---|
+| `stylelint` | 1.55 s | 1.18 s | **−0.37 s** |
+| `typecheck` | 6.91 s | 6.36 s | **−0.54 s** |
+| `lint` | 5.34 s | 5.38 s | +0.04 s (noise) |
+| `test` | 16.8 s | 17.7 s | not comparable — different work, see above |
+
+Whole-gate saving is therefore **~0.9 s**, against a frontend gate of ~30 s and
+a backend suite of ~360 s. The fixed overhead is only visible on the shortest
+script and disappears into noise on the longest.
+
+### What this means
+
+`nubx` is sound — same output, ~0.24 s faster per CLI invocation — but nothing
+in this repo invokes one-off CLIs in a loop, so there is no workload to point it
+at. `nub run` is disqualified on correctness regardless of speed.
+
+Prediction logged before measuring was "low single-digit seconds across the
+gate", which held (~0.9 s). The correctness failure was **not** predicted, and
+is the finding that actually decides it — a reminder that a runner swap needs an
+equivalence check, not just a stopwatch.
 
 ## Sources
 
