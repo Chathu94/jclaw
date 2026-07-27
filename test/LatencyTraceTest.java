@@ -17,14 +17,20 @@ class LatencyTraceTest extends UnitTest {
         var trace = LatencyTrace.forTurn(channel, null);
         // PROLOGUE_DONE is required for end() to emit (early-exit traces skip).
         trace.mark(LatencyTrace.PROLOGUE_DONE);
+        // JCLAW-882: the call counter emits from end() too, so it has to be
+        // covered by the same guard — a double emit would double the NFR's
+        // per-turn call distribution.
+        try (var _ = LatencyTrace.bind(trace)) {
+            LatencyTrace.countLlmCall();
+        }
 
         trace.end();
         trace.end(); // must be a no-op
 
-        var total = LatencyStats.snapshot()
-                .getAsJsonObject(channel)
-                .getAsJsonObject("total");
-        assertEquals(1L, total.get("count").getAsLong(),
+        var channelStats = LatencyStats.snapshot().getAsJsonObject(channel);
+        assertEquals(1L, channelStats.getAsJsonObject("total").get("count").getAsLong(),
                 "a second end() must not re-emit the segments");
+        assertEquals(1L, channelStats.getAsJsonObject("llm_call_count").get("count").getAsLong(),
+                "a second end() must not re-emit the LLM call count either");
     }
 }

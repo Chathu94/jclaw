@@ -8,6 +8,7 @@ import models.Agent;
 import models.MessageAttachment;
 import services.EventLogger;
 import services.Tx;
+import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -221,17 +222,31 @@ public final class ParallelToolExecutor {
         var latch = new CountDownLatch(workUnits);
         var ctx = new DispatchContext(
                 toolCalls, agent, conversationId, taskRunId, onStatus, isCancelled, latch);
+        // JCLAW-882: the work-unit threads below inherit nothing, so an LLM call
+        // a tool makes on its own (a subagent's bootstrap summary, a memory
+        // rerank) would dispatch unbound and go uncounted. Hand each unit the
+        // turn's binding so those calls bill the turn that caused them. Same
+        // set-on-the-tool's-own-thread shape as ToolContext.withScope.
+        var turnTrace = LatencyTrace.current();
 
         // One virtual thread per parallel-safe call — full concurrency.
         for (int idx : safeCalls) {
             final int i = idx;
-            Thread.ofVirtual().name("agent-tool-parallel").start(() -> runSafeCall(ctx, results, i));
+            Thread.ofVirtual().name("agent-tool-parallel").start(() -> {
+                try (var _ = LatencyTrace.bind(turnTrace)) {
+                    runSafeCall(ctx, results, i);
+                }
+            });
         }
 
         // One virtual thread per non-parallel-safe tool-name group —
         // calls within execute sequentially in declared order.
         for (var group : unsafeGroups.values()) {
-            Thread.ofVirtual().name("agent-tool-serial").start(() -> runSerialGroup(ctx, results, group));
+            Thread.ofVirtual().name("agent-tool-serial").start(() -> {
+                try (var _ = LatencyTrace.bind(turnTrace)) {
+                    runSerialGroup(ctx, results, group);
+                }
+            });
         }
 
         try {

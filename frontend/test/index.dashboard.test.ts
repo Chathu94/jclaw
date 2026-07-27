@@ -101,6 +101,28 @@ describe('Dashboard — Chat Performance latency filters (JCLAW-515)', () => {
     expect(channelOpts).toContain('web')
     expect(channelOpts).toContain('telegram')
   })
+
+  it('renders LLM calls / turn as a count, not a duration (JCLAW-882)', async () => {
+    const hist = (p50: number) => ({
+      count: 10, sum_ms: 1000, min_ms: p50, max_ms: p50,
+      p50_ms: p50, p90_ms: p50, p99_ms: p50, p999_ms: p50, buckets: [],
+    })
+    setupApi({
+      latency: {
+        since: '2026-06-01T00:00:00Z',
+        channels: ['web'],
+        segments: { llm_call_count: hist(3), ttft: hist(30), total: hist(100) },
+      },
+    })
+    const c = await mountSuspended(Index, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    expect(c.text()).toContain('LLM calls / turn')
+    // The count segments share the latency histogram pipeline, so the ms
+    // formatter would render three model calls as "3 ms".
+    expect(c.text()).not.toContain('3 ms')
+    expect(c.text()).toContain('30 ms')
+  })
 })
 
 describe('Dashboard — workspace disk footprint line', () => {

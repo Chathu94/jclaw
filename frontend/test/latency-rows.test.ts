@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildLatencyRows,
   buildChartSeries,
+  isCountSegment,
   listAvailableChannels,
   type LatencyHistogram,
 } from '~/utils/latency-rows'
@@ -262,6 +263,44 @@ describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
   it('returns an empty list when the payload has no sampled data', () => {
     expect(listAvailableChannels({})).toEqual([])
     expect(listAvailableChannels({ web: {} })).toEqual([])
+  })
+})
+
+describe('buildLatencyRows (JCLAW-882 LLM call counts)', () => {
+  it('renders the call counts beside Tool rounds, still above Total', () => {
+    const rows = buildLatencyRows({
+      ttft: h(3, 50),
+      tool_exec: h(3, 400),
+      tool_round_count: h(3, 4),
+      llm_call_count: h(3, 6),
+      llm_call_cached: h(2, 2),
+      persist: h(3, 8),
+      total: h(3, 800),
+    })
+    const keys = rows.map(r => r.key)
+    expect(keys).toEqual([
+      'ttft', 'tool_exec', 'tool_round_count',
+      'llm_call_count', 'llm_call_cached',
+      'persist', 'total',
+    ])
+    expect(rows.find(r => r.key === 'llm_call_count')!.label).toBe('LLM calls / turn')
+    expect(rows.find(r => r.key === 'llm_call_cached')!.label).toBe('Cache-served calls / turn')
+  })
+
+  it('renders the total without the cached companion, which turns omit at zero', () => {
+    // The backend clamps recorded values to a minimum of 1, so a turn with no
+    // cache hits omits llm_call_cached entirely rather than recording a 0 that
+    // would read back as 1.
+    const rows = buildLatencyRows({ llm_call_count: h(3, 1), total: h(3, 800) })
+    expect(rows.map(r => r.key)).toEqual(['llm_call_count', 'total'])
+  })
+
+  it('classifies count segments so the table can skip the ms unit', () => {
+    expect(isCountSegment('llm_call_count')).toBe(true)
+    expect(isCountSegment('llm_call_cached')).toBe(true)
+    expect(isCountSegment('tool_round_count')).toBe(true)
+    expect(isCountSegment('ttft')).toBe(false)
+    expect(isCountSegment('total')).toBe(false)
   })
 })
 

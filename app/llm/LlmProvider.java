@@ -23,6 +23,7 @@ import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
 import services.EventLogger;
 import utils.HttpKeys;
+import utils.LatencyTrace;
 import utils.PlayConfig;
 import utils.Strings;
 
@@ -364,18 +365,37 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                              String channel) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
+        // JCLAW-882: the sync dispatch point. Counted before the wire call so a
+        // request that ends in an exception still shows as a call the harness
+        // decided to make — the NFR is about decisions, not successes.
+        LatencyTrace.countLlmCall();
         var responseBody = executeWithRetry("/chat/completions", json, timeoutSeconds, channel);
         // A provider can return a 200 whose body is garbage (truncated JSON, an
         // HTML error page, a missing "choices" array). deserializeResponse then
         // throws a raw JsonSyntaxException / IllegalStateException — which
         // chatWithFailover doesn't catch, so the failover never fires. Wrap it as
         // an LlmException so provider-side garbage-with-200 is a failover trigger.
+        ChatResponse response;
         try {
-            return deserializeResponse(responseBody);
+            response = deserializeResponse(responseBody);
         } catch (LlmException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new LlmException("Malformed 200 response from " + config.name(), e);
+        }
+        noteCachedCall(LatencyTrace.current(), response.usage());
+        return response;
+    }
+
+    /**
+     * Companion half of the JCLAW-882 call counter: a call whose prompt came out
+     * of the provider's cache costs a fraction of an uncached one, so the
+     * efficiency NFR needs the split rather than the total alone. No-op outside a
+     * turn or when the provider reports no cache reads.
+     */
+    private static void noteCachedCall(LatencyTrace trace, Usage usage) {
+        if (trace != null && usage != null && usage.cachedTokens() > 0) {
+            trace.noteCachedLlmCall();
         }
     }
 
@@ -391,6 +411,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
                            Integer maxTokens, String thinkingMode, String channel) {
+        // JCLAW-882: the streaming dispatch point. Counted here rather than inside
+        // the virtual thread below, because the turn binding lives on the calling
+        // thread — the stream thread and the provider's IO thread carry none.
+        LatencyTrace.countLlmCall();
         Thread.ofVirtual().name("llm-stream").start(() -> {
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
@@ -439,6 +463,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         accumulator.promptTokenEstimate = TokenUsageEstimator.estimateChatRequest(model, messages, tools);
         var contentBuilder = new StringBuilder();
         var toolCallAccumulator = new HashMap<Integer, ToolCallBuilder>();
+        // JCLAW-882: the completion callback below fires on the provider's IO
+        // thread, which has no turn binding — capture the dispatching thread's
+        // trace so the cache-served half of the counter stays attributable.
+        var trace = LatencyTrace.current();
 
         chatStream(model, messages, tools,
                 chunk -> accumulateChunk(chunk, accumulator, contentBuilder, toolCallAccumulator,
@@ -451,6 +479,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                             model, accumulator.content, accumulator.toolCalls, accumulator.reasoningText());
                     accumulator.reasoningTokenEstimate = TokenUsageEstimator.estimateReasoning(
                             model, accumulator.reasoningText());
+                    noteCachedCall(trace, accumulator.usage);
                     accumulator.markComplete();
                 },
                 e -> {

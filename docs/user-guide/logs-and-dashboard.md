@@ -44,6 +44,18 @@ Latency percentiles for each model, optionally filtered by channel via the in-pa
 
 Use this to spot a slow model or a slow channel before users complain.
 
+Three rows in the table are counts per turn rather than durations, and render without a unit:
+
+| Row                           | What it counts                                                                                          |
+|-------------------------------|---------------------------------------------------------------------------------------------------------|
+| **Tool rounds / turn**        | Tool-execution rounds. A round can carry several tool calls, and it is not a model call.                  |
+| **LLM calls / turn**          | Chat requests dispatched to a provider during the turn — the first call plus every tool-loop continuation, retry-with-nudge, prologue summarization, and any call a tool makes on the turn's behalf. Transport retries behind one dispatch are not separate calls; a failover to a second provider is. |
+| **Cache-served calls / turn** | How many of those had their prompt served from the provider's cache — a much cheaper call than an uncached one. |
+
+Only turns with at least one cache-served call contribute to the last row, so read the cache-served *share* as the ratio of the two rows' totals rather than by subtracting percentiles (percentiles don't subtract).
+
+Watch **LLM calls / turn** when you change agent configuration: it is what tells you whether a change bought its quality with extra model calls.
+
 ### Recent Activity
 
 A live tail of the last 10 events. It shows the same message columns as the [Logs](/logs) page, but **without** the expand chevron — events can't be expanded inline here:
