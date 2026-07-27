@@ -13,12 +13,24 @@
 @import "@fontsource-variable/inter";
 
 /* Handwriting face, used by exactly one element: the "Leave a star!" nudge
-   that points at the header's GitHub link on first load. Imported as the
-   single latin/600 subset (50 KB woff2) rather than the whole family — the
-   nudge renders four words, so the other weights and scripts are dead
-   weight. Self-hosted for the same reason Inter is: instances run
-   air-gapped and can't reach a font CDN. */
-@import "@fontsource/caveat/latin-600.css";
+   that points at the header's GitHub link on first load. Self-hosted for the
+   same reason Inter is: instances run air-gapped and can't reach a font CDN.
+   Only the latin/600 subset — the nudge renders four words, so the rest of
+   the family is dead weight.
+
+   Declared by hand instead of `@import "@fontsource/caveat/latin-600.css"`
+   purely to drop that file's `.woff` fallback. Measured: the browser fetches
+   only the woff2 (verified via the Resource Timing API against a cold cache),
+   so the 61 KB .woff shipped in the build for nobody — it exists for browsers
+   predating 2016, which cannot run this app at all. Halves the font's
+   on-disk footprint, 111 KB → 50 KB, with no user-visible change. */
+@font-face {
+  font-family: Caveat;
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("@fontsource/caveat/files/caveat-latin-600-normal.woff2") format("woff2");
+}
 
 /* Class-based dark mode (preserves v3 darkMode: 'class' behavior).
    The <html> element carries the 'dark' class; useTheme() manages it. */
