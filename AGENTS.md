@@ -210,6 +210,37 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+### 6. Know What Is Verified
+
+**Separate what you ran from what you inferred. Say which is which.**
+
+- **Claims about external systems need the external system.** How Slack renders an audio attachment, what a provider's API accepts, whether a client plays a codec — these are facts about someone else's software, and reading docs or reasoning from adjacent behaviour is inference, not verification. Infer freely; just label it, and don't let an inference reach a commit message or a ticket as fact.
+- **A green result you did not scope is not evidence.** A quality gate can pass because nothing was measured; a test can pass because its fixture avoids the interesting case. Before reporting a pass, check that the thing you care about was actually exercised.
+- **Validate a measurement harness against a known-zero case** before trusting a number it produces. Time a no-op; assert on an empty input. A harness that reports plausible nonsense is worse than no measurement, because it gets believed.
+- **A flake is a defect until proven environmental — and "environmental" means naming the mechanism.** "Re-ran and it passed" is not a diagnosis. There are known interference cases here (a live app on the test port, parallel worktrees); those are identifiable by name, and anything else is a real failure.
+
+### 7. Reach For What Exists
+
+**Instrumentation, helpers, and prior verdicts already in the repo beat improvising.**
+
+- Latency questions have `LatencyStats` / `LatencyTrace`, `/api/metrics`, the `./jclaw.sh loadtest` harness, and JProfiler. Prefer them over a hand-rolled stopwatch.
+- Before deciding a static-analysis finding, check how the same rule was already resolved elsewhere in this project. A verdict that contradicts an established one either needs to change both places or is wrong.
+- Match the existing construction for test fixtures and helpers (`AgentService.create`, `commitInFreshTx`, the probe `setForTest` seams) rather than building a parallel one.
+
+### 8. Comments Carry Reasoning, Not Narration
+
+**Explain why the code is the way it is; never restate what it already says.**
+
+Comments earn their place with design rationale, non-obvious invariants, the failure a guard prevents, and decision provenance (the ticket, the measurement, the bug that motivated it). Everything else is noise that ages badly.
+
+This matters most during refactors: a comment recording *why* a check exists is frequently the only surviving record of a bug that was actually hit, and deleting it as clutter is how the bug comes back. When restructuring code, the comments move with the logic they explain.
+
+### 9. Commit Messages Are Public
+
+`/deploy` pushes to **both** remotes, and the GitHub mirror (`github.com/tsukhani/jclaw`) is **public**. Commit bodies, tags and release notes are published artifacts, not internal notes.
+
+Write them factually: what changed, why, what was verified. That is also what makes them useful internally — the constraint costs nothing. Keep genuinely internal material (credentials, customer specifics, unreleased commercial plans) out of them entirely.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
