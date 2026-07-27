@@ -79,8 +79,21 @@ if [[ -n "$wildcards" ]]; then
     exit 1
 fi
 echo "[jclaw pre-push] Checking import order (spotlessCheck)..."
-if ! (cd "$repo_root" && ./gradlew --quiet spotlessCheck); then
-    echo "[jclaw pre-push] Import order drift in app/ — run ./gradlew spotlessApply, then re-commit." >&2
+# Capture rather than stream so the failure can be classified before this hook
+# names a cause. spotlessCheck exits non-zero for anything that stops the build,
+# including failures during Gradle *configuration* that run no Spotless task at
+# all — the .play-version/fork-mismatch guard in build.gradle.kts is one. This
+# hook used to report every such exit as "Import order drift", which sent the
+# v0.17.8 release chasing a spotlessApply that could not have fixed it.
+# Assigning inside the `if` keeps `set -e` from aborting before we can report.
+if ! spotless_out=$(cd "$repo_root" && ./gradlew --quiet spotlessCheck 2>&1); then
+    printf '%s\n' "$spotless_out" >&2
+    if printf '%s' "$spotless_out" | grep -q 'format violations'; then
+        echo "[jclaw pre-push] Import order drift in app/ — run ./gradlew spotlessApply, then re-commit." >&2
+    else
+        echo "[jclaw pre-push] spotlessCheck failed without reporting format violations." >&2
+        echo "[jclaw pre-push] See the Gradle output above for the real cause; spotlessApply will not fix it." >&2
+    fi
     exit 1
 fi
 
