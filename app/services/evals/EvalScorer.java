@@ -1,0 +1,187 @@
+package services.evals;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
+import tools.SchemaKeys;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.regex.Pattern;
+
+/**
+ * Scores one agent response against an {@link EvalCase}'s checks (JCLAW-875).
+ *
+ * <p>Pure and offline: no model call, no I/O, no clock. Every failure is a
+ * sentence naming the check and what it saw, because a report that only says
+ * "failed" sends the reader back to re-run the case by hand.
+ */
+public final class EvalScorer {
+
+    /**
+     * What the agent produced for one case. {@code toolsCalled} is the tool names in
+     * call order; {@code llmCalls} is the model calls the turn spent (the
+     * {@code llm_call_count} segment JCLAW-882 adds), which is what
+     * {@link EvalCheck.Kind#MAX_LLM_CALLS} asserts against.
+     */
+    public record Response(String output, List<String> toolsCalled, int llmCalls) {
+
+        public Response {
+            output = output == null ? "" : output;
+            toolsCalled = toolsCalled == null ? List.of() : List.copyOf(toolsCalled);
+        }
+    }
+
+    private EvalScorer() {}
+
+    /** The failed checks, as human-readable sentences. Empty means the case passed. */
+    public static List<String> failures(EvalCase testCase, Response response) {
+        var failures = new ArrayList<String>();
+        for (var check : testCase.checks()) {
+            score(check, response, failures);
+        }
+        return List.copyOf(failures);
+    }
+
+    private static void score(EvalCheck check, Response response, List<String> failures) {
+        // Substring matching is case-insensitive: these suites test whether the fact
+        // survived the turn, not how the model capitalised it.
+        var haystack = response.output().toLowerCase(Locale.ROOT);
+        switch (check.kind()) {
+            case CONTAINS_ALL -> {
+                for (var needle : check.args()) {
+                    if (!haystack.contains(needle.toLowerCase(Locale.ROOT))) {
+                        failures.add("contains_all: response is missing \"" + needle + "\"");
+                    }
+                }
+            }
+            case NOT_CONTAINS_ANY -> {
+                for (var needle : check.args()) {
+                    if (haystack.contains(needle.toLowerCase(Locale.ROOT))) {
+                        failures.add("not_contains_any: response contains \"" + needle + "\"");
+                    }
+                }
+            }
+            case MATCHES -> {
+                if (!Pattern.compile(check.arg()).matcher(response.output()).find()) {
+                    failures.add("matches: response does not match /" + check.arg() + "/");
+                }
+            }
+            case JSON_SCHEMA -> scoreSchema(check, response, failures);
+            case TOOL_CALLED -> {
+                if (!response.toolsCalled().contains(check.arg())) {
+                    failures.add("tool_called: " + check.arg() + " was not called (called: "
+                            + response.toolsCalled() + ")");
+                }
+            }
+            case TOOL_NOT_CALLED -> {
+                if (response.toolsCalled().contains(check.arg())) {
+                    failures.add("tool_not_called: " + check.arg() + " was called");
+                }
+            }
+            case MAX_LLM_CALLS -> {
+                if (response.llmCalls() > check.limit()) {
+                    failures.add("max_llm_calls: used " + response.llmCalls() + " calls, budget " + check.limit());
+                }
+            }
+        }
+    }
+
+    private static void scoreSchema(EvalCheck check, Response response, List<String> failures) {
+        JsonElement body;
+        try {
+            body = JsonParser.parseString(response.output());
+        } catch (JsonParseException e) {
+            // Deliberately no fence-stripping or brace-hunting: a caller asking for
+            // structured output gets the raw body, so prose around it is the defect.
+            failures.add("json_schema: response is not valid JSON — " + e.getMessage());
+            return;
+        }
+        validate(body, check.schema(), "$", failures);
+    }
+
+    /**
+     * Validates {@code value} against the JSON Schema subset the loader admits —
+     * type, properties, required, items, enum, additionalProperties. Anything
+     * outside that subset never reaches here: {@link EvalDatasetLoader} rejects it
+     * when the suite is loaded, so this method never silently skips an assertion.
+     */
+    private static void validate(JsonElement value, JsonObject schema, String path, List<String> failures) {
+        var type = schema.has(SchemaKeys.TYPE) ? schema.get(SchemaKeys.TYPE).getAsString() : null;
+        if (type != null && !typeMatches(value, type)) {
+            failures.add("json_schema: " + path + ": expected " + type + ", got " + describe(value));
+            return; // the nested keywords all assume the type held
+        }
+        var allowed = schema.getAsJsonArray(SchemaKeys.ENUM);
+        if (allowed != null && !allowed.contains(value)) {
+            failures.add("json_schema: " + path + ": " + value + " is not one of " + allowed);
+        }
+        if (value.isJsonObject()) {
+            validateObject(value.getAsJsonObject(), schema, path, failures);
+        } else if (value.isJsonArray()) {
+            var items = schema.getAsJsonObject(SchemaKeys.ITEMS);
+            if (items != null) {
+                var arr = value.getAsJsonArray();
+                for (var i = 0; i < arr.size(); i++) {
+                    validate(arr.get(i), items, path + "[" + i + "]", failures);
+                }
+            }
+        }
+    }
+
+    private static void validateObject(JsonObject obj, JsonObject schema, String path, List<String> failures) {
+        var required = schema.getAsJsonArray(SchemaKeys.REQUIRED);
+        if (required != null) {
+            for (var req : required) {
+                if (!obj.has(req.getAsString())) {
+                    failures.add("json_schema: " + path + ": missing required property '" + req.getAsString() + "'");
+                }
+            }
+        }
+        var props = schema.getAsJsonObject(SchemaKeys.PROPERTIES);
+        if (props != null) {
+            for (var entry : props.entrySet()) {
+                var child = obj.get(entry.getKey());
+                if (child != null) {
+                    validate(child, entry.getValue().getAsJsonObject(), path + "." + entry.getKey(), failures);
+                }
+            }
+        }
+        var additional = schema.get(SchemaKeys.ADDITIONAL_PROPERTIES);
+        if (props != null && additional != null && !additional.getAsBoolean()) {
+            for (var key : obj.keySet()) {
+                if (!props.has(key)) {
+                    failures.add("json_schema: " + path + ": unexpected property '" + key + "'");
+                }
+            }
+        }
+    }
+
+    private static boolean typeMatches(JsonElement value, String type) {
+        return switch (type) {
+            case SchemaKeys.OBJECT -> value.isJsonObject();
+            case SchemaKeys.ARRAY -> value.isJsonArray();
+            case SchemaKeys.STRING -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isString();
+            case SchemaKeys.BOOLEAN -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean();
+            case SchemaKeys.NUMBER -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber();
+            // "1" and 1.5 both fail integer: a stringified or fractional id is the
+            // structured-output defect this check exists to catch.
+            case SchemaKeys.INTEGER -> value.isJsonPrimitive() && value.getAsJsonPrimitive().isNumber()
+                    && new BigDecimal(value.getAsString()).stripTrailingZeros().scale() <= 0;
+            default -> throw new IllegalStateException("unsupported schema type: " + type);
+        };
+    }
+
+    private static String describe(JsonElement value) {
+        if (value.isJsonNull()) return "null";
+        if (value.isJsonObject()) return SchemaKeys.OBJECT;
+        if (value.isJsonArray()) return SchemaKeys.ARRAY;
+        var prim = value.getAsJsonPrimitive();
+        if (prim.isString()) return SchemaKeys.STRING;
+        if (prim.isBoolean()) return SchemaKeys.BOOLEAN;
+        return SchemaKeys.NUMBER;
+    }
+}

@@ -67,6 +67,13 @@ pipeline {
                         // no more `play deps --sync` step. `play precompile`
                         // resolves transitively as needed.
                         sh 'play precompile'
+                        // Eval dataset gate (JCLAW-875). EvalSuiteConformanceTest
+                        // covers the same validation under `play autotest`, but
+                        // running it here fails a malformed suite in seconds
+                        // instead of after the full suite — and exercises the
+                        // operator-facing CLI, which is how command rot is caught.
+                        // Free: it reuses the classes precompile just produced.
+                        sh './jclaw.sh evals'
                     }
                 }
                 stage('Frontend') {

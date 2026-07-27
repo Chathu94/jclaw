@@ -1,0 +1,94 @@
+{
+  "id": "structured-output",
+  "version": 1,
+  "description": "When a caller asks for JSON, does the agent emit JSON that actually validates — no prose wrapper, no invented fields, no stringified numbers?",
+  "cases": [
+    {
+      "id": "extract-invoice-fields",
+      "input": "Extract the invoice number, total in dollars, and whether it is paid from this line, as JSON with keys invoiceNumber (string), total (number), paid (boolean) and nothing else: 'INV-2041 — $128.50 — settled 3 June'.",
+      "rubric": "The common structured-extraction shape: right keys, right JSON types, no extras. A stringified total is the usual failure.",
+      "checks": [
+        {
+          "kind": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": ["invoiceNumber", "total", "paid"],
+            "additionalProperties": false,
+            "properties": {
+              "invoiceNumber": { "type": "string" },
+              "total": { "type": "number" },
+              "paid": { "type": "boolean" }
+            }
+          }
+        },
+        { "kind": "contains_all", "args": ["INV-2041"] }
+      ]
+    },
+    {
+      "id": "classify-into-enum",
+      "input": "Classify the sentiment of 'the release slipped again' as JSON: {\"sentiment\": one of positive, neutral, negative}. Output only the JSON.",
+      "rubric": "Closed vocabulary: a near-miss label ('mixed', 'Negative.') is the failure mode a free-text check would wave through.",
+      "checks": [
+        {
+          "kind": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": ["sentiment"],
+            "additionalProperties": false,
+            "properties": {
+              "sentiment": { "type": "string", "enum": ["positive", "neutral", "negative"] }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "array-of-objects",
+      "input": "List the three largest planets in the solar system as JSON: {\"planets\": [{\"name\": string, \"rank\": integer}]}. Output only the JSON.",
+      "rubric": "Nested array-of-objects is where schema adherence usually breaks: a bare array, or rank emitted as a string.",
+      "checks": [
+        {
+          "kind": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": ["planets"],
+            "additionalProperties": false,
+            "properties": {
+              "planets": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["name", "rank"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": { "type": "string" },
+                    "rank": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        { "kind": "contains_all", "args": ["Jupiter"] }
+      ]
+    },
+    {
+      "id": "no-prose-around-json",
+      "input": "Reply with only this JSON object and no other text: {\"ok\": true}",
+      "rubric": "'Here is the JSON you asked for:' and ```json fences both break machine callers; the schema check alone would not catch them.",
+      "checks": [
+        { "kind": "matches", "args": ["^\\s*\\{"] },
+        { "kind": "not_contains_any", "args": ["```"] },
+        {
+          "kind": "json_schema",
+          "schema": {
+            "type": "object",
+            "required": ["ok"],
+            "additionalProperties": false,
+            "properties": { "ok": { "type": "boolean" } }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "id": "grounding",
+  "version": 1,
+  "description": "Does the agent answer from the supplied source only — carrying the right figure, citing the right chunk, and saying so when the source does not contain the answer?",
+  "cases": [
+    {
+      "id": "carries-the-figure-from-source",
+      "input": "Answer using only this source. Source: 'The Falkon-3 probe entered orbit on 14 March 2031 after a transfer lasting 209 days.' Question: how long was the transfer?",
+      "rubric": "The figure is in the source and nowhere near a memorised one; a wrong number here is fabrication, not paraphrase.",
+      "checks": [
+        { "kind": "contains_all", "args": ["209"] },
+        { "kind": "not_contains_any", "args": ["211", "180", "365"] }
+      ]
+    },
+    {
+      "id": "cites-the-chunk-it-used",
+      "input": "Answer using only these sources, citing the chunk label you used. [S1] Ganymede is the largest moon of Jupiter. [S2] Titan is the largest moon of Saturn. [S3] Triton orbits Neptune retrograde. Question: which moon is the largest moon of Saturn?",
+      "rubric": "Citation must point at the chunk that carries the answer; citing every chunk is the cheap way to look grounded.",
+      "checks": [
+        { "kind": "contains_all", "args": ["Titan", "[S2]"] },
+        { "kind": "not_contains_any", "args": ["[S3]"] }
+      ]
+    },
+    {
+      "id": "declines-when-source-is-silent",
+      "input": "Answer using only this source, and say plainly if it does not contain the answer. Source: 'The Falkon-3 probe entered orbit on 14 March 2031 after a transfer lasting 209 days.' Question: what was the probe's launch mass?",
+      "rubric": "The source is silent, so the only correct answer is to say so — this is the case a model passes by guessing a plausible mass.",
+      "checks": [
+        { "kind": "matches", "args": ["(?i)(not|isn't|does ?n[o']t|no) [a-z ]*(state|mention|say|contain|specif|includ|given|available|provided)"] },
+        { "kind": "not_contains_any", "args": ["kg", "kilogram", "tonne"] }
+      ]
+    },
+    {
+      "id": "prefers-source-over-prior-belief",
+      "input": "Answer using only this source, even where it contradicts what you know. Reply with the city name alone. Source: 'In this dataset, the capital of Australia is recorded as Melbourne.' Question: which city does the dataset record as the capital of Australia?",
+      "rubric": "Source and prior belief disagree on purpose; a model that silently substitutes the memorised answer is reciting, not reading.",
+      "checks": [
+        { "kind": "contains_all", "args": ["Melbourne"] },
+        { "kind": "not_contains_any", "args": ["Canberra"] }
+      ]
+    }
+  ]
+}

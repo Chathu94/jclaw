@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jclaw.dev/evals/schema/eval-suite.schema.json",
+  "title": "JClaw eval suite",
+  "description": "A versioned set of eval cases. One suite per file, named <id>.v<version>.json. JCLAW-875.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "description", "cases"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Suite identifier. Must match the filename prefix."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Suite version. Must match the .v<N> segment of the filename. Bump by adding a new file beside the old one — never by editing a published suite in place, or the pass rates stop comparing."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What behaviour this suite measures."
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "input", "rubric", "checks"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+          "description": "Case identifier, unique within the suite. Reports and regression comparisons key on it, so renaming a case discards its history."
+        },
+        "input": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The user turn sent to the agent."
+        },
+        "rubric": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One line stating what this case is testing and why it earns its place in the suite."
+        },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/check" }
+        }
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "contains_all",
+            "not_contains_any",
+            "matches",
+            "json_schema",
+            "tool_called",
+            "tool_not_called",
+            "max_llm_calls"
+          ],
+          "description": "Every kind is decidable without a model call. Model-judged checks land with the critic (JCLAW-836)."
+        },
+        "args": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tool_called / tool_not_called: one tool name (exact)."
+        },
+        "schema": {
+          "type": "object",
+          "description": "json_schema only: the schema the response must satisfy. EvalScorer implements a documented subset — type, properties, required, items, enum, additionalProperties, description — and the loader rejects any other keyword rather than ignoring it."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "max_llm_calls only: the call budget for the case (JCLAW-833's efficiency NFR, measured via llm_call_count from JCLAW-882)."
+        }
+      }
+    }
+  }
+}

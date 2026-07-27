@@ -1,0 +1,54 @@
+{
+  "id": "tool-selection",
+  "version": 1,
+  "description": "Does the agent reach for the right tool, leave the wrong ones alone, and answer without a tool when it already knows?",
+  "cases": [
+    {
+      "id": "current-weather-uses-web-search",
+      "input": "What is the weather in Singapore right now?",
+      "rubric": "Live external fact the model cannot know: must search the web, must not shell out.",
+      "checks": [
+        { "kind": "tool_called", "args": ["web_search"] },
+        { "kind": "tool_not_called", "args": ["exec"] }
+      ]
+    },
+    {
+      "id": "wall-clock-uses-datetime",
+      "input": "What time is it?",
+      "rubric": "The clock is a local tool, not a web fact — searching for it burns a round-trip and returns someone else's timezone.",
+      "checks": [
+        { "kind": "tool_called", "args": ["datetime"] },
+        { "kind": "tool_not_called", "args": ["web_search"] }
+      ]
+    },
+    {
+      "id": "arithmetic-needs-no-tool",
+      "input": "What is 17 times 3? Reply with just the number.",
+      "rubric": "Known-answer question: any tool call here is pure overhead, and a second model call means the first one failed to commit.",
+      "checks": [
+        { "kind": "contains_all", "args": ["51"] },
+        { "kind": "tool_not_called", "args": ["exec"] },
+        { "kind": "tool_not_called", "args": ["web_search"] },
+        { "kind": "max_llm_calls", "limit": 1 }
+      ]
+    },
+    {
+      "id": "recurring-reminder-uses-task-manager",
+      "input": "Remind me every weekday at 9am to check the deploy queue.",
+      "rubric": "A recurring reminder is a scheduled task, not a message the agent can promise to send later.",
+      "checks": [
+        { "kind": "tool_called", "args": ["task_manager"] }
+      ]
+    },
+    {
+      "id": "named-url-uses-fetch-not-search",
+      "input": "Summarise https://example.com/pricing for me.",
+      "rubric": "The URL is already known — searching for it adds a round-trip and can land on a different page than the one asked for.",
+      "checks": [
+        { "kind": "tool_called", "args": ["web_fetch"] },
+        { "kind": "tool_not_called", "args": ["web_search"] },
+        { "kind": "max_llm_calls", "limit": 2 }
+      ]
+    }
+  ]
+}
