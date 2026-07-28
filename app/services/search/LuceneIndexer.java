@@ -1,6 +1,5 @@
 package services.search;
 
-import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -385,17 +384,6 @@ public final class LuceneIndexer {
                     "Lucene upsert failed: scope=%s id=%d: %s"
                             .formatted(scope.name(), id, e.getMessage()));
         }
-    }
-
-    /**
-     * Convenience overload for {@link Scope#TASK_RUN_MESSAGE} — the
-     * existing call-site shape from before JCLAW-304's multi-scope work.
-     * Reads {@link models.TaskRunMessage#content} and delegates to
-     * {@link #upsert(Scope, long, String)}.
-     */
-    public static void upsert(TaskRunMessage m) {
-        if (m == null || m.id == null) return;
-        upsert(Scope.TASK_RUN_MESSAGE, m.id, m.content);
     }
 
     /**

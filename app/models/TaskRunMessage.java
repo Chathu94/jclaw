@@ -121,7 +121,10 @@ public class TaskRunMessage extends Model {
     @PostPersist
     @PostUpdate
     void onIndexUpsert() {
-        LuceneIndexer.upsert(this);
+        if (id != null) {
+            LuceneIndexer.upsert(
+                    LuceneIndexer.Scope.TASK_RUN_MESSAGE, id, content);
+        }
     }
 
     /**

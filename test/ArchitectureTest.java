@@ -146,4 +146,36 @@ class ArchitectureTest extends UnitTest {
                         + "not re-copy it (wave-5 DRY consolidation)");
         rule.check(APP_CLASSES);
     }
+
+    /**
+     * {@code LuceneIndexer} is the one search class invoked <em>from</em> JPA lifecycle
+     * callbacks — every indexed entity calls it from {@code @PostPersist}/{@code @PostUpdate}/
+     * {@code @PostRemove}. A dependency back into {@code models} therefore closes a write-path
+     * loop: an entity hook calls the indexer, which reads another entity. The last such edge was
+     * a pre-JCLAW-304 convenience overload, {@code upsert(TaskRunMessage)}, with a single call
+     * site; inlining it to the explicit {@code upsert(Scope, long, String)} form removed the
+     * import. This rule keeps it removed — the indexer takes scope + id + text, never an entity.
+     *
+     * <p>Deliberately scoped to this one class rather than the whole {@code services.search}
+     * package: the search <em>repositories</em> ({@code DirectLuceneMessageSearchRepository},
+     * {@code MessageSearch}, and the two {@code MessageSearchRepository} implementations) query
+     * and return entities, which is the ordinary services-to-models direction and is not part of
+     * any callback path. A package-wide rule would flag that legitimate traffic.
+     *
+     * <p>Scope note: ArchUnit checks direct dependencies, which is what this rule pins. A
+     * transitive path still exists via {@code services.EventLogger} (the indexer's no-throw
+     * failure log) into {@code models.EventLog} — that one is safe by construction because
+     * {@code EventLogger} queues to a {@code ConcurrentLinkedQueue} and flushes out-of-band,
+     * so no JPA write re-enters from inside a lifecycle callback.
+     */
+    @Test
+    void luceneIndexerDoesNotDependOnModels() {
+        ArchRule rule = noClasses()
+                .that().haveFullyQualifiedName("services.search.LuceneIndexer")
+                .should().dependOnClassesThat().resideInAPackage("models..")
+                .because("LuceneIndexer is called from entity @PostPersist/@PostUpdate/@PostRemove hooks; "
+                        + "depending back on models closes a write-path cycle. It takes scope + id + text, "
+                        + "never an entity");
+        rule.check(APP_CLASSES);
+    }
 }
