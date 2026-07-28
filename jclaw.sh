@@ -139,6 +139,11 @@ Environment:
                           Last-wins for value flags (e.g. MaxDirectMemorySize),
                           so this lets you override most hardcoded settings.
                           Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
+  JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
+                          date. The build is normally skipped unless a
+                          frontend file is newer than public/spa; set this
+                          when a change leaves no newer file (e.g. a
+                          build-time env var) and the SPA must be rebuilt.
 
 Load-test options (only used with the 'loadtest' command):
   --concurrency <n>       Parallel workers (default: 10). Each worker drives
@@ -516,6 +521,11 @@ Environment:
                           (defaults: 512m / 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins for value
                           flags, e.g. -XX:MaxDirectMemorySize=512m).
+  JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
+                          date. The build is normally skipped unless a
+                          frontend file is newer than public/spa; set this
+                          when a change leaves no newer file (e.g. a
+                          build-time env var) and the SPA must be rebuilt.
 
 Examples:
   ${INVOKE} start                              # Production in current directory
@@ -2409,12 +2419,58 @@ do_start_prod() {
         cd "$SCRIPT_DIR/frontend"
         pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
-        echo "==> Generating static SPA..."
-        npx nuxi generate
+        # Rebuild the SPA only when it's actually stale, mirroring the
+        # precompile guard above (JCLAW-887). Two reasons, the second the
+        # important one:
+        #
+        #   - Cost. A warm `nuxi generate` is ~7 s (measured, twice) and was
+        #     being paid on every restart, including backend-only ones.
+        #     jclaw.sh never clears .nuxt or the Vite cache, so the restart
+        #     case is always this warm figure, never a cold build.
+        #   - Update detection. Nuxt's prod buildId is a per-build
+        #     randomUUID() (@nuxt/schema 4.5.0), so an unconditional rebuild
+        #     minted a fresh id even when every Vite content hash was
+        #     byte-identical — verified by two back-to-back builds producing
+        #     an identical chunk set under different ids. Nuxt's
+        #     outdated-build poll ships live in the bundle, so open tabs read
+        #     a backend-only restart as a new frontend version and hard-reload
+        #     on next navigation. Gating the rebuild makes "new id" mean
+        #     "frontend actually changed", which is the correct semantics.
+        #
+        # public/spa's mtime is the threshold: the `cp -r` below stamps it at
+        # build time (cp doesn't preserve mtimes without -p).
+        #
+        # The prunes are load-bearing, not tidiness. `pnpm install` directly
+        # above touches node_modules on every start, so without pruning it the
+        # gate reports stale 100% of the time and silently degrades to the old
+        # unconditional behaviour while appearing to work. .nuxt/.output/.vite
+        # are outputs of the very build being gated, so they'd do the same.
+        #
+        # mtime can't see a change that leaves no newer file (a build-time env
+        # var, say), and a missed input means shipping a frontend change that
+        # never appears — strictly worse than a wasted rebuild. Hence the
+        # escape hatch.
+        spa_rebuild_reason=""
+        if [[ -n "${JCLAW_FORCE_SPA_BUILD:-}" ]]; then
+            spa_rebuild_reason="forced by JCLAW_FORCE_SPA_BUILD"
+        elif [[ ! -d "$SCRIPT_DIR/public/spa" ]]; then
+            spa_rebuild_reason="public/spa is missing"
+        elif [[ -n "$(find . \
+                \( -name node_modules -o -name .nuxt -o -name .output -o -name .vite \) -prune \
+                -o -type f -newer "$SCRIPT_DIR/public/spa" -print -quit 2>/dev/null)" ]]; then
+            spa_rebuild_reason="frontend sources are newer than public/spa"
+        fi
 
-        echo "==> Copying SPA build to public/spa/..."
-        rm -rf "$SCRIPT_DIR/public/spa"
-        cp -r .output/public "$SCRIPT_DIR/public/spa"
+        if [[ -n "$spa_rebuild_reason" ]]; then
+            echo "==> Generating static SPA ($spa_rebuild_reason)..."
+            npx nuxi generate
+
+            echo "==> Copying SPA build to public/spa/..."
+            rm -rf "$SCRIPT_DIR/public/spa"
+            cp -r .output/public "$SCRIPT_DIR/public/spa"
+        else
+            echo "==> Skipping SPA build (public/spa is up to date)"
+        fi
 
         cd "$SCRIPT_DIR"
     else
