@@ -39,10 +39,23 @@ public class ApiController extends Controller {
      *                                 The sidebar compares this against
      *                                 {@code frameworkVersion} and colors a dot
      *                                 green (match) or amber (drift).
+     * @param spaBuildId               the deployed SPA's Nuxt build id, or
+     *                                 {@code null} when the SPA isn't built.
+     *                                 Answers "is this browser on a stale
+     *                                 build?" with one curl instead of an SSH
+     *                                 session — the triage step every report of
+     *                                 the GitHub-issue-9 class needs first.
+     *                                 Only a meaningful signal because
+     *                                 JCLAW-887 gated the SPA rebuild on
+     *                                 staleness: Nuxt derives this id from
+     *                                 {@code randomUUID()} per build, so before
+     *                                 that gate every restart minted a new id
+     *                                 and the field would have reported churn
+     *                                 rather than change.
      */
     public record StatusResponse(String status, String application, String mode,
                                   String applicationVersion, String frameworkVersion,
-                                  String expectedFrameworkVersion) {}
+                                  String expectedFrameworkVersion, String spaBuildId) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     @Operation(summary = "Report service health, app name/version, run mode, and Play framework version vs. expected")
@@ -53,7 +66,8 @@ public class ApiController extends Controller {
                 Play.mode.toString(),
                 Play.configuration.getProperty("application.version", "0.0.0"),
                 Play.version,
-                readExpectedFrameworkVersion());
+                readExpectedFrameworkVersion(),
+                readSpaBuildId());
         renderJSON(GSON.toJson(resp));
     }
 
@@ -71,6 +85,30 @@ public class ApiController extends Controller {
             if (!Files.isRegularFile(path)) return null;
             var raw = Files.readString(path).trim();
             return raw.isEmpty() ? null : raw;
+        } catch (IOException | RuntimeException _) {
+            return null;
+        }
+    }
+
+    /**
+     * The fields of Nuxt's {@code _nuxt/builds/latest.json} we care about.
+     * It also carries a {@code timestamp}; Gson ignores what isn't declared.
+     */
+    private record NuxtBuildManifest(String id) {}
+
+    /**
+     * Read the deployed SPA's build id from
+     * {@code public/spa/_nuxt/builds/latest.json}, or {@code null} when the
+     * SPA isn't built or the manifest is unreadable/malformed. Never throws,
+     * for the same reason as {@link #readExpectedFrameworkVersion()} — a
+     * health check must not 500 over an optional file.
+     */
+    private static String readSpaBuildId() {
+        try {
+            var path = Play.getFile("public/spa/_nuxt/builds/latest.json").toPath();
+            if (!Files.isRegularFile(path)) return null;
+            var manifest = GSON.fromJson(Files.readString(path), NuxtBuildManifest.class);
+            return manifest == null ? null : manifest.id();
         } catch (IOException | RuntimeException _) {
             return null;
         }

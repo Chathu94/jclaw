@@ -2,6 +2,8 @@ import org.junit.jupiter.api.Test;
 import play.test.FunctionalTest;
 import play.mvc.Http.Response;
 
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
 /**
  * JCLAW-315: extend the bare {@link ApplicationTest} coverage by exercising
  * the SPA catch-all branches.
@@ -67,6 +69,76 @@ class ApplicationControllerTest extends FunctionalTest {
                 "spa catch-all must not leak conf/application.conf: " + body);
         assertTrue(status == 200 || status == 404,
                 "traversal must collapse to 200-SPA-shell or 404-not-built, got " + status);
+    }
+
+    /**
+     * The SPA shell must always revalidate: it references content-hashed
+     * {@code _nuxt/} chunks, so a cached index.html keeps pointing at stale
+     * chunk hashes and a new frontend build never reaches users — the bug
+     * GitHub issue 9 reported. The header is a bare {@code response.setHeader}
+     * duplicated in {@code Application.index} and {@code Application.spa} with
+     * no shared call path, so nothing but these two tests stops a refactor
+     * dropping it silently. {@code nuxtCacheControl} is separately unit-tested,
+     * but that pure function isn't where the risk is (JCLAW-886).
+     *
+     * <p>Both tests discriminate on the file rather than the status code:
+     * unbuilt, {@code index} still returns 200 {@code text/html} (a plain
+     * "SPA not built" page) and sets no cache header at all, so a status check
+     * can't tell the branches apart. The fixed {@code public/spa/index.html}
+     * path also can't be created here the way {@code AppAssetCacheControlTest}
+     * creates unique dirs under {@code public/apps} — play1 runs tests
+     * concurrently, so writing it would race and could stomp a real build.
+     */
+    @Test
+    void indexSendsNoCacheOnSpaShell() {
+        assumeTrue(play.Play.getFile("public/spa/index.html").exists(),
+                "SPA not built — no shell to assert the cache header against");
+        Response response = GET("/");
+        assertIsOk(response);
+        assertEquals("no-cache", response.getHeader("Cache-Control"),
+                "the SPA shell must revalidate or stale chunk hashes get pinned");
+    }
+
+    @Test
+    void spaCatchAllSendsNoCacheOnSpaShell() {
+        // Same contract on the client-routing fallback: Application.spa serves
+        // the identical shell, so it carries the identical requirement.
+        assumeTrue(play.Play.getFile("public/spa/index.html").exists(),
+                "SPA not built — no shell to assert the cache header against");
+        Response response = GET("/some/spa/route");
+        assertIsOk(response);
+        assertEquals("no-cache", response.getHeader("Cache-Control"),
+                "the SPA catch-all shell must revalidate, like index");
+    }
+
+    /**
+     * Covers the immutable half of the cache split — and, more importantly,
+     * proves the two no-cache tests above aren't vacuous.
+     *
+     * <p>Play's {@code addEtag} rewrites {@code Cache-Control} to
+     * {@code no-cache} on every response in DEV. If that ran under
+     * {@link FunctionalTest}, the shell assertions would still pass with
+     * {@code Application.index}'s {@code setHeader} deleted, and this whole
+     * regression guard would be theatre. A content-hashed chunk coming back
+     * {@code immutable} is only possible when nothing is rewriting the header,
+     * so this test failing invalidates the two above rather than standing
+     * alone — hence the shared assertion message.
+     */
+    @Test
+    void hashedNuxtChunkIsImmutable() {
+        var nuxtDir = play.Play.getFile("public/spa/_nuxt");
+        assumeTrue(nuxtDir.isDirectory(), "SPA not built — no hashed chunks to probe");
+        var chunk = java.util.Arrays.stream(nuxtDir.listFiles())
+                .filter(f -> f.isFile() && f.getName().endsWith(".js"))
+                .findFirst();
+        assumeTrue(chunk.isPresent(), "no hashed chunk under public/spa/_nuxt");
+
+        Response response = GET("/_nuxt/" + chunk.get().getName());
+        assertIsOk(response);
+        assertEquals("public, max-age=31536000, immutable",
+                response.getHeader("Cache-Control"),
+                "content-hashed chunks must cache for a year; if this reads 'no-cache' "
+                        + "the harness is rewriting headers and the shell tests are vacuous");
     }
 
     @Test

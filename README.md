@@ -390,6 +390,30 @@ You can also set `JCLAW_PORT` in `.env` alongside `docker-compose.yml` instead o
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
+### Running Behind a Reverse Proxy
+
+JClaw already sends the right cache headers, and a proxy that rewrites or ignores them is the one remaining way to serve a stale SPA. The app sends `Cache-Control: no-cache` on the HTML shell (so it always revalidates) and `public, max-age=31536000, immutable` on the content-hashed `_nuxt/` chunks (so they never do). That split only works end-to-end if your proxy leaves it alone.
+
+If you front JClaw with nginx, Caddy, Traefik, or a CDN:
+
+- **Don't cache HTML.** The shell must revalidate on every load, or the browser keeps an `index.html` pointing at chunk hashes that no longer exist.
+- **Pass origin `Cache-Control` through unmodified.** Don't add a blanket `expires` or `proxy_cache_valid` covering all responses.
+- **If you do enable proxy caching, exclude `/` and `/_nuxt/builds/`.** The build manifest under `builds/` advertises the current build id; caching it defeats new-deploy detection. Everything else under `_nuxt/` is content-hashed and safe to cache hard.
+
+Diagnosing a suspected stale SPA: `curl -s localhost:9000/api/status | jq .spaBuildId` reports the build id the server is actually serving. Compare it against the id the browser has (DevTools → Network → `builds/latest.json`). Matching ids mean the browser is current and the problem is elsewhere; differing ids mean a caching layer is holding an old shell.
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:9000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    # Let the app decide cacheability — it already differentiates the
+    # always-revalidate shell from the immutable hashed chunks.
+    proxy_cache off;
+}
+```
+
 #### Browser-trusted HTTPS
 
 The container also exposes HTTPS on **:9443** (with HTTP/3 over the same UDP port) using a self-signed TLS cert generated at `certs/host.cert` on first boot. HTTPS works as-is but browsers show a cert-warning interstitial, and Chrome refuses HTTP/3 entirely — QUIC requires the cert to be in the system trust store. To get browser-trusted HTTPS plus working HTTP/3, sign the cert with [mkcert](https://github.com/FiloSottile/mkcert)'s local CA from your host. Install mkcert via your platform's package manager:
