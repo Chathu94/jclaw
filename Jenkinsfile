@@ -140,15 +140,18 @@ pipeline {
         }
 
         stage('Build') {
+            // A failed backend precompile means nothing downstream can run, so
+            // aborting the sibling SPA build immediately frees the agent instead
+            // of burning a full Nuxt production build for a result no one will
+            // read. Deliberately NOT applied to the Test stage's parallel —
+            // there you want both results even when one side is red.
+            //
+            // failFast is a directive of the stage that CONTAINS the parallel,
+            // a sibling of the parallel block. Putting it inside `parallel {}`
+            // fails the Declarative parser with "Expected a stage", because
+            // only stage entries are legal there.
+            failFast true
             parallel {
-                // A failed backend precompile means nothing downstream can run,
-                // so aborting the sibling SPA build immediately frees the agent
-                // instead of burning a full Nuxt production build for a result
-                // no one will read. Deliberately NOT applied to the Test
-                // stage's parallel — there you want both results even when one
-                // side is red.
-                failFast true
-
                 stage('Backend') {
                     steps {
                         // PF-90: Gradle handles dependency resolution natively;
