@@ -26,19 +26,24 @@ pipeline {
     environment {
         PLAY_HOME = '/opt/play1'
         PATH = "${PLAY_HOME}:${env.PATH}"
-        PNPM_HOME = "${env.WORKSPACE}/.pnpm-store"
         // GRADLE_OPTS: applied to every Gradle launcher invocation in this
-        // pipeline. Two flags worth carrying:
+        // pipeline. Two things worth carrying:
         //   -Dorg.gradle.vfs.watch=false — suppresses the "Already watching
         //     path: <workspace>" warning that Gradle's VFS subsystem emits on
         //     this agent's workspace layout. CI gets nothing from file
         //     watching since every build runs against a fresh checkout.
-        //   -Xmx2g — sizes the launcher (gradlew client) JVM. Without it
-        //     Gradle warns "current JVM process isn't compatible with build
-        //     requirement" and forks a single-use daemon. Harmless but
-        //     noisy. (org.gradle.jvmargs in gradle.properties only sizes
-        //     the daemon, not the launcher.)
-        GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false -Xmx2g'
+        //   -Xmx2g -XX:MaxMetaspaceSize=512m — sizes the launcher (gradlew
+        //     client) JVM to EXACTLY match org.gradle.jvmargs in
+        //     gradle.properties. Gradle compares the launcher's full JVM-arg
+        //     set against that property and forks a single-use daemon on ANY
+        //     difference ("To honour the JVM settings for this build a
+        //     single-use Daemon process will be forked"). Carrying -Xmx2g
+        //     alone still mismatched on the metaspace flag, so the fork
+        //     happened anyway; matching both saves a JVM start per Gradle
+        //     invocation. It also makes -Dorg.gradle.daemon=false genuinely
+        //     run in-process rather than fork, which is what lets the Package
+        //     stage's Gradle see corepack's pnpm shim on PATH.
+        GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false -Xmx2g -XX:MaxMetaspaceSize=512m'
     }
 
     stages {
@@ -50,10 +55,30 @@ pipeline {
                 // `packageManager` field on first invocation, so no hardcoded
                 // version pins here. Bumping the pin in package.json (the
                 // single source of truth) doesn't need a parallel edit to
-                // this file. Download happens inside the install step; the
-                // per-build cache in PNPM_HOME covers repeat invocations.
+                // this file.
+                //
+                // `corepack install` is the read-only validate AGENTS.md calls
+                // layer 3 of the pnpm-pin guard: it downloads the pinned
+                // version on first use and verifies the tarball against the
+                // +sha512- integrity hash on every subsequent run, hard-failing
+                // on a mismatch. It never mutates package.json. This used to
+                // reach CI only indirectly, via ./jclaw.sh dist ->
+                // validate_corepack_pnpm; the Package stage now drives Gradle
+                // directly, so the gate is stated explicitly here instead.
+                //
+                // Deliberately NO PNPM_HOME override. pnpm resolves its
+                // content-addressed store to $PNPM_HOME/store whenever that var
+                // is set, so the previous ${WORKSPACE}/.pnpm-store value put the
+                // store INSIDE the workspace — where post{cleanup{cleanWs}}
+                // deleted it after every build, forcing a full re-download of
+                // the dependency graph from the registry on the next one.
+                // Unset, the store lands at ~/.local/share/pnpm/store and
+                // survives across builds. Tradeoff: store and workspace may now
+                // sit on different filesystems, in which case pnpm copies
+                // instead of hardlinking — far cheaper than re-fetching.
                 sh 'corepack enable'
                 dir('frontend') {
+                    sh 'corepack install'
                     sh 'pnpm install --frozen-lockfile'
                 }
             }
@@ -175,30 +200,55 @@ pipeline {
 
         stage('Package') {
             steps {
-                // ./jclaw.sh dist runs play precompile (Gradle resolves
-                // deps as a transitive step), frontend pnpm install +
-                // nuxi generate, then `play dist` (PlayDistTask). The
-                // resulting zip contains the source tree filtered by
-                // .gitignore + .distignore, plus precompiled/ and
-                // public/spa/ — but NOT the framework jar, framework
-                // lib, Gradle-resolved app deps, or a runtime launcher.
-                // Operators unzipping it need a local Java 25 + Gradle
-                // + Play 1 fork install to assemble the runtime classpath.
-                // Output: dist/jclaw.zip with files prefixed jclaw/
-                // (project.name from settings.gradle.kts).
+                // ONE Gradle invocation, both packaging tasks. This is load-
+                // bearing, not style: playDist and playBundle each declare
+                // `outputs.upToDateWhen { false }` and depend on playPrecompile,
+                // which in turn depends on a Delete task that wipes tmp/ +
+                // precompiled/ first (Play1Plugin.kt:151-163). There is no
+                // incremental reuse to lean on — the previous shape
+                // (`./jclaw.sh dist` then `./gradlew playBundle`, two separate
+                // processes) therefore ran a full clean precompile TWICE.
+                // Gradle executes each task at most once per invocation, so
+                // naming both tasks in one command collapses that to one.
                 //
-                // The self-contained variant (framework, resolved deps, and a
-                // `./play` launcher baked in, JRE-only at runtime) comes from
-                // the playBundle Gradle task — the same artifact the Dockerfile
-                // bakes into the GHCR image. We build it here too via
-                // `./gradlew playBundle` so both the GitHub Release and the
-                // Jenkins artifacts carry the source dist AND the runnable
-                // bundle. Gradle's incremental build skips the precompile + SPA
-                // steps already done above when their inputs are unchanged, so
-                // playBundle's marginal cost is dependency resolution + zip
-                // assembly. Output: dist/jclaw-bundle.zip (same jclaw/ prefix).
-                sh './jclaw.sh dist'
-                sh './gradlew playBundle'
+                // The SPA is still generated twice: the plugin calls
+                // buildFrontendAndCopySpa from inside each task's ACTION rather
+                // than as a shared task, so the task-once rule doesn't reach it.
+                // Deduplicating that is an upstream /opt/play1 change (hoist it
+                // into its own task with declared inputs/outputs).
+                //
+                // -Dorg.gradle.daemon=false for exactly the reason ./jclaw.sh
+                // dist used it (see do_dist): both tasks probe `pnpm --version`
+                // via ExecOperations.exec, which inherits the JVM's
+                // frozen-at-startup PATH. A daemon started before `corepack
+                // enable` — or by an earlier job — wouldn't have the pnpm shim
+                // on PATH and the probe fails. The bare `./gradlew playBundle`
+                // this replaces used the daemon and carried that latent flake.
+                // Because GRADLE_OPTS now matches org.gradle.jvmargs exactly,
+                // this runs in-process and inherits the calling shell's PATH.
+                //
+                // dist/jclaw.zip        source tree filtered by .gitignore +
+                //                       .distignore, plus precompiled/ and
+                //                       public/spa/ — but NOT the framework jar,
+                //                       framework lib, Gradle-resolved app deps,
+                //                       or a runtime launcher. Operators
+                //                       unzipping it need a local Java 25 +
+                //                       Gradle + Play 1 fork install to assemble
+                //                       the runtime classpath.
+                // dist/jclaw-bundle.zip the self-contained variant (framework,
+                //                       resolved deps, and a `./play` launcher
+                //                       baked in, JRE-only at runtime) — the
+                //                       same artifact the Dockerfile bakes into
+                //                       the GHCR image.
+                // Both carry the jclaw/ inner prefix (project.name from
+                // settings.gradle.kts).
+                sh 'GRADLE_OPTS="$GRADLE_OPTS -Dorg.gradle.daemon=false" ./gradlew playDist playBundle'
+
+                // Preserves the existence check ./jclaw.sh dist used to perform.
+                // Neither PlayDistTask nor PlayBundleTask fails if its zip
+                // somehow isn't written, and a silently-empty archiveArtifacts
+                // is worse than a red build.
+                sh 'test -f dist/jclaw.zip && test -f dist/jclaw-bundle.zip'
 
                 // Both zips ride the same archiveArtifacts call, so the bundle
                 // falls under the job's artifact retention
@@ -408,7 +458,20 @@ pipeline {
 
     post {
         cleanup {
-            cleanWs()
+            // Wipe the workspace EXCEPT .gradle/. gradle.properties sets
+            // org.gradle.configuration-cache=true, and Gradle stores those
+            // entries in <project>/.gradle/configuration-cache — so a blanket
+            // cleanWs() guaranteed a cold configuration on every Gradle
+            // invocation (this pipeline runs two or three per build, against a
+            // Kotlin-DSL script that validates the play1 fork and declares a
+            // large dependency graph). Excluding it lets the cache actually
+            // hit. An empty include set means "everything", so the two EXCLUDE
+            // entries below are the whole filter; the second keeps the
+            // directory itself, the first its contents.
+            cleanWs(patterns: [
+                [pattern: '.gradle/**', type: 'EXCLUDE'],
+                [pattern: '.gradle', type: 'EXCLUDE'],
+            ])
         }
     }
 }
