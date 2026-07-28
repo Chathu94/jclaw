@@ -1,3 +1,31 @@
+// Shared prelude for the two GHCR-publishing stages (Release and Publish Dev
+// Container), which previously carried byte-identical inline copies. Must be
+// called from inside a withCredentials block that binds GH_TOKEN.
+//
+// A build with both RELEASE and PUBLISH_DEVCONTAINER set runs this twice. That
+// is deliberate rather than latched: every step here is idempotent, and the
+// repeat costs ~2s (see the binfmt note below) — cheaper than the script-scope
+// gymnastics a CPS-safe latch would need.
+def dockerPrelude() {
+    sh '''
+        echo "$GH_TOKEN" | docker login ghcr.io -u tsukhani --password-stdin
+
+        # Register QEMU user-mode emulation via binfmt_misc on the Jenkins
+        # host so BuildKit can run arm64 binaries (e.g. the arm64 runtime
+        # stage's apt-get) during the cross-arch build. Docker Engine updates
+        # periodically invalidate these registrations, which surfaces as
+        #   .buildkit_qemu_emulator: /bin/sh: Invalid ELF image for this architecture
+        # during arm64 RUN steps. tonistiigi/binfmt --install all is idempotent
+        # (~2s when registrations are fresh, ~5-10s when they need rebuilding),
+        # so it's safe to run every build. Scoping to 'all' covers amd64,
+        # arm64, riscv64, and the less-common platforms; trim if you want to
+        # lock down the allowed target set.
+        docker run --privileged --rm tonistiigi/binfmt --install all
+
+        docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
+    '''
+}
+
 pipeline {
     agent any
 
@@ -6,6 +34,22 @@ pipeline {
             numToKeepStr: '20',
             artifactNumToKeepStr: '5'
         ))
+        // Ceiling, not a target: the longest legitimate run is a RELEASE build
+        // whose arm64 image stage compiles the whole bundle under QEMU
+        // emulation. Without this a hung `play autotest` or a wedged BuildKit
+        // step pins an executor indefinitely.
+        timeout(time: 120, unit: 'MINUTES')
+        // This agent has no per-build test-port isolation: PLAY_TEST_PORT is
+        // seeded into certs/.env by `./jclaw.sh init-worktree` via the
+        // post-checkout hook, and a plain Jenkins SCM checkout runs neither
+        // (core.hooksPath is never configured here, and certs/ is gitignored),
+        // so concurrent `play autotest` runs would collide on the default
+        // port. Overlapping builds would also share the jclaw-builder buildx
+        // instance, ~/.gradle, and any live Gradle daemon.
+        disableConcurrentBuilds()
+        // Requires the Timestamper plugin. Purely diagnostic — drop this line
+        // if the plugin isn't installed on the controller.
+        timestamps()
     }
 
     parameters {
@@ -81,11 +125,30 @@ pipeline {
                     sh 'corepack install'
                     sh 'pnpm install --frozen-lockfile'
                 }
+
+                // Read application.version once. The Sonar and Release stages
+                // both need it and previously ran their own identical grep,
+                // which meant two places to keep in sync with the key name.
+                script {
+                    env.APP_VERSION = sh(
+                        script: "grep '^application.version=' conf/application.conf | cut -d= -f2",
+                        returnStdout: true
+                    ).trim()
+                }
+                echo "application.version = ${env.APP_VERSION}"
             }
         }
 
         stage('Build') {
             parallel {
+                // A failed backend precompile means nothing downstream can run,
+                // so aborting the sibling SPA build immediately frees the agent
+                // instead of burning a full Nuxt production build for a result
+                // no one will read. Deliberately NOT applied to the Test
+                // stage's parallel — there you want both results even when one
+                // side is red.
+                failFast true
+
                 stage('Backend') {
                     steps {
                         // PF-90: Gradle handles dependency resolution natively;
@@ -121,9 +184,24 @@ pipeline {
                         // in conf/application.conf) into the XML format Sonar
                         // expects at sonar.coverage.jacoco.xmlReportPaths.
                         // Runs after play autotest so the exec file is flushed
-                        // to disk; --classfiles points at the prod-mode
-                        // compile from the Build stage, not tmp/classes, so
-                        // the report matches what Sonar's binaries path sees.
+                        // to disk; --classfiles points at precompiled/java from
+                        // the Build stage, not tmp/classes, so the report
+                        // matches what Sonar's binaries path sees.
+                        //
+                        // That works because playPrecompile runs with
+                        // playId="test" (Play1Plugin.kt:160) — so precompiled/
+                        // and the tmp/classes the test JVM actually loaded are
+                        // both Play test-mode-enhanced and carry matching
+                        // class IDs. JaCoCo matches execution data to classes
+                        // by a bytecode CRC and SILENTLY DROPS classes whose
+                        // IDs don't match, producing a report that renders fine
+                        // but understates coverage. If that invariant ever
+                        // breaks, this step's output says so — grep the build
+                        // log for "does not match".
+                        //
+                        // Pointing --classfiles at build/classes/java/main
+                        // instead would be wrong: that is unenhanced javac
+                        // output, so nothing would match at all.
                         sh 'java -jar bin/jacococli.jar report jacoco.exec --classfiles precompiled/java --sourcefiles app --xml jacoco.xml'
                     }
                     post {
@@ -173,27 +251,39 @@ pipeline {
                 // releases. Same pattern used by the 'Cleanup Old Releases'
                 // stage below.
                 //
-                // The quality-gate check (waitForQualityGate) lives OUTSIDE
-                // catchError on purpose (JCLAW-306): once analysis has
+                // The quality-gate check (waitForQualityGate) stays OUTSIDE
+                // that catchError on purpose (JCLAW-306): once analysis has
                 // landed in Sonar, a Failed gate is a real signal about new
-                // code quality and SHOULD abort the build. abortPipeline:
-                // true raises a flow-control error() that bypasses any
-                // surrounding catchError, so the gate is binding even if we
-                // ever wrap it. Timeout caps the polling wait at 5 minutes
-                // so a server hang doesn't pin the executor indefinitely.
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    script {
-                        def appVersion = sh(
-                            script: "grep '^application.version=' conf/application.conf | cut -d= -f2",
-                            returnStdout: true
-                        ).trim()
+                // code quality and SHOULD abort the build. abortPipeline: true
+                // raises a flow-control error() that bypasses any surrounding
+                // catchError, so the gate is binding even if we ever wrap it.
+                // Timeout caps the polling wait at 5 minutes so a server hang
+                // doesn't pin the executor indefinitely.
+                //
+                // But the gate is only reachable when analysis actually ran.
+                // waitForQualityGate reads the analysis task id that the
+                // scanner writes into the build context; if the scanner failed,
+                // it throws "There is no SonarQube analysis in the current
+                // build context" and aborts the build — defeating the whole
+                // point of the catchError above. The `analysed` latch keeps the
+                // gate binding when it can be evaluated and skips it (leaving
+                // the stage UNSTABLE) when it can't.
+                script {
+                    def analysed = false
+                    catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                         withSonarQubeEnv('SonarQube') {
-                            sh "./gradlew sonar -Dsonar.projectVersion=v${appVersion}"
+                            sh "./gradlew sonar -Dsonar.projectVersion=v${env.APP_VERSION}"
                         }
+                        analysed = true
                     }
-                }
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
+                    if (analysed) {
+                        timeout(time: 5, unit: 'MINUTES') {
+                            waitForQualityGate abortPipeline: true
+                        }
+                    } else {
+                        echo 'Sonar analysis did not complete — skipping the quality gate. ' +
+                             'Stage is UNSTABLE; new-code quality was NOT verified for this build.'
+                    }
                 }
             }
         }
@@ -264,9 +354,14 @@ pipeline {
             }
             steps {
                 script {
-                    def version = 'v' + sh(script: "grep '^application.version=' conf/application.conf | cut -d= -f2", returnStdout: true).trim()
-                    sh "echo 'Creating release: ${version}'"
-                    sh "git tag ${version} || true"
+                    def version = "v${env.APP_VERSION}"
+                    echo "Creating release: ${version}"
+
+                    // No local `git tag` here. The one this replaces was never
+                    // pushed, and post{cleanup{cleanWs}} deleted the workspace
+                    // that held it — so it read as if Jenkins owned tagging
+                    // while doing nothing. `gh release create` below creates
+                    // the tag server-side from the repo's default branch.
 
                     // GitHub Release with both the source dist and the runnable
                     // bundle attached (delete existing release if re-running).
@@ -324,25 +419,8 @@ pipeline {
                         // attestation anywhere, so dropping it keeps the
                         // manifest index clean. Flip back to `=true` if
                         // supply-chain requirements emerge.
+                        dockerPrelude()
                         sh """
-                            echo \$GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
-
-                            # Register QEMU user-mode emulation via binfmt_misc
-                            # on the Jenkins host so BuildKit can run arm64
-                            # binaries (e.g. the arm64 runtime stage's apt-get)
-                            # during the cross-arch build. Docker Engine updates
-                            # periodically invalidate these registrations, which
-                            # surfaces as
-                            #   .buildkit_qemu_emulator: /bin/sh: Invalid ELF image for this architecture
-                            # during arm64 RUN steps. tonistiigi/binfmt --install
-                            # all is idempotent (~2s when registrations are fresh,
-                            # ~5-10s when they need rebuilding), so it's safe to
-                            # run every build. Scoping to 'all' covers amd64,
-                            # arm64, riscv64, and the less-common platforms; trim
-                            # if you want to lock down the allowed target set.
-                            docker run --privileged --rm tonistiigi/binfmt --install all
-
-                            docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
                             docker buildx build \\
                                 --provenance=false \\
                                 --platform linux/amd64,linux/arm64 \\
@@ -360,38 +438,41 @@ pipeline {
                 expression { params.PUBLISH_DEVCONTAINER }
             }
             steps {
-                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
-                    // Same multi-arch buildx pattern as the Release stage:
-                    // amd64 covers Intel/AMD Linux + Windows hosts; arm64
-                    // covers Apple Silicon + Linux ARM. Reuses the
-                    // jclaw-builder buildx instance (created in the Release
-                    // stage on the same agent) and the same QEMU binfmt
-                    // refresh so cross-arch RUN steps have working
-                    // emulation. --provenance=false keeps the GHCR package
-                    // index clean (no stray unknown/unknown manifests).
-                    //
-                    // Single :latest tag only — the Dev Container Dockerfile
-                    // changes infrequently (Java/Node/Play/base bumps every
-                    // few months at most for a project this size), and any
-                    // historical state is recoverable from git via
-                    // `git checkout <sha> && docker buildx build .devcontainer/`.
-                    // GHCR's untagged-orphan accumulation rate at this
-                    // publish cadence is negligible; if it ever becomes a
-                    // storage concern, add a cleanup stage modeled on
-                    // `Cleanup Old Releases` below.
-                    sh '''
-                        echo $GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
-
-                        docker run --privileged --rm tonistiigi/binfmt --install all
-
-                        docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
-                        docker buildx build \\
-                            --provenance=false \\
-                            --platform linux/amd64,linux/arm64 \\
-                            -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
-                            --push \\
-                            .devcontainer/
-                    '''
+                // script{} wrapper is required, not cosmetic: Declarative
+                // validates every entry in a steps block (including inside a
+                // block-scoped step like withCredentials) against the known
+                // step list, and dockerPrelude() is a script-level method, not
+                // a step. The Release stage already sits inside a script{}.
+                script {
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                        // Same multi-arch buildx pattern as the Release stage:
+                        // amd64 covers Intel/AMD Linux + Windows hosts; arm64
+                        // covers Apple Silicon + Linux ARM. Shares the
+                        // jclaw-builder buildx instance and the QEMU binfmt
+                        // refresh via dockerPrelude() so cross-arch RUN steps
+                        // have working emulation. --provenance=false keeps the
+                        // GHCR package index clean (no stray unknown/unknown
+                        // manifests).
+                        //
+                        // Single :latest tag only — the Dev Container Dockerfile
+                        // changes infrequently (Java/Node/Play/base bumps every
+                        // few months at most for a project this size), and any
+                        // historical state is recoverable from git via
+                        // `git checkout <sha> && docker buildx build .devcontainer/`.
+                        // GHCR's untagged-orphan accumulation rate at this
+                        // publish cadence is negligible; if it ever becomes a
+                        // storage concern, add a cleanup stage modeled on
+                        // `Cleanup Old Releases` below.
+                        dockerPrelude()
+                        sh '''
+                            docker buildx build \\
+                                --provenance=false \\
+                                --platform linux/amd64,linux/arm64 \\
+                                -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
+                                --push \\
+                                .devcontainer/
+                        '''
+                    }
                 }
             }
         }
