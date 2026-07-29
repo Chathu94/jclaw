@@ -60,7 +60,15 @@ public class ToolRegistry {
             /** No tool of that name is registered — typically a name the model invented. */
             UNKNOWN_TOOL,
             /** Registered, but not among the tools this turn offered the model. */
-            NOT_ENABLED
+            NOT_ENABLED,
+            /**
+             * Registered and offered, but the arguments were absent or unparseable, so the
+             * registry rejected the call before any tool ran — almost always a call truncated
+             * by the model's output-token limit. Distinct from {@code DISPATCHED} because the
+             * tool never executed: counting a truncated call as work inflates {@code toolsCalled}
+             * and spends a {@link ToolResultVerifier} check on a call that never happened.
+             */
+            INVALID_ARGS
         }
 
         /** Back-compat 2-arg form — most tools produce no inline attachment. */
@@ -472,21 +480,17 @@ public class ToolRegistry {
     }
 
     /**
-     * JCLAW-170: rich-output sibling of {@link #execute}. Same validation
-     * semantics (unknown tool, empty args, malformed args); on success
-     * returns the tool's {@link ToolResult} so callers that want the
-     * structured JSON payload (UI surfaces) get it alongside the LLM-visible
-     * text. Tools that don't override {@link Tool#executeRich} fall back
-     * to a text-only result.
-     */
-    public static ToolResult executeRich(String toolName, String argsJson, Agent agent) {
-        return executeRich(toolName, argsJson, agent, null);
-    }
-
-    /**
-     * Dispatch restricted to {@code offered} — the tool names this turn actually put
-     * in front of the model (JCLAW-883). Pass {@code null} to skip the restriction;
-     * every model-driven dispatch passes the real set.
+     * The dispatch path. JCLAW-170 made it rich-output: on success it returns the tool's
+     * {@link ToolResult}, so callers that want the structured JSON payload (UI surfaces)
+     * get it alongside the LLM-visible text. Tools that don't override
+     * {@link Tool#executeRich} fall back to a text-only result.
+     *
+     * <p>Dispatch is restricted to {@code offered} — the tool names this turn actually put
+     * in front of the model (JCLAW-883). Pass {@code null} to skip the restriction; every
+     * model-driven dispatch passes the real set.
+     *
+     * <p>Every rejection here carries a non-{@code DISPATCHED} {@link ToolResult.Outcome},
+     * because nothing downstream can recover that distinction from the text alone.
      */
     public static ToolResult executeRich(String toolName, String argsJson, Agent agent, Set<String> offered) {
         var tool = tools.get(toolName);
@@ -496,38 +500,6 @@ public class ToolRegistry {
         }
         if (notOffered(toolName, offered)) {
             return ToolResult.refused(notEnabledError(toolName), ToolResult.Outcome.NOT_ENABLED);
-        }
-        if (argsJson == null || argsJson.isEmpty()) {
-            return ToolResult.text(
-                    "Error: Tool '%s' received empty arguments. The model's response was likely truncated before the tool call completed. Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call."
-                            .formatted(toolName));
-        }
-        try {
-            JsonParser.parseString(argsJson);
-        } catch (JsonSyntaxException e) {
-            return ToolResult.text(
-                    "Error: Tool '%s' received malformed arguments (likely truncated by the model's output token limit). Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call. Parse error: %s"
-                            .formatted(toolName, e.getMessage()));
-        }
-        try {
-            return tool.executeRich(argsJson, agent);
-        } catch (Exception e) {
-            return ToolResult.text("Error executing tool '%s': %s".formatted(toolName, e.getMessage()));
-        }
-    }
-
-    public static String execute(String toolName, String argsJson, Agent agent) {
-        return execute(toolName, argsJson, agent, null);
-    }
-
-    /** Text-only sibling of {@link #executeRich(String, String, Agent, Set)}. */
-    public static String execute(String toolName, String argsJson, Agent agent, Set<String> offered) {
-        var tool = tools.get(toolName);
-        if (tool == null) {
-            return "Error: Unknown tool '%s'".formatted(toolName);
-        }
-        if (notOffered(toolName, offered)) {
-            return notEnabledError(toolName);
         }
         // Defense-in-depth: validate the args JSON is parseable BEFORE invoking the
         // tool. When the LLM hits its output-token budget mid-tool-call, the
@@ -542,20 +514,39 @@ public class ToolRegistry {
         // teach it to retry with smaller content. Pre-validate here and return a
         // message the LLM can actually act on.
         if (argsJson == null || argsJson.isEmpty()) {
-            return "Error: Tool '%s' received empty arguments. The model's response was likely truncated before the tool call completed. Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call."
-                    .formatted(toolName);
+            return ToolResult.refused(
+                    "Error: Tool '%s' received empty arguments. The model's response was likely truncated before the tool call completed. Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call."
+                            .formatted(toolName),
+                    ToolResult.Outcome.INVALID_ARGS);
         }
         try {
             JsonParser.parseString(argsJson);
         } catch (JsonSyntaxException e) {
-            return "Error: Tool '%s' received malformed arguments (likely truncated by the model's output token limit). Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call. Parse error: %s"
-                    .formatted(toolName, e.getMessage());
+            return ToolResult.refused(
+                    "Error: Tool '%s' received malformed arguments (likely truncated by the model's output token limit). Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call. Parse error: %s"
+                            .formatted(toolName, e.getMessage()),
+                    ToolResult.Outcome.INVALID_ARGS);
         }
         try {
-            return tool.execute(argsJson, agent);
+            return tool.executeRich(argsJson, agent);
         } catch (Exception e) {
-            return "Error executing tool '%s': %s".formatted(toolName, e.getMessage());
+            return ToolResult.text("Error executing tool '%s': %s".formatted(toolName, e.getMessage()));
         }
+    }
+
+    /**
+     * Text-only view of {@link #executeRich}. There is no production caller — the live
+     * dispatch path is {@link ParallelToolExecutor} via {@code executeRich} — but tests that
+     * only assert on the model-visible text read better through this. It delegates so the
+     * guard chain has exactly one definition; the two variants previously duplicated it,
+     * error prose included.
+     *
+     * <p>Equivalent to the rich path for every registered tool: non-overriders inherit
+     * {@link Tool#executeRich}'s default, which wraps {@code execute}, and every tool that
+     * does override it already implements {@code execute} as {@code executeRich(...).text()}.
+     */
+    public static String execute(String toolName, String argsJson, Agent agent) {
+        return executeRich(toolName, argsJson, agent, null).text();
     }
 
     /** Get tool definitions filtered by agent's tool configuration. */

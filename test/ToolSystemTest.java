@@ -1546,6 +1546,39 @@ class ToolSystemTest extends UnitTest {
     }
 
     @Test
+    void truncatedArgsAreRefusedNotReportedAsDispatched() {
+        // A call the registry rejected for unparseable args never reached a tool, so it
+        // must not read as work done. It used to: both arg guards returned
+        // ToolResult.text(), which stamps DISPATCHED. That inflated the eval capture's
+        // toolsCalled on exactly the truncation case the guards exist for, and made
+        // ToolResultVerifier spend a check on a call that never ran.
+        var name = ToolRegistry.listTools().getFirst().name();
+
+        var malformed = ToolRegistry.executeRich(name, "{\"path\":\"foo.docx\"", agent, null);
+        assertEquals(ToolRegistry.ToolResult.Outcome.INVALID_ARGS, malformed.outcome());
+        assertFalse(malformed.dispatched());
+        assertTrue(malformed.text().contains("malformed"), malformed.text());
+
+        var empty = ToolRegistry.executeRich(name, "", agent, null);
+        assertEquals(ToolRegistry.ToolResult.Outcome.INVALID_ARGS, empty.outcome());
+        assertFalse(empty.dispatched());
+        assertTrue(empty.text().contains("empty"), empty.text());
+    }
+
+    @Test
+    void invalidArgsRefusalStillTeachesTheModelToRetrySmaller() {
+        // The model-facing half of the contract, unchanged by the outcome fix: the text
+        // has to name the failure AND carry the retry hint, or the LLM just repeats the
+        // oversized call. Asserted on the rich path because that is what production
+        // dispatches through.
+        var name = ToolRegistry.listTools().getFirst().name();
+
+        var result = ToolRegistry.executeRich(name, "{\"a\":", agent, null);
+        assertTrue(result.text().startsWith("Error:"), result.text());
+        assertTrue(result.text().contains("smaller"), "error must include the retry hint: " + result.text());
+    }
+
+    @Test
     void evalTestAgentGrantsToolsOnlyWhenAskedTo() {
         // JCLAW-883: the eval agent inverts the per-agent default — every tool is
         // opt-in, not just the costly ones. An eval sweep runs unattended against
