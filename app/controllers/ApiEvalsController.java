@@ -120,7 +120,7 @@ public class ApiEvalsController extends Controller {
         if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
         try {
             return body.get(key).getAsInt();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "'%s' must be a number".formatted(key));
             return defaultValue;  // unreachable: error() throws
         }

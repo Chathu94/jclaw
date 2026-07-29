@@ -208,6 +208,7 @@ public final class ParallelToolExecutor {
      * LinkedHashMap preserves first-occurrence order so the unsafe groups,
      * like the safe singletons, see their declared positions.
      */
+    @SuppressWarnings("java:S107") // scheduling state; collapses into DispatchContext once the latch is known
     private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent, Long conversationId,
                                                Long taskRunId, ToolRegistry.ToolResult[] results,
                                                Consumer<String> onStatus, AtomicBoolean isCancelled,
