@@ -7,13 +7,6 @@ import tools.ShellExecTool;
 import utils.LatencyStats;
 import utils.LatencyTrace;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-836 stages 1 and 1.5: the deterministic tool-result checks, and the
  * per-tool post-conditions layered on top of them.

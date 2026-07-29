@@ -2,8 +2,6 @@ import controllers.Application;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 /**
  * Unit coverage for {@link controllers.Application#nuxtCacheControl}: Vite
  * content-hashes every chunk/font filename, so those are cached immutably for a
