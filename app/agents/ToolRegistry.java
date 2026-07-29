@@ -18,6 +18,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -127,6 +128,31 @@ public class ToolRegistry {
          */
         default ToolResult executeRich(String argsJson, Agent agent) {
             return ToolResult.text(execute(argsJson, agent));
+        }
+
+        /**
+         * JCLAW-836: a check this tool can make on its OWN result that the generic
+         * checks in {@link ToolResultVerifier} cannot. Return the reason the result
+         * indicates failure, or empty when nothing is wrong. Costs no model call.
+         *
+         * <p>This lives on the tool because only the tool knows what its own fields
+         * mean. {@code exec} is the worked example: it reports {@code exitCode: -1}
+         * both when it killed a process on timeout AND when it deliberately left one
+         * running for the user to interact with. A generic checker reading exit codes
+         * would flag the second as a failure and be confidently wrong — the same
+         * defect class this whole layer exists to catch, relocated into the catcher.
+         *
+         * <p>Called only for a DISPATCHED result that already passed the generic
+         * checks, so implementations do not re-check for blank text or the
+         * {@code "Error…"} prose convention. They should return empty rather than
+         * throw on anything unexpected; a throw is caught and logged upstream, but it
+         * costs the turn its verification count.
+         *
+         * @param result the result this tool just produced
+         * @return why the result indicates failure, or empty if it does not
+         */
+        default Optional<String> postConditionFailure(ToolResult result) {
+            return Optional.empty();
         }
 
         /** Short one-line summary for the system prompt tool catalog. Defaults to

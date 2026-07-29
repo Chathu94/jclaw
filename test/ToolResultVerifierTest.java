@@ -3,15 +3,18 @@ import agents.ToolResultVerifier;
 import agents.ToolResultVerifier.Verdict;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import tools.ShellExecTool;
 import utils.LatencyStats;
 import utils.LatencyTrace;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * JCLAW-836 stage 1: the deterministic tool-result checks.
+ * JCLAW-836 stages 1 and 1.5: the deterministic tool-result checks, and the
+ * per-tool post-conditions layered on top of them.
  *
  * <p>Exercises {@code check} rather than {@code verify} for the verdict cases, so
  * nothing here writes {@code verification.enabled} or {@code verification.skipTools} —
@@ -20,18 +23,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ToolResultVerifierTest extends UnitTest {
 
+    /** No tool answers to this, so check() exercises the generic path only —
+     *  no dependency on what ToolRegistrationJob happened to publish. */
+    private static final String UNREGISTERED = "__no_such_tool__";
+
     @Test
     void ordinaryResultPasses() {
-        var v = ToolResultVerifier.check(ToolRegistry.ToolResult.text("Singapore is UTC+8."));
+        var v = ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text("Singapore is UTC+8."));
         assertEquals(Verdict.OK, v.verdict());
         assertFalse(v.failed());
     }
 
     @Test
     void blankResultIsEmpty() {
-        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(ToolRegistry.ToolResult.text("")).verdict());
-        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(ToolRegistry.ToolResult.text("   \n ")).verdict());
-        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(ToolRegistry.ToolResult.text(null)).verdict());
+        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text("")).verdict());
+        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text("   \n ")).verdict());
+        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text(null)).verdict());
     }
 
     @Test
@@ -42,7 +49,7 @@ class ToolResultVerifierTest extends UnitTest {
                 "Error: Unknown tool 'nope'",
                 "Error executing tool: connection reset",
                 "Error fetching URL: HTTP 404"}) {
-            var v = ToolResultVerifier.check(ToolRegistry.ToolResult.text(text));
+            var v = ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text(text));
             assertEquals(Verdict.ERROR_REPORTED, v.verdict(), text);
             assertTrue(v.failed(), text);
         }
@@ -59,17 +66,17 @@ class ToolResultVerifierTest extends UnitTest {
                 "The report describes an error in the 1997 census.",
                 "Errors and Omissions Insurance — a primer",
                 "Erroneous data was corrected in v2."}) {
-            assertEquals(Verdict.OK, ToolResultVerifier.check(ToolRegistry.ToolResult.text(text)).verdict(), text);
+            assertEquals(Verdict.OK, ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text(text)).verdict(), text);
         }
     }
 
     @Test
     void unparseableStructuredJsonIsFlagged() {
         var bad = new ToolRegistry.ToolResult("3 results found", "{not json");
-        assertEquals(Verdict.MALFORMED_JSON, ToolResultVerifier.check(bad).verdict());
+        assertEquals(Verdict.MALFORMED_JSON, ToolResultVerifier.check(UNREGISTERED, bad).verdict());
 
         var good = new ToolRegistry.ToolResult("3 results found", "{\"results\":[]}");
-        assertEquals(Verdict.OK, ToolResultVerifier.check(good).verdict());
+        assertEquals(Verdict.OK, ToolResultVerifier.check(UNREGISTERED, good).verdict());
     }
 
     /**
@@ -101,6 +108,95 @@ class ToolResultVerifierTest extends UnitTest {
     void verifyAppliesChecksUnderDefaultConfig() {
         assertEquals(Verdict.ERROR_REPORTED,
                 ToolResultVerifier.verify("datetime", ToolRegistry.ToolResult.text("Error: no such zone")).verdict());
+    }
+
+    // ---- Stage 1.5: per-tool post-conditions ----
+
+    private static String execEnvelope(int exitCode, boolean timedOut) {
+        return "{\"exitCode\":%d,\"output\":\"...\",\"durationMs\":12,\"truncated\":false,\"timedOut\":%s}"
+                .formatted(exitCode, timedOut);
+    }
+
+    @Test
+    void execSuccessHasNoPostConditionFailure() {
+        assertTrue(new ShellExecTool()
+                .postConditionFailure(ToolRegistry.ToolResult.text(execEnvelope(0, false))).isEmpty());
+    }
+
+    @Test
+    void execNonZeroExitIsAFailure() {
+        var reason = new ShellExecTool()
+                .postConditionFailure(ToolRegistry.ToolResult.text(execEnvelope(1, false)));
+        assertEquals("command exited 1", reason.orElse(null));
+    }
+
+    @Test
+    void execTimeoutIsAFailure() {
+        // executeCommand pairs timedOut with exitCode -1, so timedOut must be
+        // checked before the exit code or this lands in the early-return case below.
+        var reason = new ShellExecTool()
+                .postConditionFailure(ToolRegistry.ToolResult.text(execEnvelope(-1, true)));
+        assertEquals("command timed out", reason.orElse(null));
+    }
+
+    /**
+     * The trap this check was written around. {@code buildTerminalImageEarlyReturn}
+     * reports exitCode -1 on a SUCCESS path — a terminal image was detected and the
+     * process is deliberately still running so the user can interact with it. A bare
+     * {@code exitCode != 0} would score every one of those a failure and poison the
+     * very metric this story exists to produce.
+     */
+    @Test
+    void execTerminalImageEarlyReturnIsNotAFailure() {
+        assertTrue(new ShellExecTool()
+                .postConditionFailure(ToolRegistry.ToolResult.text(execEnvelope(-1, false))).isEmpty(),
+                "exitCode -1 with timedOut=false is a process left running for the user, not a failure");
+    }
+
+    @Test
+    void execPostConditionIgnoresNonEnvelopeText() {
+        var tool = new ShellExecTool();
+        // Prose early-returns (allowlist refusal, bad workdir) never reach here in
+        // production — the generic Error check rules first — but the parse must not throw.
+        assertTrue(tool.postConditionFailure(
+                ToolRegistry.ToolResult.text("Error: command is required")).isEmpty());
+        assertTrue(tool.postConditionFailure(ToolRegistry.ToolResult.text("plain output")).isEmpty());
+        assertTrue(tool.postConditionFailure(ToolRegistry.ToolResult.text("[1,2,3]")).isEmpty());
+        assertTrue(tool.postConditionFailure(ToolRegistry.ToolResult.text("{\"output\":\"no exit code\"}")).isEmpty());
+    }
+
+    /** The verifier consults the tool, so a failed command stops scoring a clean pass. */
+    @Test
+    void checkRoutesThroughTheToolsPostCondition() {
+        assertNotNull(ToolRegistry.lookupTool("exec"),
+                "exec must be registered for this wiring assertion to mean anything");
+
+        var failed = ToolResultVerifier.check("exec", ToolRegistry.ToolResult.text(execEnvelope(1, false)));
+        assertEquals(Verdict.POSTCONDITION_FAILED, failed.verdict());
+        assertTrue(failed.failed());
+
+        assertEquals(Verdict.OK,
+                ToolResultVerifier.check("exec", ToolRegistry.ToolResult.text(execEnvelope(0, false))).verdict());
+    }
+
+    /**
+     * Ordering: a tool that announced its failure in prose is ERROR_REPORTED, not
+     * POSTCONDITION_FAILED. The two verdicts answer different questions — "did the
+     * model get told" versus "did anyone notice" — and collapsing them would waste
+     * the distinction the critic decision rests on.
+     */
+    @Test
+    void announcedFailureStaysErrorReportedRatherThanPostcondition() {
+        assertEquals(Verdict.ERROR_REPORTED,
+                ToolResultVerifier.check("exec",
+                        ToolRegistry.ToolResult.text("Error: command is required")).verdict());
+    }
+
+    /** An unregistered name passes: MCP tools come and go with their server. */
+    @Test
+    void unknownToolNamePasses() {
+        assertEquals(Verdict.OK,
+                ToolResultVerifier.check(UNREGISTERED, ToolRegistry.ToolResult.text("anything")).verdict());
     }
 
     /**

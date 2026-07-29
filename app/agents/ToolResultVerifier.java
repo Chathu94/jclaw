@@ -30,7 +30,17 @@ import java.util.stream.Collectors;
  *
  * <h2>What the verdicts mean</h2>
  *
- * <p>{@link Verdict#EMPTY} and {@link Verdict#ERROR_REPORTED} are the two shapes
+ * <h2>Two layers</h2>
+ *
+ * <p>Generic checks first — they know nothing about any particular tool, so they can
+ * only judge how a result is <em>framed</em>: blank, or prefixed with the codebase's
+ * "Error…" convention. Then the tool's own {@code postConditionFailure}, which knows
+ * what its fields mean. That second layer exists because the first has a blind spot
+ * with teeth: {@code exec} returns {@code {"exitCode":1,…}} on a failed command, which
+ * is neither blank nor "Error…"-prefixed, so a failed command scored a clean pass until
+ * stage 1.5 added it.
+ *
+ * <p>{@link Verdict#EMPTY} and {@link Verdict#ERROR_REPORTED} are the two generic shapes
  * that actually occur. The error convention is real rather than assumed: the
  * registry returns "Error: Unknown tool …" and "Error executing tool …", and
  * tools follow it themselves — {@code web_fetch} returns "Error fetching URL:
@@ -72,6 +82,14 @@ public final class ToolResultVerifier {
         ERROR_REPORTED,
         /** The tool emitted a structuredJson payload that does not parse. */
         MALFORMED_JSON,
+        /**
+         * The tool's own post-condition says the result is a failure (JCLAW-836,
+         * stage 1.5). Distinct from {@link #ERROR_REPORTED} on purpose: that one means
+         * the tool announced its failure in prose the model can read, this one means
+         * the tool did NOT announce it and only the tool's own check found it. Those
+         * are different defects, and a critic is only worth paying for on the second.
+         */
+        POSTCONDITION_FAILED,
         /** Verification was switched off for this tool, or globally. Not a pass — an absence of one. */
         SKIPPED
     }
@@ -100,7 +118,7 @@ public final class ToolResultVerifier {
         if (parseSkipTools(ConfigService.get(CFG_SKIP_TOOLS, "")).contains(normalize(toolName))) {
             return Verification.skipped();
         }
-        return check(result);
+        return check(toolName, result);
     }
 
     /**
@@ -108,8 +126,13 @@ public final class ToolResultVerifier {
      * {@link #verify} so the verdicts can be tested without writing the two config
      * keys — this project runs test classes concurrently, so a test that flipped a
      * process-global setting would change behaviour under whatever else is running.
+     *
+     * <p>Generic checks first, the tool's own post-condition last. A tool that
+     * already said {@code "Error…"} should be {@link Verdict#ERROR_REPORTED}: it
+     * announced the failure to the model, which is materially different from a
+     * failure only its post-condition can see.
      */
-    public static Verification check(ToolRegistry.ToolResult result) {
+    public static Verification check(String toolName, ToolRegistry.ToolResult result) {
         var text = result.text();
         if (text == null || text.isBlank()) {
             return new Verification(Verdict.EMPTY, "tool returned no text");
@@ -121,7 +144,25 @@ public final class ToolResultVerifier {
         if (structured != null && !structured.isBlank() && !parses(structured)) {
             return new Verification(Verdict.MALFORMED_JSON, "structuredJson does not parse");
         }
-        return Verification.ok();
+        return postCondition(toolName, result);
+    }
+
+    /**
+     * Ask the tool about its own result. An unregistered name yields a pass rather
+     * than a failure — MCP tools come and go with their server, and a name that no
+     * longer resolves says nothing about the result it produced.
+     *
+     * <p>A throw from a tool's own check is deliberately NOT swallowed here. It
+     * propagates to the caller's guard in {@code ParallelToolExecutor}, which logs it
+     * and drops the count. Catching it silently would leave a broken post-condition
+     * reporting clean verdicts forever.
+     */
+    private static Verification postCondition(String toolName, ToolRegistry.ToolResult result) {
+        var tool = ToolRegistry.lookupTool(toolName);
+        if (tool == null) return Verification.ok();
+        return tool.postConditionFailure(result)
+                .map(reason -> new Verification(Verdict.POSTCONDITION_FAILED, reason))
+                .orElseGet(Verification::ok);
     }
 
     /**

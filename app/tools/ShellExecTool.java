@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -154,6 +155,40 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 ),
                 SchemaKeys.REQUIRED, List.of(PARAM_COMMAND, PARAM_WHY)
         );
+    }
+
+    /**
+     * JCLAW-836 stage 1.5: a failed command is invisible to the generic checks.
+     * {@link #execute} returns its envelope as the result text — non-blank, not
+     * prefixed {@code "Error"} — so {@code exit 1} scored a clean pass until this
+     * existed.
+     *
+     * <p>Deliberately NOT {@code exitCode != 0}. {@link #buildTerminalImageEarlyReturn}
+     * reports {@code exitCode -1} on a SUCCESS path: a terminal image was detected
+     * mid-stream and the process is intentionally still running so the user can
+     * interact with it (scanning a QR code, say). {@code timedOut} is what separates
+     * that from a process we killed, which is why it is checked first and why a bare
+     * {@code -1} passes.
+     */
+    @Override
+    public Optional<String> postConditionFailure(ToolRegistry.ToolResult result) {
+        JsonObject envelope;
+        try {
+            var parsed = JsonParser.parseString(result.text());
+            if (!parsed.isJsonObject()) return Optional.empty();
+            envelope = parsed.getAsJsonObject();
+        } catch (RuntimeException _) {
+            // The prose early-returns (allowlist refusal, bad workdir) are not JSON.
+            // Those all use the "Error:" convention, so the generic check already
+            // ruled on them before this method was reached.
+            return Optional.empty();
+        }
+        if (!envelope.has("exitCode")) return Optional.empty();
+        if (envelope.has("timedOut") && envelope.get("timedOut").getAsBoolean()) {
+            return Optional.of("command timed out");
+        }
+        int exitCode = envelope.get("exitCode").getAsInt();
+        return exitCode > 0 ? Optional.of("command exited " + exitCode) : Optional.empty();
     }
 
     @Override
