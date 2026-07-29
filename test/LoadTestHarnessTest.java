@@ -1,4 +1,5 @@
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.LoadTestHarness;
@@ -16,9 +17,17 @@ import java.time.Duration;
  */
 class LoadTestHarnessTest extends UnitTest {
 
+    // JCLAW-890: the harness is a JVM-global singleton and ApiMetricsControllerLoadtestRunTest
+    // reaches the same statics from the functional lane, so these tests must own it
+    // exclusively for the duration of each method. See LoadTestHarnessSync.
+    @BeforeEach
+    void lockHarness() {
+        LoadTestHarnessSync.acquire();
+    }
+
     @AfterEach
     void stopHarness() {
-        LoadTestHarness.stop();
+        LoadTestHarnessSync.release();
     }
 
     @Test

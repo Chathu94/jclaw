@@ -1,5 +1,6 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
@@ -22,9 +23,19 @@ import java.util.HashMap;
  */
 class ApiMetricsControllerLoadtestRunTest extends FunctionalTest {
 
+    // JCLAW-890: a mock-mode loadtest reaches LoadTestRunner's setScenario and so
+    // mutates the same JVM-global harness LoadTestHarnessTest asserts against.
+    // The two classes run in different play1 lanes, which is why JUnit's own
+    // @Isolated cannot serialize them. See LoadTestHarnessSync.
     @BeforeEach
     void setup() {
+        LoadTestHarnessSync.acquire();
         Fixtures.deleteDatabase();
+    }
+
+    @AfterEach
+    void releaseHarness() {
+        LoadTestHarnessSync.release();
     }
 
     /** Loopback origin + X-Loadtest-Auth carrying application.secret — the

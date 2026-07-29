@@ -3307,9 +3307,21 @@ do_evals() {
         fi
     done
 
+    # Recompile when the classes are missing OR stale (JCLAW-889). Checking only
+    # for a missing directory meant that after any source edit this command
+    # silently ran the previous build — and reported on it confidently, which is
+    # the worst failure mode for the thing that decides whether the dataset is
+    # valid. It is also what Jenkins runs. The find short-circuits on the first
+    # newer file, so the check costs milliseconds and the command stays fast.
     local classes="$SCRIPT_DIR/precompiled/java"
+    local reason=""
     if [[ ! -d "$classes" ]]; then
-        echo "==> No compiled classes yet — running 'play precompile' first..."
+        reason="No compiled classes yet"
+    elif [[ -n "$(find "$SCRIPT_DIR/app" -name '*.java' -newer "$classes" -print -quit 2>/dev/null)" ]]; then
+        reason="Sources are newer than precompiled/java"
+    fi
+    if [[ -n "$reason" ]]; then
+        echo "==> $reason — running 'play precompile' first..."
         check_play
         play precompile
     fi
