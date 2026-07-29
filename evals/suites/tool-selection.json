@@ -98,7 +98,7 @@
     {
       "id": "recurring-reminder-uses-task-manager",
       "input": "Remind me every weekday at 9am to check the deploy queue.",
-      "rubric": "A recurring reminder is a scheduled task, not a message the agent can promise to send later. Asserting the result too: arguments say what the agent asked for, and only the tool's own result says a task with that schedule actually exists.",
+      "rubric": "A recurring reminder is a scheduled task, not a message the agent can promise to send later, and listing existing tasks first is a round-trip the request did not need. The result assertion confirms a task was actually created \u2014 arguments only say what was asked for. It deliberately does not pin the cron string: '0 0 9 * * 1-5' and '0 0 9 * * MON-FRI' are the same schedule, and substring matching cannot tell equivalent spellings apart, so asserting one would fail a correct agent.",
       "checks": [
         {
           "kind": "tools_called_exactly",
@@ -119,8 +119,7 @@
           "kind": "tool_result_includes",
           "args": [
             "task_manager",
-            "created",
-            "0 0 9 * * 1-5"
+            "created"
           ]
         },
         {
