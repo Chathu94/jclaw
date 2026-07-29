@@ -65,6 +65,20 @@ public class ApiEvalsController extends Controller {
         var agentName = JsonBodyReader.requiredOr400(body, "agent");
 
         var agent = Agent.findByName(agentName);
+        if (agent == null && Agent.EVALTEST_AGENT_NAME.equalsIgnoreCase(agentName)) {
+            // Provision the eval agent on first use, like LoadTestRunner does for its
+            // benchmark agents. It lands with an empty tool surface, so the first sweep
+            // against a fresh one fails its tool checks until the operator grants what
+            // the suite needs — which is the safe direction to be wrong in.
+            agent = EvalCapture.ensureEvalAgent();
+            if (agent == null) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                        ("Cannot provision %s: no '%s' agent to copy a provider and model from. "
+                                + "Create %s in the agent editor instead.")
+                                .formatted(Agent.EVALTEST_AGENT_NAME, Agent.MAIN_AGENT_NAME,
+                                        Agent.EVALTEST_AGENT_NAME));
+            }
+        }
         if (agent == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
         }

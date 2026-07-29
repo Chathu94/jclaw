@@ -1495,6 +1495,40 @@ class ToolSystemTest extends UnitTest {
     }
 
     @Test
+    void evalTestAgentGrantsToolsOnlyWhenAskedTo() {
+        // JCLAW-883: the eval agent inverts the per-agent default — every tool is
+        // opt-in, not just the costly ones. An eval sweep runs unattended against
+        // suites that deliberately provoke tool selection, and tools execute for
+        // real: the first live run went against `main` with the full surface and
+        // created an actual recurring task. Both phases live in one test because
+        // the agent name is unique, so two tests would race for the same row.
+        assertEquals(4, ToolRegistry.getToolDefsForAgent(agent).size(),
+                "precondition: an ordinary agent still sees every published tool");
+
+        var evalAgent = AgentService.create(Agent.EVALTEST_AGENT_NAME, "openrouter", "gpt-4.1");
+        try {
+            assertTrue(ToolRegistry.getToolDefsForAgent(evalAgent).isEmpty(),
+                    "a freshly provisioned eval agent must reach no tool at all");
+
+            // Calibration is additive: the operator grants exactly what a suite needs.
+            var granted = ToolRegistry.listTools().getFirst().name();
+            var config = new models.AgentToolConfig();
+            config.agent = evalAgent;
+            config.toolName = granted;
+            config.enabled = true;
+            config.save();
+            ToolRegistry.invalidateDisabledToolsCache(evalAgent);
+
+            assertEquals(java.util.List.of(granted),
+                    ToolRegistry.getToolDefsForAgent(evalAgent).stream()
+                            .map(def -> def.function().name()).toList(),
+                    "only the explicitly granted tool becomes reachable");
+        } finally {
+            try { evalAgent.delete(); } catch (Exception _) { /* best-effort */ }
+        }
+    }
+
+    @Test
     void toolsLoadtestAgentSeesAtMostLoadtestSleep() {
         // The single-tool benchmark twin is exempt from the zero-tools gate but
         // exposes ONLY loadtest_sleep — never the full registered set. Asserted

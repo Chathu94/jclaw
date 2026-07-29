@@ -50,7 +50,7 @@ pnpm test                 # Vitest (unit)
 ```bash
 ./jclaw.sh evals                                       # validate the eval dataset
 ./jclaw.sh evals --responses run.json --out rep.json   # score a recorded agent run
-./jclaw.sh evals --capture run.json --agent <name> --suite <id>   # drive a live agent
+./jclaw.sh evals --capture run.json --agent __evaltest__ --suite <id>   # drive a live agent
 ```
 
 Versioned agent-behaviour datasets live in `evals/suites/` (`<id>.v<N>.json`);
@@ -66,6 +66,13 @@ behind the same loopback + `X-Loadtest-Auth` gate as the loadtest endpoints, and
 `--agent` is required rather than defaulted. Capture turns leave no
 conversation, no history and no memories behind, and are never recorded into the
 Chat Performance histograms — see `evals/README.md` for why each of those holds.
+
+What capture does **not** isolate is tool side effects: tools execute for real,
+so a suite case that provokes a `task_manager` call creates an actual scheduled
+task. Run sweeps against `__evaltest__` — the eval sibling of `__loadtest__`,
+auto-provisioned on first capture, for which **every tool is opt-in** so it can
+only reach what you granted it in the agent editor. Deleting that agent cleans
+up everything a sweep created.
 
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.

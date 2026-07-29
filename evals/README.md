@@ -25,7 +25,7 @@ evals/
 ./jclaw.sh evals --responses run.json --baseline reports/last.json   # catch regressions
 
 # drive a live agent and write the run the scorer consumes
-./jclaw.sh evals --capture run.json --agent evalbot --suite tool-selection
+./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection
 ```
 
 Validating and scoring are **offline**: no backend, no database, no model call.
@@ -146,7 +146,7 @@ partial sweep reads as unmeasured cases rather than a suspiciously short suite.
 ## Capturing a run from a live agent
 
 ```bash
-./jclaw.sh evals --capture run.json --agent evalbot --suite tool-selection
+./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection
 ```
 
 This needs the backend running, because driving an agent needs what the offline
@@ -158,10 +158,10 @@ Capture and scoring stay two steps on purpose: the recorded file is the boundary
 so a sweep can be scored now, re-scored later against a changed suite, or diffed
 against a baseline, without paying for the model twice.
 
-**`--agent` is required and never defaults.** An eval sweep against the agent you
-actually work with is the accident worth designing out.
+**`--agent` is required and never defaults.** Use `__evaltest__` (below), not an
+agent you actually work with.
 
-What a sweep leaves behind: nothing. Turns run through `AgentRunner.runForTask`,
+What a sweep does not leave behind: turns run through `AgentRunner.runForTask`,
 which builds a transient conversation it never persists — so there are no history
 rows to clean up, which is a stronger guarantee than creating throwaway
 conversations and deleting them, since nothing survives a sweep that dies midway.
@@ -170,6 +170,46 @@ an eval cannot teach the agent about its own eval questions. The per-case
 `LatencyTrace` exists only to count model calls and is never ended, so no eval
 turn reaches `LatencyStats` — hundreds of them landing in the request-path
 histograms would corrupt the baseline JCLAW-833 measures against.
+
+### What it does leave behind: tool side effects
+
+The isolation above covers the turn's bookkeeping. It does not cover what the
+agent *does*. Tools execute for real. A case that induces a `task_manager` call
+creates a real scheduled task; a case that induces a write tool writes.
+
+This is not theoretical. The first live run of `tool-selection.v1` against the
+operator's `main` agent created a recurring task (`check-deploy-queue-weekday`,
+cron `0 0 9 * * 1-5`) that had to be deleted by hand — the suite contains a case
+designed to make the agent reach for the task manager, and it did.
+
+So the agent you point capture at is a safety boundary, not just a label.
+
+## The `__evaltest__` agent
+
+`__evaltest__` is the agent sweeps are meant to run against — the eval sibling of
+`__loadtest__`. Capture provisions it on first use, copying provider and model
+from `main` as a starting point.
+
+**Every tool is opt-in for it.** An ordinary agent starts with the full tool set
+and the operator switches things off; `__evaltest__` starts with nothing and the
+operator switches things *on*, in the agent editor, per suite. That inversion
+lives in `ToolRegistry.computeDisabledTools` alongside the same rule that makes
+`generate_image` and `generate_video` opt-in, and it holds for tools added to the
+registry later — which seeding disabled rows at provisioning would not.
+
+The practical consequence: a fresh `__evaltest__` fails every `tool_called` check
+until you grant the tools that suite needs. That is the safe direction to be
+wrong in, and the failure names the missing tool.
+
+Calibrate it the same way you configure any agent — tools and MCP servers in the
+agent editor, skills through the per-agent skill config. Unlike `__loadtest__` it
+is deliberately **not** in `ApiAgentsController.isReservedName`: reserved rows are
+hidden from every user-facing API, and being able to calibrate this one in the UI
+is the entire point. It is a conventional name with a safe default, not a hidden
+internal row.
+
+To clean up everything a sweep created, delete the agent — `AgentDeletionCascade`
+takes its tasks, runs, and messages with it.
 
 `--concurrency` (default 4, max 16) bounds how many cases are in front of the
 model at once. Unbounded fan-out would contradict the NFR the suite exists to

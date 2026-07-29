@@ -24,7 +24,7 @@ import java.util.Map;
  * means a sweep can be scored now, re-scored later against a changed suite, or
  * diffed against a baseline, without paying for the model twice.
  *
- * <h2>Why this costs the serving path nothing</h2>
+ * <h2>What a sweep does not leave behind</h2>
  * <ul>
  *   <li><b>No conversation.</b> Turns run through {@link AgentRunner#runForTask},
  *       which manufactures a transient stub {@link models.Conversation} that is
@@ -43,6 +43,20 @@ import java.util.Map;
  *   <li><b>Nothing runs unless asked.</b> The only caller is an operator-triggered
  *       endpoint; a normal turn never reaches this class.</li>
  * </ul>
+ *
+ * <h2>What it DOES leave behind: tool side effects</h2>
+ *
+ * <p>The isolation above covers the turn's own bookkeeping. It does not cover what
+ * the agent <i>does</i>. {@code runForTask} hands the agent its full configured
+ * tool surface and tools execute for real — a suite case that induces a
+ * {@code task_manager} call creates a real scheduled task, one that induces a
+ * write tool writes.
+ *
+ * <p>This is not theoretical: the first live run of {@code tool-selection.v1}
+ * against the operator's {@code main} agent created a recurring task that had to
+ * be deleted by hand. Point capture at a calibrated agent whose tool surface is
+ * scoped to what the suite needs — see {@code __evaltest__} in
+ * {@code evals/README.md} — not at an agent you actually use.
  */
 public final class EvalCapture {
 
@@ -55,6 +69,43 @@ public final class EvalCapture {
      * the two paths cannot drift: whatever this writes, the offline scorer reads.
      */
     public record Capture(String suite, int version, Map<String, EvalScorer.Response> responses) {}
+
+    /**
+     * Find {@code __evaltest__}, provisioning it on first use — the same
+     * find-or-create shape {@code LoadTestRunner} uses for its benchmark agents.
+     *
+     * <p>Provider and model are copied from {@code main} as a starting point the
+     * operator can change in the agent editor; there is no sensible way to invent a
+     * model id, so a deployment with no {@code main} agent gets {@code null} here
+     * and the caller reports it rather than guessing.
+     *
+     * <p>No tool config is seeded. The agent starts with an empty tool surface
+     * because {@code ToolRegistry.computeDisabledTools} makes every tool opt-in for
+     * it, which stays fail-closed as new tools are registered — seeding disabled
+     * rows at creation would not.
+     *
+     * @return the agent, or {@code null} when there is no {@code main} agent to
+     *         derive a provider and model from
+     */
+    public static Agent ensureEvalAgent() {
+        var existing = Agent.findByName(Agent.EVALTEST_AGENT_NAME);
+        if (existing != null) return existing;
+
+        var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
+        if (main == null) return null;
+
+        var agent = new Agent();
+        agent.name = Agent.EVALTEST_AGENT_NAME;
+        agent.modelProvider = main.modelProvider;
+        agent.modelId = main.modelId;
+        agent.enabled = true;
+        agent.description = "Eval sweeps (JCLAW-883). Tools are opt-in — grant only what a suite needs.";
+        agent.save();
+
+        EventLogger.info(EVENT_CATEGORY, "Provisioned %s with no tools enabled; provider/model copied from '%s'"
+                .formatted(Agent.EVALTEST_AGENT_NAME, Agent.MAIN_AGENT_NAME));
+        return agent;
+    }
 
     /**
      * One agent turn, as capture needs it: a prompt in, the final assistant text out,

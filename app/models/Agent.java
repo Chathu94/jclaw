@@ -32,6 +32,9 @@ public class Agent extends Model {
 
     public static final String MAIN_AGENT_NAME = "main";
 
+    /** JCLAW-883: reserved-by-convention agent that eval sweeps run against. See {@link #isEvalTest()}. */
+    public static final String EVALTEST_AGENT_NAME = "__evaltest__";
+
     @Column(nullable = false, unique = true)
     public String name;
 
@@ -189,6 +192,22 @@ public class Agent extends Model {
 
     public boolean isMain() {
         return MAIN_AGENT_NAME.equalsIgnoreCase(name);
+    }
+
+    /**
+     * JCLAW-883: the agent eval sweeps run against. Its tool surface is opt-in
+     * for EVERY tool (see {@code ToolRegistry.computeDisabledTools}), so an
+     * operator calibrates it to exactly what a suite needs and a sweep cannot
+     * reach a tool nobody granted.
+     *
+     * <p>Unlike the loadtest agents this is deliberately NOT in
+     * {@code ApiAgentsController.isReservedName}: reserved rows are hidden from
+     * every user-facing API, and calibrating this one in the agent editor is the
+     * entire point. It is a conventional name with a safe default, not a hidden
+     * internal row.
+     */
+    public boolean isEvalTest() {
+        return EVALTEST_AGENT_NAME.equalsIgnoreCase(name);
     }
 
     /**

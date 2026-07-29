@@ -788,6 +788,11 @@ working agent is the accident this guards against. Turns leave no
 conversation, no message history and no memories behind, and their latency is
 not recorded into the Chat Performance histograms.
 
+Tools DO execute for real, so use __evaltest__ — the eval sibling of
+__loadtest__, provisioned on first capture, for which every tool is opt-in.
+Grant it only what a suite needs in the agent editor; delete the agent to
+clean up everything a sweep created.
+
 Options:
   --suites <dir>     Suite directory (default: evals/suites)
   --responses <file> A recorded run: {"suite":…, "version":…, "responses":
@@ -808,7 +813,7 @@ Examples:
   ${INVOKE} evals                                              # validate the dataset
   ${INVOKE} evals --responses run.json --out report.json       # score a recorded run
   ${INVOKE} evals --responses run.json --baseline report.json  # catch regressions
-  ${INVOKE} evals --capture run.json --agent evalbot --suite tool-selection
+  ${INVOKE} evals --capture run.json --agent __evaltest__ --suite tool-selection
 EOF
     else
         cat <<EOF

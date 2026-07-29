@@ -564,6 +564,19 @@ public class ToolRegistry {
         for (var entry : explicitState.entrySet()) {
             if (Boolean.FALSE.equals(entry.getValue())) disabled.add(entry.getKey());
         }
+        // JCLAW-883: the eval agent inverts the default — every tool is opt-in, not
+        // just the costly ones below. An eval sweep runs unattended and its suites
+        // deliberately provoke tool selection, so a tool nobody granted must not be
+        // reachable: the first live sweep ran against `main` with the full surface
+        // and created a real recurring task. Inverting here rather than seeding
+        // disabled rows at provisioning also means a tool added to the registry
+        // later is off for this agent too, instead of silently re-opening the hole.
+        if (agent.isEvalTest()) {
+            for (var tool : tools.values()) {
+                if (!Boolean.TRUE.equals(explicitState.get(tool.name()))) disabled.add(tool.name());
+            }
+            return Collections.unmodifiableSet(disabled);
+        }
         // JCLAW-228: image generation can cost money / hit rate limits, so generate_image is hidden
         // from every agent unless an explicit AgentToolConfig row turns it on (single-click in the
         // agent editor). Distinct from the MCP default-disable below, which only affects non-main agents.
