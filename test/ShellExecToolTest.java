@@ -1,3 +1,4 @@
+import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -5,7 +6,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import models.Agent;
 import services.AgentService;
 import services.ConfigService;
 import tools.ShellExecTool;

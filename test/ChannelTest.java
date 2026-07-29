@@ -1,6 +1,3 @@
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-import play.test.UnitTest;
 import channels.Channel;
 import channels.ChannelRegistry;
 import channels.ChannelTransport;
@@ -9,9 +6,13 @@ import channels.TelegramChannel;
 import channels.WebChannel;
 import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HexFormat;

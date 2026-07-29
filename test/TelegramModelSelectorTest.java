@@ -1,6 +1,6 @@
+import channels.InboundCallback;
 import channels.TelegramCallbackDispatcher;
 import channels.TelegramChannel;
-import channels.InboundCallback;
 import channels.TelegramModelCallback;
 import channels.TelegramModelKeyboard;
 import channels.TelegramModelSelector;

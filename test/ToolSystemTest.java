@@ -1,3 +1,6 @@
+import agents.ToolRegistry;
+import models.Agent;
+import models.Task;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -6,9 +9,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import agents.ToolRegistry;
-import models.Agent;
-import models.Task;
 import services.AgentService;
 import tools.CheckListTool;
 import tools.FileSystemTools;
@@ -16,9 +16,8 @@ import tools.TaskTool;
 import tools.WebFetchTool;
 
 import java.io.IOException;
-import java.nio.file.Path;
-
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;

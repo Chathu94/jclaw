@@ -11,8 +11,8 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.transcription.FfmpegProbe;
 import services.transcription.TranscriptionException;
-import services.transcription.WhisperTranscriber;
 import services.transcription.WhisperLocalTranscriptionService;
+import services.transcription.WhisperTranscriber;
 
 import java.util.UUID;
 

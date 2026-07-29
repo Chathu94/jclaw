@@ -1,5 +1,4 @@
 import models.Agent;
-import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import org.junit.jupiter.api.AfterEach;

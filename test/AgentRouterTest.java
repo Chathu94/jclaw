@@ -1,10 +1,10 @@
+import agents.AgentRouter;
+import models.Agent;
+import models.AgentBinding;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import agents.AgentRouter;
-import models.Agent;
-import models.AgentBinding;
 
 class AgentRouterTest extends UnitTest {
 

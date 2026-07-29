@@ -3,6 +3,7 @@ import play.test.UnitTest;
 import services.caption.CaptionImageNormalizer;
 
 import javax.imageio.ImageIO;
+
 import java.io.ByteArrayInputStream;
 import java.util.Base64;
 

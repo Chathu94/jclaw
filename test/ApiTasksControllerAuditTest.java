@@ -1,10 +1,10 @@
+import models.EventLog;
+import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
-import models.EventLog;
-import models.Task;
 import services.EventLogger;
 
 import java.util.regex.Pattern;

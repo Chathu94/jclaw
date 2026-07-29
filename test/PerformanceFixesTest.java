@@ -1,12 +1,12 @@
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import play.test.Fixtures;
-import play.test.UnitTest;
 import models.Agent;
 import models.AgentBinding;
 import models.Conversation;
 import models.Task;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
+import play.test.Fixtures;
+import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
 import services.Tx;

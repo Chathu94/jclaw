@@ -1,13 +1,13 @@
+import models.Agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import models.Agent;
 import services.ConversationQueue;
 import services.ConversationQueue.QueuedMessage;
 
-import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;

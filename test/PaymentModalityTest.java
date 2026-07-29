@@ -1,6 +1,6 @@
+import llm.PaymentModality;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import llm.PaymentModality;
 
 class PaymentModalityTest extends UnitTest {
 

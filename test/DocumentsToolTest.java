@@ -9,12 +9,13 @@ import services.ConfigService;
 import services.OcrHealthProbe;
 import tools.DocumentsTool;
 
+import javax.imageio.ImageIO;
+
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import javax.imageio.ImageIO;
 
 /**
  * Covers the collision-avoidance helpers used by {@link DocumentsTool#writeDocument}.

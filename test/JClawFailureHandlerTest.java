@@ -1,4 +1,3 @@
-import java.net.SocketTimeoutException;
 import models.Agent;
 import models.Task;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +8,7 @@ import services.JClawFailureHandler;
 import services.JClawFailureHandler.Decision;
 import services.Tx;
 
+import java.net.SocketTimeoutException;
 import java.time.Instant;
 
 /**

@@ -1,8 +1,8 @@
+import controllers.ApiAuthController;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
-import controllers.ApiAuthController;
 import services.ConfigService;
 
 class ApiAuthControllerTest extends FunctionalTest {

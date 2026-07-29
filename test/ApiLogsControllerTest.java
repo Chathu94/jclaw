@@ -1,8 +1,8 @@
+import models.EventLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
-import models.EventLog;
 
 class ApiLogsControllerTest extends FunctionalTest {
 

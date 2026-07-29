@@ -1,7 +1,6 @@
+import controllers.Application;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-
-import controllers.Application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

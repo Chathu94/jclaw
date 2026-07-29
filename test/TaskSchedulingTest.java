@@ -1,10 +1,10 @@
+import models.Agent;
+import models.Task;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.JClawCronUtils;
-import models.Agent;
-import models.Task;
 
 import java.time.Instant;
 import java.time.LocalDateTime;

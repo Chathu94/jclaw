@@ -1,9 +1,9 @@
+import agents.ToolCatalog;
+import agents.ToolRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import agents.ToolCatalog;
-import agents.ToolRegistry;
 
 import java.util.List;
 import java.util.Map;

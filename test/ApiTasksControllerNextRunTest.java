@@ -1,7 +1,7 @@
-import org.junit.jupiter.api.Test;
-import play.test.UnitTest;
 import controllers.ApiTasksController;
 import models.Task;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
 
 import java.time.Instant;
 

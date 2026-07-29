@@ -1,6 +1,6 @@
+import agents.SkillVersionManager;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import agents.SkillVersionManager;
 
 /**
  * Tests for SkillVersionManager: semver parsing, comparison, patch bumping,

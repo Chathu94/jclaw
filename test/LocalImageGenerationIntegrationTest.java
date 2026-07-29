@@ -1,9 +1,9 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.imagegen.LocalImageGenerationClient;
-import services.imagegen.ImageModelManager;
 import services.UvProbe;
 import services.imagegen.ImageGenerationService;
+import services.imagegen.ImageModelManager;
+import services.imagegen.LocalImageGenerationClient;
 import services.imagegen.LocalImageSidecarManager;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;

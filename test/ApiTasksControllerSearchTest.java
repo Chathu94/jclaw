@@ -1,14 +1,14 @@
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import play.test.Fixtures;
-import play.test.FunctionalTest;
-import play.db.DB;
-import org.h2.fulltext.FullTextLucene;
 import models.MessageRole;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
+import org.h2.fulltext.FullTextLucene;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.db.DB;
+import play.test.Fixtures;
+import play.test.FunctionalTest;
 
 import java.time.Instant;
 import java.util.regex.Pattern;

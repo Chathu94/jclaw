@@ -10,10 +10,10 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.imagegen.BflImageGenerationClient;
-import services.imagegen.ImageGenerationService;
-import services.imagegen.LocalImageGenerationClient;
 import services.imagegen.ImageGenerationException;
 import services.imagegen.ImageGenerationRouter;
+import services.imagegen.ImageGenerationService;
+import services.imagegen.LocalImageGenerationClient;
 import services.imagegen.OpenAiImageGenerationClient;
 import services.imagegen.ReplicateImageGenerationClient;
 

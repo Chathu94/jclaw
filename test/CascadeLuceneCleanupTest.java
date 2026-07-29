@@ -1,10 +1,9 @@
 import models.Agent;
-import models.Conversation;
+import models.MessageRole;
 import models.SubagentRun;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
-import models.MessageRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

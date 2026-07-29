@@ -1,8 +1,3 @@
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import play.test.Fixtures;
-import play.test.UnitTest;
 import models.Agent;
 import models.AgentBinding;
 import models.ChannelConfig;
@@ -12,6 +7,11 @@ import models.EventLog;
 import models.Memory;
 import models.Message;
 import models.Task;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.Fixtures;
+import play.test.UnitTest;
 
 import java.time.Instant;
 

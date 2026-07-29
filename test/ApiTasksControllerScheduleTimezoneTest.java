@@ -1,9 +1,9 @@
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import play.test.Fixtures;
-import play.test.FunctionalTest;
 import play.mvc.Http.Request;
 import play.mvc.Http.Response;
+import play.test.Fixtures;
+import play.test.FunctionalTest;
 
 import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;

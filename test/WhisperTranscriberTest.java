@@ -2,9 +2,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.transcription.AsrModel;
 import services.transcription.TranscriptionException;
 import services.transcription.WhisperTranscriber;
-import services.transcription.AsrModel;
 
 import java.io.IOException;
 import java.io.OutputStream;

@@ -1,8 +1,8 @@
+import llm.ProviderRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import llm.ProviderRegistry;
 import services.ConfigService;
 
 import java.util.concurrent.CountDownLatch;

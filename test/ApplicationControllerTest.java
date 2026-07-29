@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.Test;
-import play.test.FunctionalTest;
 import play.mvc.Http.Response;
+import play.test.FunctionalTest;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 

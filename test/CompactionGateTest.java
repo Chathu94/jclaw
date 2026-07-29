@@ -9,9 +9,9 @@ import models.MessageRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import play.db.jpa.JPA;
 import services.ConfigService;
 import services.ConversationService;
 

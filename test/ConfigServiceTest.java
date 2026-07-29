@@ -1,13 +1,13 @@
+import jakarta.persistence.EntityManager;
+import models.Agent;
+import org.hibernate.Session;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import models.Agent;
 import services.AgentService;
 import services.ConfigService;
-import play.db.jpa.JPA;
-import jakarta.persistence.EntityManager;
-import org.hibernate.Session;
 
 class ConfigServiceTest extends UnitTest {
 

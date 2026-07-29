@@ -1,7 +1,7 @@
+import agents.SkillLoader;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import agents.SkillLoader;
 import services.AgentService;
 
 import java.nio.file.Files;

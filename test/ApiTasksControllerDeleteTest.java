@@ -1,3 +1,5 @@
+import models.Task;
+import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -5,8 +7,6 @@ import play.db.DB;
 import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
-import models.Task;
-import models.TaskRun;
 import services.EventLogger;
 import services.TaskExecutionHandler;
 import services.Tx;

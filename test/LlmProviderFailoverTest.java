@@ -1,8 +1,8 @@
 import llm.LlmProvider;
-import llm.OpenAiProvider;
 import llm.LlmTypes.ChatResponse;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
+import llm.OpenAiProvider;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import org.junit.jupiter.api.AfterEach;

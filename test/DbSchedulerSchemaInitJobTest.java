@@ -1,6 +1,6 @@
+import jobs.DbSchedulerSchemaInitJob;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import jobs.DbSchedulerSchemaInitJob;
 
 class DbSchedulerSchemaInitJobTest extends UnitTest {
 

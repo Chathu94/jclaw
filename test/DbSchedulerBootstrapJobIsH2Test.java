@@ -1,12 +1,12 @@
 import org.junit.jupiter.api.Test;
-import play.test.UnitTest;
 import play.db.DB;
+import play.test.UnitTest;
+
+import javax.sql.DataSource;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
-
-import javax.sql.DataSource;
 
 /**
  * Branch coverage for DbSchedulerBootstrapJob.isH2 — the private static

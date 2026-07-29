@@ -1,7 +1,7 @@
+import models.Task;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ScheduleShorthandParser;
-import models.Task;
 
 import java.time.Instant;
 import java.time.LocalDateTime;

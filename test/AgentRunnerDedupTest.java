@@ -1,8 +1,8 @@
+import agents.MessageDeduplicator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.UnitTest;
-import agents.MessageDeduplicator;
 
 import java.util.ArrayList;
 import java.util.List;

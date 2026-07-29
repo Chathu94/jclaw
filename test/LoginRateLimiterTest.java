@@ -1,6 +1,6 @@
+import controllers.LoginRateLimiter;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import controllers.LoginRateLimiter;
 
 /**
  * JCLAW-741: unit coverage for the failed-login throttle. Runs safely under the

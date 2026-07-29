@@ -1,8 +1,8 @@
+import jobs.ConversationQueueEvictionJob;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import jobs.ConversationQueueEvictionJob;
 import services.ConfigService;
 
 class ConversationQueueEvictionJobTest extends UnitTest {

@@ -1,11 +1,11 @@
+import memory.MemoryAutoCapture;
+import memory.MemoryCategory;
+import memory.MemoryStoreFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import memory.MemoryAutoCapture;
-import memory.MemoryCategory;
-import memory.MemoryStoreFactory;
 import utils.CircuitBreaker;
 
 class MemoryAutoCaptureTest extends UnitTest {

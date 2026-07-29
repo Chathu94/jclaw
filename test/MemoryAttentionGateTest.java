@@ -1,6 +1,6 @@
+import memory.MemoryAttentionGate;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import memory.MemoryAttentionGate;
 
 class MemoryAttentionGateTest extends UnitTest {
 

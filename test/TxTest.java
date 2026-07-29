@@ -1,10 +1,10 @@
+import models.EventLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
 import play.libs.F;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import models.EventLog;
 import services.Tx;
 
 import java.time.Instant;

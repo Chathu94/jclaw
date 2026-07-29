@@ -1,9 +1,9 @@
+import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
-import models.Agent;
 import services.AgentService;
 import tools.DateTimeTool;
 

@@ -1,9 +1,9 @@
+import models.Agent;
+import models.Notification;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
-import models.Agent;
-import models.Notification;
 import services.AgentService;
 
 import java.time.Instant;
