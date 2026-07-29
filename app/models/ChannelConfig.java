@@ -5,18 +5,14 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.cache.CacheConfig;
 import play.cache.Caches;
-import play.db.jpa.Model;
 import services.Tx;
 
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Optional;
 
 @Entity
@@ -28,7 +24,7 @@ import java.util.Optional;
 // complementary: L2 cuts the field re-fetch on hit, the named cache cuts
 // the SQL altogether.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class ChannelConfig extends Model {
+public class ChannelConfig extends TimestampedModel {
 
     @Column(name = "channel_type", nullable = false, unique = true)
     public String channelType;
@@ -38,24 +34,6 @@ public class ChannelConfig extends Model {
 
     @Column(nullable = false)
     public boolean enabled = false;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     // Keep the TTL cache coherent with JPA lifecycle. Without this hook a test
     // (or background job) that reads "telegram" before a row exists poisons the

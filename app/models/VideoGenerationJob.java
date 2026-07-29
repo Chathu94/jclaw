@@ -88,6 +88,11 @@ public class VideoGenerationJob extends Model {
     @Column(name = "result_attachment_id")
     public Long resultAttachmentId;
 
+    // Deliberately NOT on TimestampedModel: that base stamps createdAt unconditionally,
+    // which would stomp a caller-supplied value. The null guard below is the difference,
+    // and it is load-bearing — a job can be constructed with its submission time already
+    // set. Inheriting would mean overriding onCreate and calling super, which does not
+    // help when the point is to NOT do what super does.
     @PrePersist
     void onCreate() {
         var now = Instant.now();

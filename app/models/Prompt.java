@@ -5,12 +5,8 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
-import play.db.jpa.Model;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -34,7 +30,7 @@ import java.util.List;
         @Index(name = "idx_prompt_category", columnList = "category"),
         @Index(name = "idx_prompt_updated_at", columnList = "updated_at")
 })
-public class Prompt extends Model {
+public class Prompt extends TimestampedModel {
 
     /**
      * The fixed set of prompt categories. A controlled taxonomy (not
@@ -85,24 +81,6 @@ public class Prompt extends Model {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     public Category category;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     /** Newest-edited first — the order the library page renders. */
     public static List<Prompt> findAllOrdered() {

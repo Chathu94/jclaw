@@ -7,12 +7,9 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
-import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
@@ -21,7 +18,7 @@ import java.util.List;
 @Table(name = "conversation", indexes = {
         @Index(name = "idx_conversation_agent_channel_peer", columnList = "agent_id,channel_type,peer_id")
 })
-public class Conversation extends Model {
+public class Conversation extends TimestampedModel {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false)
@@ -156,12 +153,6 @@ public class Conversation extends Model {
     @Column(name = "parent_context", columnDefinition = "TEXT")
     public String parentContext;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
     // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.
@@ -169,18 +160,6 @@ public class Conversation extends Model {
     @OneToMany(mappedBy = "conversation")
     @OrderBy("createdAt ASC")
     public List<Message> messages;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     /**
      * Resolve the current conversation for a (agent, channelType, peerId) tuple.

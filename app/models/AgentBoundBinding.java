@@ -4,23 +4,19 @@ import jakarta.persistence.Column;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MappedSuperclass;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
-import play.db.jpa.Model;
 
-import java.time.Instant;
 import java.util.function.Function;
 
 /**
- * JCLAW-723: shared JPA state, timestamps, and lifecycle for the per-agent
- * channel bindings ({@link TelegramBinding}, {@link SlackBinding},
- * {@link WhatsAppBinding}), which were otherwise repeating the same {@code agent}
- * FK, {@code enabled} flag, {@code created_at}/{@code updated_at} columns, and
- * timestamp callbacks. Mirrors {@link AgentFeatureConfig}'s mapped-superclass
- * approach: the concrete subclasses keep their own {@code @Table}/indexes/
- * {@code @Cache}, their channel-specific columns, and their typed finders.
+ * JCLAW-723: shared JPA state and lifecycle for the per-agent channel bindings
+ * ({@link TelegramBinding}, {@link SlackBinding}, {@link WhatsAppBinding}), which were
+ * otherwise repeating the same {@code agent} FK and {@code enabled} flag. Mirrors
+ * {@link AgentFeatureConfig}'s mapped-superclass approach: the concrete subclasses keep
+ * their own {@code @Table}/indexes/{@code @Cache}, their channel-specific columns, and
+ * their typed finders. The {@code created_at}/{@code updated_at} pair and its callbacks
+ * come from {@link TimestampedModel}, one level further up.
  *
  * <p><b>Privacy invariant.</b> The {@code agent_id} join column is {@code unique},
  * so exactly one binding may reference a given agent. This is a privacy
@@ -39,7 +35,7 @@ import java.util.function.Function;
  * parameterized by the subclass's own {@code findByAgent}.
  */
 @MappedSuperclass
-public abstract class AgentBoundBinding extends Model {
+public abstract class AgentBoundBinding extends TimestampedModel {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "agent_id", nullable = false, unique = true)
@@ -48,24 +44,6 @@ public abstract class AgentBoundBinding extends Model {
 
     @Column(nullable = false)
     public boolean enabled = true;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     /**
      * Resolve a binding by walking the {@link Agent#parentAgent} chain — the

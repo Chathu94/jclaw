@@ -119,6 +119,10 @@ public class Memory extends Model {
         save();
     }
 
+    // Deliberately NOT on TimestampedModel: these callbacks also clamp the importance
+    // score, so inheriting them would mean overriding both and calling super — relying on
+    // JPA callback-override semantics that nothing here pins with a test. The duplicated
+    // timestamp lines are the cheaper price.
     @PrePersist
     void onCreate() {
         var now = Instant.now();

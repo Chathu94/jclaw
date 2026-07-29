@@ -10,15 +10,12 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import org.hibernate.query.NativeQuery;
 import play.db.jpa.JPA;
-import play.db.jpa.Model;
 import services.search.LuceneIndexer;
 
 import java.time.Instant;
@@ -28,7 +25,7 @@ import java.util.List;
 @Table(name = "task", indexes = {
         @Index(name = "idx_task_status_next_run", columnList = "status,next_run_at")
 })
-public class Task extends Model {
+public class Task extends TimestampedModel {
 
     /**
      * Fire-shape enum. JCLAW-21 introduced INTERVAL as the fourth value
@@ -334,24 +331,6 @@ public class Task extends Model {
      */
     @Column(name = "timezone", length = 64)
     public String timezone;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     /**
      * JCLAW-304: mirror this row into the Lucene full-text index under

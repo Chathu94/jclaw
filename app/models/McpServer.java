@@ -5,13 +5,10 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.ColumnDefault;
-import play.db.jpa.Model;
 
 import java.time.Instant;
 import java.util.List;
@@ -54,7 +51,7 @@ import java.util.List;
 // through .save(), so a CONNECTED → ERROR transition invalidates the
 // row and the next reader sees fresh state.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class McpServer extends Model {
+public class McpServer extends TimestampedModel {
 
     public enum Transport { STDIO, HTTP }
 
@@ -106,24 +103,6 @@ public class McpServer extends Model {
 
     @Column(name = "last_disconnected_at")
     public Instant lastDisconnectedAt;
-
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     public static List<McpServer> findEnabled() {
         return McpServer.find("enabled = true ORDER BY name").fetch();

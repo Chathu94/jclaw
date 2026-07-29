@@ -6,17 +6,13 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
-import play.db.jpa.Model;
 
-import java.time.Instant;
 import java.util.List;
 
 @Entity
@@ -28,7 +24,7 @@ import java.util.List;
 // layer caching of findById is now redundant — JCLAW-204 was downsized
 // accordingly.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
-public class Agent extends Model {
+public class Agent extends TimestampedModel {
 
     public static final String MAIN_AGENT_NAME = "main";
 
@@ -152,30 +148,12 @@ public class Agent extends Model {
     @Column(name = "memory_autocapture_model")
     public String memoryAutocaptureModel;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    public Instant createdAt;
-
-    @Column(name = "updated_at", nullable = false)
-    public Instant updatedAt;
-
     // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.
     @SuppressWarnings("java:S1948")
     @OneToMany(mappedBy = "agent", cascade = CascadeType.ALL, orphanRemoval = true)
     public List<AgentBinding> bindings;
-
-    @PrePersist
-    void onCreate() {
-        var now = Instant.now();
-        createdAt = now;
-        updatedAt = now;
-    }
-
-    @PreUpdate
-    void onUpdate() {
-        updatedAt = Instant.now();
-    }
 
     /**
      * Null-safe agent name for audit logs and channel routing: the agent's
