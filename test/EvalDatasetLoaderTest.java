@@ -4,7 +4,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.evals.EvalCheck;
 import services.evals.EvalDatasetLoader;
-import services.evals.EvalSuite;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

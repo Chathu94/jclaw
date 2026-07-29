@@ -261,23 +261,28 @@ public final class EvalRunner {
 
         var exit = report.passed() == report.results().size() ? 0 : 1;
         var baseline = opts.get(OPT_BASELINE);
-        if (baseline != null) {
-            var before = EvalReport.fromJson(Files.readString(Path.of(baseline)));
-            if (report.scoredByDifferentSuiteThan(before)) {
-                // Case ids can match across two rulers while meaning different things,
-                // so this is stated before the list rather than left for the reader to
-                // infer from a suspicious number of "regressions".
-                System.out.println("Warning: " + baseline + " was scored against @" + before.fingerprint()
-                        + " and this run against @" + report.fingerprint()
-                        + " — the suite changed, so the comparison below is between two different measuring sticks.");
-            }
-            var regressions = report.regressionsAgainst(before);
-            if (!regressions.isEmpty()) {
-                System.out.println("Regressions against " + baseline + ": " + String.join(", ", regressions));
-                exit = 1;
-            }
-        }
+        if (baseline != null && regressedAgainstBaseline(report, baseline)) exit = 1;
         return exit;
+    }
+
+    /**
+     * Compare {@code report} against a recorded baseline, printing any drift, and
+     * report whether this run regressed.
+     */
+    private static boolean regressedAgainstBaseline(EvalReport report, String baseline) throws IOException {
+        var before = EvalReport.fromJson(Files.readString(Path.of(baseline)));
+        if (report.scoredByDifferentSuiteThan(before)) {
+            // Case ids can match across two rulers while meaning different things,
+            // so this is stated before the list rather than left for the reader to
+            // infer from a suspicious number of "regressions".
+            System.out.println("Warning: " + baseline + " was scored against @" + before.fingerprint()
+                    + " and this run against @" + report.fingerprint()
+                    + " — the suite changed, so the comparison below is between two different measuring sticks.");
+        }
+        var regressions = report.regressionsAgainst(before);
+        if (regressions.isEmpty()) return false;
+        System.out.println("Regressions against " + baseline + ": " + String.join(", ", regressions));
+        return true;
     }
 
     private static Map<String, String> parseOptions(String[] args) {
