@@ -1,6 +1,7 @@
 import agents.ToolRegistry;
 import agents.ToolResultVerifier;
 import agents.ToolResultVerifier.Verdict;
+import jobs.ToolRegistrationJob;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.ShellExecTool;
@@ -168,6 +169,15 @@ class ToolResultVerifierTest extends UnitTest {
     /** The verifier consults the tool, so a failed command stops scoring a clean pass. */
     @Test
     void checkRoutesThroughTheToolsPostCondition() {
+        // Establish the precondition rather than inherit it. This is the one case in
+        // this class that needs a real registered tool, and the native set is a
+        // process-global that concurrently-running classes replace: McpServerToolTest
+        // publishes List.of() in @BeforeEach and restores in @AfterEach, so there are
+        // as many wipe windows as it has test methods. Reading the registry without
+        // re-publishing first made this assertion fail on whichever run happened to
+        // land inside one. registerAll() is the same "restore the canonical set" call
+        // McpConnectionManagerTest and McpServerServiceTest already use for this.
+        ToolRegistrationJob.registerAll();
         assertNotNull(ToolRegistry.lookupTool("exec"),
                 "exec must be registered for this wiring assertion to mean anything");
 
