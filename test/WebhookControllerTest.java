@@ -6,11 +6,17 @@ import models.SlackBinding;
 import models.TelegramBinding;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.EventLogger;
 import services.Tx;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.function.Supplier;
 
 /**
@@ -114,6 +120,81 @@ class WebhookControllerTest extends FunctionalTest {
     // unmatched webhook (no binding for the number) acks with 200 and processes
     // nothing — see WebhookWhatsAppControllerTest.postAcksUnknownPhoneNumberId — so the
     // old app-global "unconfigured → 401" path no longer exists to assert here.
+
+    // ===== Cross-cutting: the /api/webhooks/ prefix =====
+
+    /**
+     * The webhook routes are this app's only unauthenticated surface. They carry no
+     * {@code @With(AuthCheck.class)}, and Play seeds a request's {@code @Before} set solely
+     * from the resolved controller's own class hierarchy plus its {@code @With} chain — so
+     * {@code AuthCheck} never runs for them at all. Each controller verifies its provider's
+     * signature itself instead.
+     *
+     * <p>Nothing cross-cutting held that second half: a sixth route added under this prefix
+     * would be silently public, and every existing test would still pass. This list is that
+     * tripwire — it fails on any change to the surface, forcing the author to state how the
+     * new route authenticates.
+     *
+     * <p><b>Do not "strengthen" this into "an unsigned request must not return 2xx".</b> Two
+     * paths deliberately ack with 200 so the provider stops retrying: a disabled Telegram
+     * binding ({@link #telegramWebhookDisabledBindingReturns200WithoutProcessing}) and a
+     * WhatsApp payload whose {@code phone_number_id} matches no binding
+     * ({@code WebhookWhatsAppControllerTest.postAcksUnknownPhoneNumberId}). The status code
+     * is not the security property — not reaching agent code is, and that is asserted per
+     * controller.
+     */
+    @Test
+    void theUnauthenticatedWebhookSurfaceIsExactlyTheseRoutes() {
+        var expected = new TreeSet<>(List.of(
+                "GET /api/webhooks/whatsapp",
+                "POST /api/webhooks/slack/{bindingId}",
+                "POST /api/webhooks/slack/{bindingId}/interactive",
+                "POST /api/webhooks/telegram/{bindingId}",
+                "POST /api/webhooks/whatsapp"));
+
+        assertEquals(expected, webhookRoutes(),
+                "The unauthenticated /api/webhooks/ surface changed. Every route under this "
+                        + "prefix bypasses AuthCheck entirely, so it MUST verify its provider's "
+                        + "signature itself — see WebhookSlackController.resolveAndVerify for the "
+                        + "shape. Update this list only after confirming the new route does.");
+    }
+
+    @Test
+    void everyWebhookRouteAnswersUnsignedTrafficWithoutCrashing() {
+        // An unauthenticated caller reaching any of these must get a decision, not a stack
+        // trace. 4xx (rejected) and 200 (deliberate ack, see above) are both legitimate;
+        // 5xx means the route met unsigned input it was not written to handle.
+        for (var route : webhookRoutes()) {
+            var parts = route.split(" ", 2);
+            var path = parts[1].replaceAll("\\{[^}]+}", "99999");
+            var response = "GET".equals(parts[0])
+                    ? GET(path)
+                    : POST(path, "application/json", "{}");
+            assertTrue(response.status < 500,
+                    route + " returned " + response.status + " to an unsigned request");
+        }
+    }
+
+    /**
+     * The {@code /api/webhooks/} routes as declared in {@code conf/routes}, rendered
+     * {@code "METHOD path"}. Read from the file rather than hardcoded so the tripwire above
+     * sees a route the moment it is added, not when someone remembers to update a list.
+     */
+    private static SortedSet<String> webhookRoutes() {
+        try {
+            var found = new TreeSet<String>();
+            for (var line : Files.readAllLines(Play.getFile("conf/routes").toPath())) {
+                var trimmed = line.strip();
+                if (trimmed.isEmpty() || trimmed.startsWith("#")) continue;
+                var cols = trimmed.split("\\s+");
+                if (cols.length < 2 || !cols[1].startsWith("/api/webhooks/")) continue;
+                found.add(cols[0] + " " + cols[1]);
+            }
+            return found;
+        } catch (IOException e) {
+            throw new AssertionError("cannot read conf/routes", e);
+        }
+    }
 
     // ===== Helpers =====
 

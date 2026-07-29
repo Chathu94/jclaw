@@ -32,7 +32,17 @@ public class AuthCheck extends Controller {
     static void checkAuthentication() {
         var path = Http.Request.current().path;
 
-        // Webhook endpoints are verified by their own signature mechanisms
+        // Webhook endpoints are verified by their own signature mechanisms.
+        //
+        // Belt-and-braces: this branch does not currently fire. The webhook controllers
+        // carry no @With(AuthCheck.class), and Play builds a request's @Before set solely
+        // from the resolved controller's own class hierarchy plus its @With chain
+        // (ActionInvoker.handleBefores -> Java.findAllAnnotatedMethods), so this
+        // interceptor is not in their chain to begin with. Kept because it is the
+        // cheap half of a fail-safe: it only becomes load-bearing if a webhook
+        // controller is ever annotated, and then it is the difference between a
+        // working webhook and a 401 nobody can explain. The surface it guards is
+        // pinned by WebhookControllerTest.theUnauthenticatedWebhookSurfaceIsExactlyTheseRoutes.
         if (path.startsWith("/api/webhooks/")) {
             return;
         }
