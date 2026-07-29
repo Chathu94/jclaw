@@ -52,7 +52,6 @@ class DangerousActionGateTest extends UnitTest {
     private static final Pattern CALLBACK_ID = Pattern.compile("a:[osad]:([0-9a-f]+)");
 
     private MockTelegramServer server;
-    private List<ToolRegistry.Tool> originalTools;
 
     @BeforeEach
     void setup() throws Exception {
@@ -63,11 +62,10 @@ class DangerousActionGateTest extends UnitTest {
         server = new MockTelegramServer();
         server.start();
         TelegramChannel.installForTest(BOT_TOKEN, server.telegramUrl());
-        // JCLAW-894: lock the registry and start from the canonical native set, so
-        // this snapshot is a known baseline rather than whatever a concurrently
+        // JCLAW-894: lock the registry and install the canonical native set, so this
+        // class starts from a known baseline rather than whatever a concurrently
         // running class last published.
         ToolRegistrySync.canonicalForTest();
-        originalTools = ToolRegistry.listTools();
         ToolRegistry.publish(List.of(stubTool(DANGEROUS_TOOL, true), stubTool(SAFE_TOOL, false),
                 new tools.JClawApiTool()));
     }

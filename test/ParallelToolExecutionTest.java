@@ -29,7 +29,6 @@ class ParallelToolExecutionTest extends UnitTest {
 
     private static final long TOOL_SLEEP_MS = 300;
 
-    private List<ToolRegistry.Tool> originalTools;
     private AtomicInteger concurrentExecutions;
     private AtomicInteger peakConcurrency;
     /** Append-only record of the order in which sleep tools began executing,
@@ -40,11 +39,10 @@ class ParallelToolExecutionTest extends UnitTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        // JCLAW-894: lock the registry and start from the canonical native set, so
-        // this snapshot is a known baseline rather than whatever a concurrently
+        // JCLAW-894: lock the registry and install the canonical native set, so this
+        // class starts from a known baseline rather than whatever a concurrently
         // running class last published.
         ToolRegistrySync.canonicalForTest();
-        originalTools = ToolRegistry.listTools();
         concurrentExecutions = new AtomicInteger();
         peakConcurrency = new AtomicInteger();
         executionOrder = java.util.Collections.synchronizedList(new ArrayList<>());

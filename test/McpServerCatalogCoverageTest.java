@@ -25,16 +25,14 @@ import java.util.Set;
  */
 class McpServerCatalogCoverageTest extends UnitTest {
 
-    private List<ToolRegistry.Tool> originalTools;
 
     @BeforeEach
     void saveRegistry() {
         Fixtures.deleteDatabase();
-        // JCLAW-894: lock the registry and start from the canonical native set, so
-        // this snapshot is a known baseline rather than whatever a concurrently
+        // JCLAW-894: lock the registry and install the canonical native set, so this
+        // class starts from a known baseline rather than whatever a concurrently
         // running class last published.
         ToolRegistrySync.canonicalForTest();
-        originalTools = ToolRegistry.listTools();
     }
 
     @AfterEach

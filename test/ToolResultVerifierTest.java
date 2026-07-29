@@ -7,9 +7,11 @@ import tools.ShellExecTool;
 import utils.LatencyStats;
 import utils.LatencyTrace;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -261,6 +263,12 @@ class ToolResultVerifierTest extends UnitTest {
     /** Outside a turn there is nothing to bill, matching {@code countLlmCall}. */
     @Test
     void countingOutsideATurnIsANoOp() {
-        LatencyTrace.countToolVerification(true);
+        // Assert the precondition rather than assume it (java:S2699): "no-op outside
+        // a turn" only means anything if no trace is actually bound to this thread,
+        // and a test that merely called the method would still pass if the binding
+        // leaked from somewhere else.
+        assertNull(LatencyTrace.current(), "this assertion is only meaningful outside a turn");
+        assertDoesNotThrow(() -> LatencyTrace.countToolVerification(true),
+                "counting with no bound trace must be a silent no-op, not an NPE");
     }
 }
