@@ -85,9 +85,9 @@ Present a table (file · drift item · `current → correct` · tier · FIX/REPO
 **Phase 6 — Commit locally & report (stop here; never push)**
 
 14. Stage only the docs you actually changed with `/usr/bin/git add <paths>`. Docs-only commits short-circuit the `pre-commit` hook (no staged `frontend/**` files), so there's zero lint cost.
-15. Create a local commit. For the trailer, use the `Co-Authored-By:` line your standing instructions specify, which names the model actually authoring the commit. **Do not hardcode a model version in this file.** It goes stale at every model bump, and a wrong trailer breaks nothing — no hook, test, or push rejects it — so the drift survives indefinitely. If your instructions specify no trailer, omit it rather than guessing a model name.
+15. Create a **signed** local commit. The `-S` flag is explicit even though `commit.gpgsign=true` is set globally — this documents the workflow's intent in the file and survives if the global config is ever disabled or the run happens on a machine missing it. For the trailer, use the `Co-Authored-By:` line your standing instructions specify, which names the model actually authoring the commit. **Do not hardcode a model version in this file.** It goes stale at every model bump, and a wrong trailer breaks nothing — no hook, test, or push rejects it — so the drift survives indefinitely. If your instructions specify no trailer, omit it rather than guessing a model name.
     ```bash
-    /usr/bin/git commit -m "$(cat <<'EOF'
+    /usr/bin/git commit -S -m "$(cat <<'EOF'
     docs: realign <scope> with codebase (v<VERSION>)
 
     <one short paragraph: what drifted and what was corrected — e.g. version

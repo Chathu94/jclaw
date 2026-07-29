@@ -61,7 +61,7 @@ Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batc
      pnpm typecheck
      pnpm stylelint
      ```
-   - **Commit the regenerated lockfile** once the gate is green (one suite run for the whole frontend batch, mirroring the backend phase): `/usr/bin/git add frontend/pnpm-lock.yaml && /usr/bin/git commit -m "chore(deps): regenerate pnpm-lock.yaml after renovate frontend merges"` (signed via the global config). If the gate fails, report it and let the user decide which bump to drop — don't guess which branch broke the batch.
+   - **Commit the regenerated lockfile** once the gate is green (one suite run for the whole frontend batch, mirroring the backend phase): `/usr/bin/git add frontend/pnpm-lock.yaml && /usr/bin/git commit -S -m "chore(deps): regenerate pnpm-lock.yaml after renovate frontend merges"`. The `-S` is explicit even though `commit.gpgsign=true` is set globally — it documents the intent here and survives if that config is ever disabled or the run happens on a machine missing it. If the gate fails, report it and let the user decide which bump to drop — don't guess which branch broke the batch.
 
    Note: the full regen may pick up patches slightly newer than each branch targeted (e.g. a transitive `17.10.0 → 17.11.0`), all within the existing `^x.y.z` ranges — that's the same "latest within range" intent Renovate had, done in one pass. Fine.
 

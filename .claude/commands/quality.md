@@ -31,10 +31,11 @@ Reject anything else with a clear message; do not guess.
    ```bash
    /usr/bin/git worktree add ../jclaw-quality -b quality-sweep
    ```
-   The `post-checkout` hook seeds `certs/.env`. Pin the test port to 9350 (or the next free port if 9350 is bound — note which):
+   The `post-checkout` hook runs `init-worktree`, which seeds `certs/.env` with its secret **and** a deterministic `PLAY_TEST_PORT` derived from the worktree path — collision-free across worktrees and against the primary tree. Read it and note it in the report:
    ```bash
-   grep -q '^PLAY_TEST_PORT=' ../jclaw-quality/certs/.env || printf 'PLAY_TEST_PORT=9350\n' >> ../jclaw-quality/certs/.env
+   grep '^PLAY_TEST_PORT=' ../jclaw-quality/certs/.env
    ```
+   **Do not override it with a fixed port** — the primary tree pins its own value, so a hardcoded pin here risks colliding with a `play autotest` running there.
    Do all work in `../jclaw-quality`. Establish a green baseline first (`cd ../jclaw-quality && play autotest`) so any later red is attributable to the sweep, not a pre-existing flake.
 2. Resolve the **scope set**: the `.java` files under the path argument (default `app/`), minus the always-out-of-scope paths above. Report the file count so the run's breadth is visible.
 
@@ -117,7 +118,7 @@ Goal: remove `build.gradle.kts` dependencies **definitely** unused. This is the 
 **Phase 5 — Validate & report**
 
 16. Final gate from the worktree: `cd ../jclaw-quality && ./gradlew spotlessApply && play autotest`. Confirm the JCLAW-684 green signal — the log contains `~ All tests passed` **and** there are no `test-result/*.class.failed.html` sentinels (exit code alone can lie). 
-    - **Env-flake guard:** if a broad batch of *unrelated* controller/functional tests fails (401s, FK violations, `awaitCommitted` timeouts), that's the known live-app / load interference (the primary tree's dev server adds load) — confirm the port is isolated (9350) and re-run once; don't chase it as a real failure.
+    - **Env-flake guard:** if a broad batch of *unrelated* controller/functional tests fails (401s, FK violations, `awaitCommitted` timeouts), that's the known live-app / load interference (the primary tree's dev server adds load) — confirm the worktree's hook-seeded `PLAY_TEST_PORT` is actually free (`lsof -nP -iTCP:<port> -sTCP:LISTEN`) and re-run once; don't chase it as a real failure.
 17. Summarize per pass: comments trimmed/removed (+ any kept-despite-verbosity), dead-code symbols removed (+ any "possibly dead" left for the human), modernizations by kind, and deps dropped (+ any "possibly unused" left) **or the "skipped — subtree scope" note** — plus the worktree path (`../jclaw-quality`), branch (`quality-sweep`), the per-pass commit hashes, and the final test result. Leave the branch for the user to review and merge or `/deploy`. **If no pass produced a commit** (e.g. an already-clean subtree, as `app/utils` is post-audit), say so plainly and remove the empty worktree (`/usr/bin/git worktree remove ../jclaw-quality`) rather than leaving an empty branch to review.
 
 ---
