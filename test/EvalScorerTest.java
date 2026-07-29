@@ -172,6 +172,66 @@ class EvalScorerTest extends UnitTest {
         assertTrue(failures.getFirst().contains("unexpected [datetime]"), failures.getFirst());
     }
 
+    // ==================== tool_args_include (JCLAW-883) ====================
+
+    private static EvalScorer.Response callingWithArgs(String tool, String... argJsons) {
+        return new EvalScorer.Response("answer", List.of(tool), List.of(tool),
+                java.util.Map.of(tool, List.of(argJsons)), 1, null);
+    }
+
+    private static EvalCheck argsInclude(String tool, String expectedJson) {
+        return new EvalCheck(EvalCheck.Kind.TOOL_ARGS_INCLUDE, List.of(tool), schema(expectedJson), 0);
+    }
+
+    @Test
+    void toolArgsIncludeSeparatesTwoUsesOfOneTool() {
+        // The gap the name-only checks cannot close: datetime answers "what time is
+        // it" with action=now and a date span with action=calculate. Against
+        // tools_called_exactly: [datetime] both pass, so a clock reading would score
+        // as correct date arithmetic.
+        var calculate = callingWithArgs("datetime", "{\"action\":\"calculate\",\"timestamp\":\"2024-02-14\"}");
+        assertTrue(EvalScorer.failures(caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")), calculate)
+                .isEmpty());
+
+        var now = callingWithArgs("datetime", "{\"action\":\"now\"}");
+        var failures = EvalScorer.failures(caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")), now);
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("no datetime call carried"), failures.getFirst());
+    }
+
+    @Test
+    void toolArgsIncludeIgnoresArgumentsTheCaseDidNotPin() {
+        // Subset, not equality: a timezone the model may default is not the point of
+        // the case, and pinning it would make the case brittle for no gain.
+        var response = callingWithArgs("datetime",
+                "{\"action\":\"calculate\",\"timezone\":\"Asia/Kuala_Lumpur\",\"endTimestamp\":\"2024-06-01\"}");
+
+        assertTrue(EvalScorer.failures(caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")), response)
+                .isEmpty());
+    }
+
+    @Test
+    void toolArgsIncludePassesWhenAnyCallMatches() {
+        // A turn may legitimately use one tool several ways; the case asserts that
+        // one of those uses happened, not that all of them did.
+        var response = callingWithArgs("datetime", "{\"action\":\"now\"}", "{\"action\":\"calculate\"}");
+
+        assertTrue(EvalScorer.failures(caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")), response)
+                .isEmpty());
+    }
+
+    @Test
+    void toolArgsIncludeSaysWhenTheToolWasNeverCalled() {
+        // Distinct from "called it differently": one is a tool-selection failure and
+        // the other an argument failure, and they send the reader to different fixes.
+        var failures = EvalScorer.failures(
+                caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")),
+                new EvalScorer.Response("answer", List.of(), List.of(), java.util.Map.of(), 1, null));
+
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("recorded no dispatched call"), failures.getFirst());
+    }
+
     @Test
     void maxLlmCallsFailsWhenTheTurnExceedsItsBudget() {
         // The epic's efficiency NFR (JCLAW-833) expressed as a dataset assertion:

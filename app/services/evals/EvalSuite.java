@@ -21,7 +21,7 @@ import java.util.List;
  * which cases changed; the fingerprint supplies the part git cannot, which is
  * telling two <em>runs</em> apart at scoring time.
  */
-public record EvalSuite(String id, String description, List<EvalCase> cases) {
+public record EvalSuite(String id, String description, List<String> requiredTools, List<EvalCase> cases) {
 
     /**
      * ASCII unit separator between canonical fields. A character that cannot occur
@@ -33,6 +33,12 @@ public record EvalSuite(String id, String description, List<EvalCase> cases) {
 
     public EvalSuite {
         cases = cases == null ? List.of() : List.copyOf(cases);
+        requiredTools = requiredTools == null ? List.of() : List.copyOf(requiredTools);
+    }
+
+    /** Convenience for suites that need no tools — grounding and structured-output. */
+    public EvalSuite(String id, String description, List<EvalCase> cases) {
+        this(id, description, List.of(), cases);
     }
 
     /**
@@ -52,6 +58,9 @@ public record EvalSuite(String id, String description, List<EvalCase> cases) {
      */
     public String fingerprint() {
         var canonical = new StringBuilder(id);
+        // Part of the canonical form: granting a suite a different tool set changes
+        // what its pass rate measures just as surely as editing a check does.
+        canonical.append(FIELD_SEP).append(requiredTools);
         for (var testCase : cases) {
             canonical.append(FIELD_SEP).append(testCase.id())
                     .append(FIELD_SEP).append(testCase.input());

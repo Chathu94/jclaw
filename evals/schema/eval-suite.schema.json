@@ -2,10 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jclaw.dev/evals/schema/eval-suite.schema.json",
   "title": "JClaw eval suite",
-  "description": "A set of eval cases. One suite per file, named <id>.json. Edit suites in place — git holds the history, and each run records a content fingerprint so two runs scored by different suite content are never compared silently. JCLAW-875, JCLAW-883.",
+  "description": "A set of eval cases. One suite per file, named <id>.json. Edit suites in place \u2014 git holds the history, and each run records a content fingerprint so two runs scored by different suite content are never compared silently. JCLAW-875, JCLAW-883.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "description", "cases"],
+  "required": [
+    "id",
+    "description",
+    "cases"
+  ],
   "properties": {
     "id": {
       "type": "string",
@@ -17,17 +21,31 @@
       "minLength": 1,
       "description": "What behaviour this suite measures."
     },
+    "requiredTools": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tools this suite needs granted to measure anything. Capture grants exactly these to the __evaltest__ agent before a sweep and revokes the rest, so a run is reproducible from the repository rather than depending on whatever was last clicked in the agent editor. Omit for suites whose cases are self-contained prompts. Never rewrites a non-__evaltest__ agent's configuration."
+    },
     "cases": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/case" }
+      "items": {
+        "$ref": "#/$defs/case"
+      }
     }
   },
   "$defs": {
     "case": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "input", "rubric", "checks"],
+      "required": [
+        "id",
+        "input",
+        "rubric",
+        "checks"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -47,14 +65,18 @@
         "checks": {
           "type": "array",
           "minItems": 1,
-          "items": { "$ref": "#/$defs/check" }
+          "items": {
+            "$ref": "#/$defs/check"
+          }
         }
       }
     },
     "check": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind"],
+      "required": [
+        "kind"
+      ],
       "properties": {
         "kind": {
           "type": "string",
@@ -65,6 +87,7 @@
             "json_schema",
             "tools_called_exactly",
             "tools_called_within",
+            "tool_args_include",
             "max_llm_calls"
           ],
           "description": "Every kind is decidable without a model call. Model-judged checks land with the critic (JCLAW-836)."
@@ -72,12 +95,14 @@
         "args": {
           "type": "array",
           "minItems": 0,
-          "items": { "type": "string" },
-          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tools_called_exactly: the complete set of tool names the turn may call, compared as a multiset — an empty array asserts no tool at all. tools_called_within: the tools the turn MAY call, none of them required — the 'or' form, for when a tool is optional because the harness already supplied what it would return. Tool assertions are allowlists on purpose: a denylist only catches rogue calls someone predicted. Per-kind arity is enforced by EvalDatasetLoader; only tools_called_exactly permits an empty array."
+          "items": {
+            "type": "string"
+          },
+          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tools_called_exactly: the complete set of tool names the turn may call, compared as a multiset \u2014 an empty array asserts no tool at all. tools_called_within: the tools the turn MAY call, none of them required \u2014 the 'or' form, for when a tool is optional because the harness already supplied what it would return. Tool assertions are allowlists on purpose: a denylist only catches rogue calls someone predicted. tool_args_include: one tool name, paired with a 'schema' holding the expected arguments. Per-kind arity is enforced by EvalDatasetLoader; only tools_called_exactly permits an empty array."
         },
         "schema": {
           "type": "object",
-          "description": "json_schema only: the schema the response must satisfy. EvalScorer implements a documented subset — type, properties, required, items, enum, additionalProperties, description — and the loader rejects any other keyword rather than ignoring it."
+          "description": "json_schema: the JSON Schema the response must satisfy \u2014 EvalScorer implements a documented subset (type, properties, required, items, enum, additionalProperties, description) and the loader rejects any other keyword rather than ignoring it. tool_args_include: NOT a JSON Schema but a literal subset of the arguments a call must have carried, so its keys are the tool's own parameter names and no schema vocabulary applies."
         },
         "limit": {
           "type": "integer",

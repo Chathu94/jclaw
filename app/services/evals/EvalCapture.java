@@ -5,8 +5,10 @@ import agents.AgentRunner;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.AgentToolConfig;
 import services.AttachmentService;
 import services.EventLogger;
+import services.Tx;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
@@ -15,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Drives a live agent through an {@link EvalSuite} and records what it produced,
@@ -138,8 +141,48 @@ public final class EvalCapture {
      * unmeasured, not as a quality collapse.
      */
     public static Capture run(EvalSuite suite, Agent agent, int maxConcurrency) {
+        calibrate(suite, agent);
         return run(suite, agent, maxConcurrency,
                 (a, prompt, sink) -> AgentRunner.runForTask(a, prompt, sink).content());
+    }
+
+    /**
+     * Grant the eval agent exactly the tools this suite declares, revoking anything
+     * else (JCLAW-883).
+     *
+     * <p>Without it the agent's tool surface is whatever the last sweep or the last
+     * click in the agent editor left behind, so a suite's pass rate silently depends
+     * on state that has nothing to do with the suite. Declaring the tools in the
+     * suite file and applying them here makes a sweep reproducible from the
+     * repository alone.
+     *
+     * <p>Only ever touches {@code __evaltest__}. Pointing capture at an agent the
+     * operator configured themselves must not rewrite their configuration — if that
+     * agent lacks a tool the suite needs, the cases fail and say which tool is
+     * missing, which is the correct outcome for an agent this code does not own.
+     */
+    // Public because Play's tests live in the default package. Calling it directly is
+    // also legitimate for an operator tool that wants to stage an agent without
+    // sweeping — the guard against touching a non-eval agent is inside, not at the
+    // call site, so exposure cannot widen what it is willing to rewrite.
+    public static void calibrate(EvalSuite suite, Agent agent) {
+        if (agent == null || !agent.isEvalTest()) return;
+
+        commitInFreshTx(() -> {
+            AgentToolConfig.delete("agent = ?1", agent);
+            for (var tool : suite.requiredTools()) {
+                var config = new AgentToolConfig();
+                config.agent = agent;
+                config.toolName = tool;
+                config.enabled = true;
+                config.save();
+            }
+        });
+        ToolRegistry.invalidateDisabledToolsCache(agent);
+
+        EventLogger.info(EVENT_CATEGORY, "Calibrated %s for suite '%s': granted %s"
+                .formatted(Agent.EVALTEST_AGENT_NAME, suite.id(),
+                        suite.requiredTools().isEmpty() ? "no tools" : suite.requiredTools()));
     }
 
     /**
@@ -159,6 +202,43 @@ public final class EvalCapture {
         return new Capture(suite.id(), suite.fingerprint(), responses);
     }
 
+    /**
+     * Run {@code block} in a transaction that COMMITS before returning, whatever the
+     * caller is inside (JCLAW-883).
+     *
+     * <p>{@link Tx#run} deliberately joins an ambient transaction rather than
+     * orphaning its EntityManager, so calibration called from a controller action
+     * writes into the request's transaction and stays uncommitted until that action
+     * returns. The sweep starts before then, and each case runs on its own virtual
+     * thread with its own persistence context — which cannot see uncommitted rows
+     * from another transaction. The first calibrated sweep did exactly this: the
+     * grants were written and logged, and every tool still read as disabled, so the
+     * model was offered nothing and fell back to guessing names.
+     *
+     * <p>A fresh thread has no ambient transaction, so {@code Tx.run} takes its
+     * {@code JPA.withTransaction} branch and commits. Same shape as the
+     * {@code commitInFreshTx} helper the tests use for HTTP-visible seeding.
+     */
+    private static void commitInFreshTx(Runnable block) {
+        var error = new AtomicReference<Throwable>();
+        var thread = Thread.ofPlatform().name("eval-calibrate").start(() -> {
+            try {
+                Tx.run(block);
+            } catch (Throwable t) {
+                error.set(t);
+            }
+        });
+        try {
+            thread.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while calibrating the eval agent", e);
+        }
+        if (error.get() != null) {
+            throw new IllegalStateException("Could not calibrate the eval agent", error.get());
+        }
+    }
+
     private static EvalScorer.Response captureOne(EvalCase testCase, Agent agent, TurnRunner turns) {
         // Counts this turn's model calls (JCLAW-882) without ever being ended — see
         // the class comment on why an eval turn must not reach LatencyStats. The
@@ -170,7 +250,7 @@ public final class EvalCapture {
         try (var _ = LatencyTrace.bind(trace)) {
             var content = turns.run(agent, testCase.input(), sink);
             return new EvalScorer.Response(content, sink.toolsCalled(), sink.toolsAttempted(),
-                    trace.llmCallCount());
+                    sink.toolArgs(), trace.llmCallCount(), null);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY,
                     "Eval case '%s' errored: %s".formatted(testCase.id(), e));
@@ -200,7 +280,14 @@ public final class EvalCapture {
         // appendAssistantMessage, appendToolResult and noteToolOutcome for one call
         // before moving to the next, so the id is always already known here.
         private final Map<String, String> nameByCallId = new ConcurrentHashMap<>();
+        private final Map<String, String> argsByCallId = new ConcurrentHashMap<>();
         private final List<String> dispatched = Collections.synchronizedList(new ArrayList<>());
+
+        // Arguments of DISPATCHED calls, per tool, in call order. Keyed by tool name
+        // rather than kept as a flat list because that is how a check reads it:
+        // "did the datetime call carry action=calculate" needs that tool's calls, not
+        // a positional index into every call the turn made.
+        private final Map<String, List<String>> argsByTool = new ConcurrentHashMap<>();
 
         @Override
         public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
@@ -222,7 +309,12 @@ public final class EvalCapture {
         public void noteToolOutcome(String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {
             if (outcome != ToolRegistry.ToolResult.Outcome.DISPATCHED) return;
             var name = nameByCallId.get(toolCallId);
-            if (name != null) dispatched.add(name);
+            if (name == null) return;
+            dispatched.add(name);
+            var args = argsByCallId.get(toolCallId);
+            if (args != null) {
+                argsByTool.computeIfAbsent(name, _ -> Collections.synchronizedList(new ArrayList<>())).add(args);
+            }
         }
 
         @Override
@@ -246,7 +338,14 @@ public final class EvalCapture {
                 if (name == null || name.isJsonNull()) return;
                 attempted.add(name.getAsString());
                 var id = obj.get("id");
-                if (id != null && !id.isJsonNull()) nameByCallId.put(id.getAsString(), name.getAsString());
+                if (id == null || id.isJsonNull()) return;
+                nameByCallId.put(id.getAsString(), name.getAsString());
+                // Arguments ride in the same serialized ToolCall the executor commits,
+                // so capturing them needs no extra plumbing — only keeping them.
+                var args = fn.get("arguments");
+                if (args != null && !args.isJsonNull()) {
+                    argsByCallId.put(id.getAsString(), args.getAsString());
+                }
             } catch (RuntimeException e) {
                 EventLogger.warn(EVENT_CATEGORY, "Unparseable tool call in eval capture: " + e);
             }
@@ -260,6 +359,13 @@ public final class EvalCapture {
         /** Every name the model emitted, dispatched or refused. */
         List<String> toolsAttempted() {
             return List.copyOf(attempted);
+        }
+
+        /** Arguments of dispatched calls, per tool, in call order. */
+        Map<String, List<String>> toolArgs() {
+            var copy = new LinkedHashMap<String, List<String>>();
+            argsByTool.forEach((tool, args) -> copy.put(tool, List.copyOf(args)));
+            return Map.copyOf(copy);
         }
     }
 }

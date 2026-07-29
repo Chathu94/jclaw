@@ -64,6 +64,21 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
          * that, so the loader rejects it.
          */
         TOOLS_CALLED_WITHIN,
+        /**
+         * A dispatched call to the named tool carried every key in {@link #schema()}
+         * with an equal value. {@code args} holds the one tool name; the schema is
+         * the expected argument subset, not a JSON Schema.
+         *
+         * <p>The tools-called kinds see names only, so they cannot tell one use of a
+         * tool from another. {@code datetime} answers "what time is it" with
+         * {@code action=now} and "how many days between two dates" with
+         * {@code action=calculate}; against {@code tools_called_exactly: [datetime]}
+         * both pass, and a case about date arithmetic would score a clock reading as
+         * correct. Subset rather than equality so a case pins the argument that
+         * carries its meaning without also pinning the ones that do not — a timezone
+         * the model is free to default is not the point of the case (JCLAW-883).
+         */
+        TOOL_ARGS_INCLUDE,
         /** The turn used at most {@link #limit()} model calls (JCLAW-833's NFR). */
         MAX_LLM_CALLS;
 

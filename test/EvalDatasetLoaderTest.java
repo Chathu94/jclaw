@@ -116,6 +116,41 @@ class EvalDatasetLoaderTest extends UnitTest {
         assertEquals("sample", suites.get(1).id());
     }
 
+    @Test
+    void parsesRequiredToolsAndFoldsThemIntoTheFingerprint() throws Exception {
+        // Granting a suite a different tool set changes what its pass rate measures
+        // just as surely as editing a check does, so it belongs in the canonical form.
+        var none = EvalDatasetLoader.loadSuite(write("sample.json", VALID));
+        assertTrue(none.requiredTools().isEmpty(), "absent means no tools, not a parse error");
+
+        var withTools = EvalDatasetLoader.loadSuite(write("sample.json", VALID.replace(
+                "\"description\": \"A sample suite\",",
+                "\"description\": \"A sample suite\", \"requiredTools\": [\"datetime\", \"web_search\"],")));
+
+        assertEquals(List.of("datetime", "web_search"), withTools.requiredTools());
+        assertNotEquals(none.fingerprint(), withTools.fingerprint());
+    }
+
+    @Test
+    void rejectsRequiredToolsThatIsNotAnArrayOfNames() throws Exception {
+        var msg = refusal("sample.json", VALID.replace(
+                "\"description\": \"A sample suite\",",
+                "\"description\": \"A sample suite\", \"requiredTools\": \"datetime\","));
+        assertNotNull(msg);
+        assertTrue(msg.contains("requiredTools"), msg);
+    }
+
+    @Test
+    void rejectsToolArgsIncludeWithoutExpectedArguments() throws Exception {
+        // The kind is meaningless without a subset to match, and an empty object
+        // would silently pass on every call to the tool.
+        var msg = refusal("sample.json", VALID.replace(
+                "{\"kind\": \"tools_called_within\", \"args\": [\"web_search\"]}",
+                "{\"kind\": \"tool_args_include\", \"args\": [\"web_search\"], \"schema\": {}}"));
+        assertNotNull(msg);
+        assertTrue(msg.contains("non-empty object"), msg);
+    }
+
     // ==================== Fingerprint (JCLAW-883) ====================
 
     @Test

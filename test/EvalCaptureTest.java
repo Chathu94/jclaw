@@ -79,6 +79,33 @@ class EvalCaptureTest extends UnitTest {
     }
 
     @Test
+    void capturedRecordCarriesTheArgumentsOfDispatchedCalls() {
+        // Arguments ride in the same serialized ToolCall the executor already commits,
+        // so this needs no extra plumbing — only keeping them. Without it a check can
+        // see that datetime was called but not which action it was asked for.
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, DATETIME_CALL, null, null, false);
+            sink.noteToolOutcome("call_1", ToolRegistry.ToolResult.Outcome.DISPATCHED);
+            return "It is 11:04.";
+        });
+
+        assertEquals(List.of("{}"), capture.responses().get("clock").argsFor("datetime"));
+    }
+
+    @Test
+    void aRefusedCallContributesNoArguments() {
+        // Symmetric with toolsCalled: a call that reached no tool carried its
+        // arguments nowhere, so asserting on them would be asserting on an intent.
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);
+            sink.noteToolOutcome("call_2", ToolRegistry.ToolResult.Outcome.NOT_ENABLED);
+            return "no search tool";
+        });
+
+        assertTrue(capture.responses().get("clock").argsFor("web_search").isEmpty());
+    }
+
+    @Test
     void anInventedToolNameCountsAsAttemptedOnly() {
         var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
             sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);

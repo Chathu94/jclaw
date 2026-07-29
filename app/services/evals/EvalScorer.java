@@ -10,6 +10,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -46,7 +47,7 @@ public final class EvalScorer {
      * Older recordings have no {@code error} field and deserialise to null.
      */
     public record Response(String output, List<String> toolsCalled, List<String> toolsAttempted,
-                           int llmCalls, String error) {
+                           Map<String, List<String>> toolArgs, int llmCalls, String error) {
 
         public Response {
             output = output == null ? "" : output;
@@ -55,21 +56,29 @@ public final class EvalScorer {
             // "attempted" — every emitted call, dispatched or not. Defaulting the new
             // field to it preserves what those files actually recorded.
             toolsAttempted = toolsAttempted == null ? toolsCalled : List.copyOf(toolsAttempted);
+            // Optional: only a recording that asserts on arguments needs to carry them,
+            // which keeps a hand-written response file as short as it was.
+            toolArgs = toolArgs == null ? Map.of() : Map.copyOf(toolArgs);
         }
 
         /** A turn that produced an answer, where every attempted call also ran. */
         public Response(String output, List<String> toolsCalled, int llmCalls) {
-            this(output, toolsCalled, toolsCalled, llmCalls, null);
+            this(output, toolsCalled, toolsCalled, Map.of(), llmCalls, null);
         }
 
         /** A turn where some attempts were refused: {@code toolsCalled} is the dispatched subset. */
         public Response(String output, List<String> toolsCalled, List<String> toolsAttempted, int llmCalls) {
-            this(output, toolsCalled, toolsAttempted, llmCalls, null);
+            this(output, toolsCalled, toolsAttempted, Map.of(), llmCalls, null);
+        }
+
+        /** Argument JSONs of the dispatched calls to {@code tool}, in call order. */
+        public List<String> argsFor(String tool) {
+            return toolArgs.getOrDefault(tool, List.of());
         }
 
         /** A turn that never produced an answer, and why. */
         public static Response failed(String reason) {
-            return new Response("", List.of(), List.of(), 0, reason);
+            return new Response("", List.of(), List.of(), Map.of(), 0, reason);
         }
 
         /** Names the model emitted that never reached a tool — invented, or not granted. */
@@ -121,6 +130,7 @@ public final class EvalScorer {
             case JSON_SCHEMA -> scoreSchema(check, response, failures);
             case TOOLS_CALLED_EXACTLY -> scoreToolsCalledExactly(check, response, failures);
             case TOOLS_CALLED_WITHIN -> scoreToolsCalledWithin(check, response, failures);
+            case TOOL_ARGS_INCLUDE -> scoreToolArgsInclude(check, response, failures);
             case MAX_LLM_CALLS -> {
                 if (response.llmCalls() > check.limit()) {
                     failures.add("max_llm_calls: used " + response.llmCalls() + " calls, budget " + check.limit());
@@ -166,6 +176,48 @@ public final class EvalScorer {
         if (unexpected.isEmpty()) return;
         failures.add("tools_called_within: unexpected " + unexpected
                 + " (allowed " + check.args() + ", called " + response.toolsCalled() + ")");
+    }
+
+    /**
+     * Did a dispatched call to this tool carry the expected arguments? Passes when
+     * ANY such call matches, because a turn may legitimately call one tool several
+     * ways and the case is asserting that one of them happened.
+     */
+    private static void scoreToolArgsInclude(EvalCheck check, Response response, List<String> failures) {
+        var tool = check.arg();
+        var calls = response.argsFor(tool);
+        if (calls.isEmpty()) {
+            // Distinguishes "never called it" from "called it differently" — the first
+            // is a tool-selection failure, the second an argument failure, and a
+            // single "did not match" would send the reader to the wrong one.
+            failures.add("tool_args_include: " + tool + " recorded no dispatched call with arguments"
+                    + (response.toolsCalled().contains(tool) ? " (called, but the run recorded no arguments)" : ""));
+            return;
+        }
+        for (var raw : calls) {
+            if (argsInclude(raw, check.schema())) return;
+        }
+        failures.add("tool_args_include: no " + tool + " call carried " + check.schema()
+                + " (saw " + calls + ")");
+    }
+
+    /** Every key in {@code expected} present in {@code rawArgs} with an equal value. */
+    private static boolean argsInclude(String rawArgs, JsonObject expected) {
+        JsonObject actual;
+        try {
+            var parsed = JsonParser.parseString(rawArgs == null || rawArgs.isBlank() ? "{}" : rawArgs);
+            if (!parsed.isJsonObject()) return false;
+            actual = parsed.getAsJsonObject();
+        } catch (JsonParseException _) {
+            // A tool call whose arguments do not parse cannot have carried anything;
+            // the truncation guards elsewhere already surface that as its own failure.
+            return false;
+        }
+        for (var entry : expected.entrySet()) {
+            var got = actual.get(entry.getKey());
+            if (got == null || !got.equals(entry.getValue())) return false;
+        }
+        return true;
     }
 
     private static void scoreSchema(EvalCheck check, Response response, List<String> failures) {

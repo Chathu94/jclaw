@@ -56,7 +56,7 @@ public final class EvalDatasetLoader {
             SchemaKeys.TYPE, SchemaKeys.PROPERTIES, SchemaKeys.REQUIRED, SchemaKeys.ITEMS,
             SchemaKeys.ENUM, SchemaKeys.ADDITIONAL_PROPERTIES, SchemaKeys.DESCRIPTION);
 
-    private static final Set<String> SUITE_KEYS = Set.of("id", "description", "cases");
+    private static final Set<String> SUITE_KEYS = Set.of("id", "description", "requiredTools", "cases");
     private static final Set<String> CASE_KEYS = Set.of("id", "input", "rubric", "checks");
     private static final String SCHEMA_KEY = "schema";
     private static final Set<String> CHECK_KEYS = Set.of("kind", "args", SCHEMA_KEY, "limit");
@@ -117,6 +117,7 @@ public final class EvalDatasetLoader {
             throw new IllegalArgumentException(name + ": suite id '" + id + "' does not match the filename");
         }
         var description = requireString(name, root, "description");
+        var requiredTools = parseRequiredTools(name, root);
 
         var casesEl = root.get("cases");
         if (casesEl == null || !casesEl.isJsonArray() || casesEl.getAsJsonArray().isEmpty()) {
@@ -131,7 +132,7 @@ public final class EvalDatasetLoader {
             }
             cases.add(evalCase);
         }
-        return new EvalSuite(id, description, cases);
+        return new EvalSuite(id, description, requiredTools, cases);
     }
 
     private static EvalCase parseCase(String file, JsonElement el) {
@@ -182,6 +183,18 @@ public final class EvalDatasetLoader {
             // "one or more": an empty allowance would mean "no tool permitted", which
             // tools_called_exactly already says more clearly.
             case TOOLS_CALLED_WITHIN -> EvalCheck.of(kind, requireArgs(ctx, obj, kind, 0));
+            case TOOL_ARGS_INCLUDE -> {
+                var args = requireArgs(ctx, obj, kind, 1);
+                var expected = obj.get(SCHEMA_KEY);
+                if (expected == null || !expected.isJsonObject() || expected.getAsJsonObject().isEmpty()) {
+                    throw new IllegalArgumentException(
+                            ctx + ": tool_args_include: 'schema' must be a non-empty object of expected arguments");
+                }
+                // Deliberately NOT validateSchema'd: this is a literal argument subset
+                // to match, not a JSON Schema, so its keys are the tool's parameter
+                // names and none of the JSON Schema vocabulary applies.
+                yield new EvalCheck(kind, args, expected.getAsJsonObject(), 0);
+            }
             case JSON_SCHEMA -> {
                 var schemaEl = obj.get(SCHEMA_KEY);
                 if (schemaEl == null || !schemaEl.isJsonObject()) {
@@ -196,6 +209,34 @@ public final class EvalDatasetLoader {
                 yield EvalCheck.maxLlmCalls(limit);
             }
         };
+    }
+
+    /**
+     * The tools a suite needs granted to run honestly (JCLAW-883). Optional — a suite
+     * whose cases are self-contained prompts (grounding, structured-output) declares
+     * nothing and gets nothing.
+     *
+     * <p>It lives with the suite rather than in the agent config because it is a
+     * property of what the suite measures: {@code tool-selection} is not a meaningful
+     * measurement of anything if the agent cannot reach the tools it is being scored
+     * on selecting. Capture uses it to calibrate the eval agent per suite, which is
+     * what stops "2/6, because nobody clicked the right toggles" being mistaken for
+     * a quality signal.
+     */
+    private static List<String> parseRequiredTools(String name, JsonObject root) {
+        var el = root.get("requiredTools");
+        if (el == null || el.isJsonNull()) return List.of();
+        if (!el.isJsonArray()) {
+            throw new IllegalArgumentException(name + ": 'requiredTools' must be an array of tool names");
+        }
+        var tools = new ArrayList<String>();
+        for (var entry : el.getAsJsonArray()) {
+            if (!entry.isJsonPrimitive() || !entry.getAsJsonPrimitive().isString() || entry.getAsString().isBlank()) {
+                throw new IllegalArgumentException(name + ": 'requiredTools' entries must be non-blank strings");
+            }
+            tools.add(entry.getAsString());
+        }
+        return List.copyOf(tools);
     }
 
     /** Sentinel for {@link #requireArgs}: any number of args, including none. */

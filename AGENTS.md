@@ -76,9 +76,12 @@ Chat Performance histograms — see `evals/README.md` for why each of those hold
 What capture does **not** isolate is tool side effects: tools execute for real,
 so a suite case that provokes a `task_manager` call creates an actual scheduled
 task. Run sweeps against `__evaltest__` — the eval sibling of `__loadtest__`,
-auto-provisioned on first capture, for which **every tool is opt-in** so it can
-only reach what you granted it in the agent editor. Deleting that agent cleans
-up everything a sweep created.
+auto-provisioned on first capture, for which **every tool is opt-in**. Each suite
+declares its own `requiredTools` and capture grants exactly those before the
+sweep, revoking the rest, so a run is reproducible from the repo rather than from
+whatever was last clicked in the agent editor. Only `__evaltest__` is calibrated
+this way — an agent you configured yourself is never rewritten. Deleting the eval
+agent cleans up everything a sweep created.
 
 Related, and not eval-specific: per-agent tool config used to be schema-only —
 it hid a tool from the model but did not stop it running, so a model that guessed

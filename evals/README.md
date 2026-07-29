@@ -75,6 +75,7 @@ Every kind is decidable from the response alone — no judge model.
 | `json_schema` | `schema` | the response parses as JSON and validates |
 | `tools_called_exactly` | `args`: every tool name allowed | the calls made equal that list as a multiset — no extras, no repeats. `[]` means no tool at all |
 | `tools_called_within` | `args`: the tools permitted | every call is in the list, but none is required — the "or" form. Extras and repeats still fail |
+| `tool_args_include` | `args`: one tool name, `schema`: expected arguments | a dispatched call to that tool carried every key in `schema` with an equal value |
 | `max_llm_calls` | `limit` | the turn spent at most `limit` model calls |
 
 `json_schema` implements a subset: `type`, `properties`, `required`, `items`,
@@ -143,6 +144,31 @@ has to come from the tool.
 Prevention and measurement are different jobs, and the two mechanisms compose:
 `__evaltest__`'s opt-in tool surface means an ungranted tool *cannot* fire, while
 `tools_called_exactly` catches a granted tool used when it should not have been.
+
+### Asserting on arguments: `tool_args_include`
+
+The tools-called kinds see names only, so they cannot tell one use of a tool from
+another. `datetime` answers "what time is it?" with `action=now` and "how many
+days between two dates" with `action=calculate`. Against
+`tools_called_exactly: ["datetime"]` both pass — so a case about date arithmetic
+would score a clock reading as correct.
+
+```json
+{ "kind": "tool_args_include", "args": ["datetime"], "schema": {"action": "calculate"} }
+```
+
+`schema` here is **not** a JSON Schema despite sharing the field. It is a literal
+subset of the arguments the call must have carried, so its keys are the tool's own
+parameter names.
+
+Subset, not equality, so a case pins the argument that carries its meaning without
+pinning the ones that do not — a timezone the model is free to default is not what
+the case is about, and pinning it would make the case brittle for no gain. It
+passes if **any** dispatched call to that tool matches, because a turn may
+legitimately use one tool several ways.
+
+Only dispatched calls contribute arguments. A refused call carried its arguments
+nowhere, so asserting on them would be asserting on an intention.
 
 ### What is deliberately missing
 
@@ -283,12 +309,45 @@ The practical consequence: a fresh `__evaltest__` fails every `tool_called` chec
 until you grant the tools that suite needs. That is the safe direction to be
 wrong in, and the failure names the missing tool.
 
-Calibrate it the same way you configure any agent — tools and MCP servers in the
-agent editor, skills through the per-agent skill config. Unlike `__loadtest__` it
-is deliberately **not** in `ApiAgentsController.isReservedName`: reserved rows are
-hidden from every user-facing API, and being able to calibrate this one in the UI
-is the entire point. It is a conventional name with a safe default, not a hidden
-internal row.
+### Calibration comes from the suite
+
+A suite declares what it needs, and capture grants exactly that before the sweep,
+revoking anything else:
+
+```json
+{
+  "id": "tool-selection",
+  "requiredTools": ["web_search", "web_fetch", "datetime", "task_manager"],
+  ...
+}
+```
+
+It lives with the suite because it is a property of what the suite measures —
+`tool-selection` is not a measurement of anything if the agent cannot reach the
+tools it is being scored on selecting. Putting it here also makes a sweep
+reproducible from the repository, rather than depending on whatever was last
+clicked in the agent editor. `requiredTools` is part of the fingerprint for the
+same reason a check is: granting a different tool set changes what the pass rate
+means.
+
+Suites whose cases are self-contained prompts declare nothing and get nothing —
+`grounding` and `structured-output` plant their sources in the prompt itself.
+
+**Only `__evaltest__` is ever calibrated this way.** Point capture at an agent you
+configured yourself and your configuration is left alone; the cases then fail
+naming the tool that was missing, which is the right outcome for an agent this
+code does not own.
+
+You can still adjust it by hand — tools and MCP servers in the agent editor,
+skills through the per-agent skill config — but the next sweep will reset the tool
+grants to what the suite declares. Unlike `__loadtest__` it is deliberately **not**
+in `ApiAgentsController.isReservedName`: reserved rows are hidden from every
+user-facing API, and being able to inspect and adjust this one in the UI is the
+point. It is a conventional name with a safe default, not a hidden internal row.
+
+Granting `task_manager` means the reminder case creates a real scheduled task on
+every sweep. That is the suite doing its job — and it is why the cleanup below
+matters.
 
 To clean up everything a sweep created, delete the agent — `AgentDeletionCascade`
 takes its tasks, runs, and messages with it.
