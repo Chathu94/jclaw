@@ -81,6 +81,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private static final String PARAM_WORKDIR = "workdir";
     private static final String PARAM_TIMEOUT = "timeout";
 
+    /**
+     * Field names of the JSON envelope {@link #execute} returns as its result text.
+     * Named because they are a CONTRACT, not incidental strings: two writers
+     * ({@code executeCommand} and {@code buildTerminalImageEarlyReturn}) must agree
+     * with one reader ({@link #postConditionFailure}), and a typo in any of them
+     * fails silently — the post-condition would just stop finding the key and score
+     * every failed command a clean pass, which is the defect JCLAW-836 stage 1.5
+     * existed to close.
+     */
+    private static final String FIELD_EXIT_CODE = "exitCode";
+    private static final String FIELD_OUTPUT = "output";
+    private static final String FIELD_DURATION_MS = "durationMs";
+    private static final String FIELD_TRUNCATED = "truncated";
+    private static final String FIELD_TIMED_OUT = "timedOut";
+
     /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
     private record AllowlistCache(String raw, Set<String> set) {}
     private static final AtomicReference<AllowlistCache> cachedAllowlist =
@@ -183,11 +198,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // ruled on them before this method was reached.
             return Optional.empty();
         }
-        if (!envelope.has("exitCode")) return Optional.empty();
-        if (envelope.has("timedOut") && envelope.get("timedOut").getAsBoolean()) {
+        if (!envelope.has(FIELD_EXIT_CODE)) return Optional.empty();
+        if (envelope.has(FIELD_TIMED_OUT) && envelope.get(FIELD_TIMED_OUT).getAsBoolean()) {
             return Optional.of("command timed out");
         }
-        int exitCode = envelope.get("exitCode").getAsInt();
+        int exitCode = envelope.get(FIELD_EXIT_CODE).getAsInt();
         return exitCode > 0 ? Optional.of("command exited " + exitCode) : Optional.empty();
     }
 
@@ -464,11 +479,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
 
             var result = new JsonObject();
-            result.addProperty("exitCode", timedOut.get() ? -1 : process.exitValue());
-            result.addProperty("output", processedOutput + (timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
-            result.addProperty("durationMs", durationMs);
-            result.addProperty("truncated", readResult.truncated());
-            result.addProperty("timedOut", timedOut.get());
+            result.addProperty(FIELD_EXIT_CODE, timedOut.get() ? -1 : process.exitValue());
+            result.addProperty(FIELD_OUTPUT, processedOutput + (timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
+            result.addProperty(FIELD_DURATION_MS, durationMs);
+            result.addProperty(FIELD_TRUNCATED, readResult.truncated());
+            result.addProperty(FIELD_TIMED_OUT, timedOut.get());
             return result.toString();
 
         } catch (IOException e) {
@@ -626,14 +641,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
         long durationMs = System.currentTimeMillis() - startTime;
 
         var result = new JsonObject();
-        result.addProperty("exitCode", -1);
-        result.addProperty("output", processedOutput
+        result.addProperty(FIELD_EXIT_CODE, -1);
+        result.addProperty(FIELD_OUTPUT, processedOutput
                 + "\n[Process still running in background — waiting for user interaction. Will timeout after %d seconds."
                         .formatted(timeoutSec)
                 + " The image above is already visible to the user in the chat. Do NOT try to read or fetch it.]");
-        result.addProperty("durationMs", durationMs);
-        result.addProperty("truncated", truncated);
-        result.addProperty("timedOut", false);
+        result.addProperty(FIELD_DURATION_MS, durationMs);
+        result.addProperty(FIELD_TRUNCATED, truncated);
+        result.addProperty(FIELD_TIMED_OUT, false);
         return result.toString();
     }
 
