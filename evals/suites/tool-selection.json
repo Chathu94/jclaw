@@ -1,0 +1,62 @@
+{
+  "id": "tool-selection",
+  "description": "Does the agent reach for the right tool, and ONLY what the job needs? v2 replaces v1's denylist checks with allowlists, so a tool nobody predicted fails the case instead of slipping past.",
+  "cases": [
+    {
+      "id": "current-weather-uses-web-search",
+      "input": "What is the weather in Singapore right now?",
+      "rubric": "Live external fact the model cannot know: one search, nothing else.",
+      "checks": [
+        { "kind": "tools_called_exactly", "args": ["web_search"] },
+        { "kind": "max_llm_calls", "limit": 2 }
+      ]
+    },
+    {
+      "id": "wall-clock-datetime-optional",
+      "input": "What time is it?",
+      "rubric": "CurrentTimeInjector stamps the current time onto the last user message, so answering with no tool is correct and one datetime call is also correct. A web search or a second clock call is not.",
+      "checks": [
+        { "kind": "tools_called_within", "args": ["datetime"] },
+        { "kind": "max_llm_calls", "limit": 2 }
+      ]
+    },
+    {
+      "id": "date-difference-uses-datetime",
+      "input": "How many days are there between 2024-02-14 and 2024-06-01?",
+      "rubric": "The injected clock answers 'now' and nothing else, so this span has to come from datetime's calculate action. It crosses a leap day and four month boundaries — exactly the arithmetic a model gets quietly wrong, where a confident wrong number is worse than a tool call.",
+      "checks": [
+        { "kind": "tools_called_exactly", "args": ["datetime"] },
+        { "kind": "contains_all", "args": ["108"] },
+        { "kind": "max_llm_calls", "limit": 2 }
+      ]
+    },
+    {
+      "id": "arithmetic-needs-no-tool",
+      "input": "What is 17 times 3? Reply with just the number.",
+      "rubric": "Known-answer question: any tool call here is pure overhead, and a second model call means the first one failed to commit. v1 said this and could only forbid two tools by name.",
+      "checks": [
+        { "kind": "contains_all", "args": ["51"] },
+        { "kind": "tools_called_exactly", "args": [] },
+        { "kind": "max_llm_calls", "limit": 1 }
+      ]
+    },
+    {
+      "id": "recurring-reminder-uses-task-manager",
+      "input": "Remind me every weekday at 9am to check the deploy queue.",
+      "rubric": "A recurring reminder is a scheduled task, not a message the agent can promise to send later. One task_manager call creates it; a second would create a duplicate, and v1 had no bound at all.",
+      "checks": [
+        { "kind": "tools_called_exactly", "args": ["task_manager"] },
+        { "kind": "max_llm_calls", "limit": 2 }
+      ]
+    },
+    {
+      "id": "named-url-uses-fetch-not-search",
+      "input": "Summarise https://example.com/pricing for me.",
+      "rubric": "The URL is already known — searching for it adds a round-trip and can land on a different page than the one asked for.",
+      "checks": [
+        { "kind": "tools_called_exactly", "args": ["web_fetch"] },
+        { "kind": "max_llm_calls", "limit": 2 }
+      ]
+    }
+  ]
+}

@@ -37,8 +37,14 @@ public final class EvalDatasetLoader {
     // before can fail now.
     private static final Pattern ID = Pattern.compile("^[a-z0-9]+(-[a-z0-9]+)*+$");
 
-    /** {@code <id>.v<version>.json} — the version is in the name so suites can sit side by side. */
-    private static final Pattern FILE_NAME = Pattern.compile("^([a-z0-9-]+)\\.v(\\d+)\\.json$");
+    /**
+     * {@code <id>.json} — the filename is the suite's identity and nothing else.
+     * JCLAW-883 removed the {@code .v<version>} segment: git holds the history and
+     * {@link EvalSuite#fingerprint()} tells two runs apart, so a hand-maintained
+     * number in the name bought nothing that was not already available and cost the
+     * ability to edit a suite in place at all.
+     */
+    private static final Pattern FILE_NAME = Pattern.compile("^([a-z0-9-]+)\\.json$");
 
     /**
      * The JSON Schema keywords {@link EvalScorer} actually implements. Anything else
@@ -50,7 +56,7 @@ public final class EvalDatasetLoader {
             SchemaKeys.TYPE, SchemaKeys.PROPERTIES, SchemaKeys.REQUIRED, SchemaKeys.ITEMS,
             SchemaKeys.ENUM, SchemaKeys.ADDITIONAL_PROPERTIES, SchemaKeys.DESCRIPTION);
 
-    private static final Set<String> SUITE_KEYS = Set.of("id", "version", "description", "cases");
+    private static final Set<String> SUITE_KEYS = Set.of("id", "description", "cases");
     private static final Set<String> CASE_KEYS = Set.of("id", "input", "rubric", "checks");
     private static final String SCHEMA_KEY = "schema";
     private static final Set<String> CHECK_KEYS = Set.of("kind", "args", SCHEMA_KEY, "limit");
@@ -58,9 +64,11 @@ public final class EvalDatasetLoader {
     private EvalDatasetLoader() {}
 
     /**
-     * Every {@code *.json} suite in {@code dir}, in filename order. Suite ids must be
-     * unique across the directory — two files claiming the same id would produce two
-     * unrelated histories under one report key.
+     * Every {@code *.json} suite in {@code dir}, in filename order.
+     *
+     * <p>No duplicate check here: {@link #loadSuite} refuses a file whose body id
+     * disagrees with its {@code <id>.json} name, so two suites sharing an id would
+     * have to share a filename. The uniqueness guard is the filename.
      */
     public static List<EvalSuite> loadAll(Path dir) {
         if (!Files.isDirectory(dir)) {
@@ -73,14 +81,8 @@ public final class EvalDatasetLoader {
             throw new UncheckedIOException("Cannot list eval suites in " + dir, e);
         }
         var suites = new ArrayList<EvalSuite>(files.size());
-        var seen = new HashSet<String>();
         for (var file : files) {
-            var suite = loadSuite(file);
-            if (!seen.add(suite.id())) {
-                throw new IllegalArgumentException(
-                        file.getFileName() + ": duplicate suite id '" + suite.id() + "' in " + dir);
-            }
-            suites.add(suite);
+            suites.add(loadSuite(file));
         }
         return List.copyOf(suites);
     }
@@ -96,7 +98,7 @@ public final class EvalDatasetLoader {
         var name = file.getFileName().toString();
         var nameMatch = FILE_NAME.matcher(name);
         if (!nameMatch.matches()) {
-            throw new IllegalArgumentException(name + ": filename must be <id>.v<version>.json");
+            throw new IllegalArgumentException(name + ": filename must be <id>.json");
         }
 
         JsonObject root;
@@ -114,10 +116,6 @@ public final class EvalDatasetLoader {
         if (!id.equals(nameMatch.group(1))) {
             throw new IllegalArgumentException(name + ": suite id '" + id + "' does not match the filename");
         }
-        var version = requireInt(name, root, "version");
-        if (version != Integer.parseInt(nameMatch.group(2))) {
-            throw new IllegalArgumentException(name + ": version " + version + " does not match the filename");
-        }
         var description = requireString(name, root, "description");
 
         var casesEl = root.get("cases");
@@ -133,7 +131,7 @@ public final class EvalDatasetLoader {
             }
             cases.add(evalCase);
         }
-        return new EvalSuite(id, version, description, cases);
+        return new EvalSuite(id, description, cases);
     }
 
     private static EvalCase parseCase(String file, JsonElement el) {
@@ -178,7 +176,12 @@ public final class EvalDatasetLoader {
                 }
                 yield EvalCheck.of(kind, args);
             }
-            case TOOL_CALLED, TOOL_NOT_CALLED -> EvalCheck.of(kind, requireArgs(ctx, obj, kind, 1));
+            // Empty args is meaningful here — it asserts the agent called no tool at
+            // all — so this kind is the one that accepts a zero-length list.
+            case TOOLS_CALLED_EXACTLY -> EvalCheck.of(kind, requireArgs(ctx, obj, kind, ANY_ARGS));
+            // "one or more": an empty allowance would mean "no tool permitted", which
+            // tools_called_exactly already says more clearly.
+            case TOOLS_CALLED_WITHIN -> EvalCheck.of(kind, requireArgs(ctx, obj, kind, 0));
             case JSON_SCHEMA -> {
                 var schemaEl = obj.get(SCHEMA_KEY);
                 if (schemaEl == null || !schemaEl.isJsonObject()) {
@@ -195,7 +198,15 @@ public final class EvalDatasetLoader {
         };
     }
 
-    /** {@code exactly == 0} means "one or more"; otherwise the kind takes exactly that many args. */
+    /** Sentinel for {@link #requireArgs}: any number of args, including none. */
+    private static final int ANY_ARGS = -1;
+
+    /**
+     * {@code exactly == 0} means "one or more"; {@link #ANY_ARGS} means no arity
+     * constraint; otherwise the kind takes exactly that many args. The array itself
+     * is still required and its entries must still be non-blank strings — an absent
+     * {@code args} is an authoring mistake even for the unconstrained kind.
+     */
     private static List<String> requireArgs(String ctx, JsonObject obj, EvalCheck.Kind kind, int exactly) {
         var el = obj.get("args");
         if (el == null || !el.isJsonArray()) {
@@ -208,7 +219,7 @@ public final class EvalDatasetLoader {
             }
             args.add(arg.getAsString());
         }
-        if (exactly == 0 ? args.isEmpty() : args.size() != exactly) {
+        if (exactly != ANY_ARGS && (exactly == 0 ? args.isEmpty() : args.size() != exactly)) {
             throw new IllegalArgumentException(ctx + ": " + kind.wire() + ": expected "
                     + (exactly == 0 ? "at least one arg" : exactly + " arg(s)") + ", got " + args.size());
         }

@@ -4,10 +4,12 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.evals.EvalCheck;
 import services.evals.EvalDatasetLoader;
+import services.evals.EvalSuite;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.List;
 
 /**
  * Loader validation for the eval dataset format (JCLAW-875). Each test writes one
@@ -26,7 +28,6 @@ class EvalDatasetLoaderTest extends UnitTest {
     private static final String VALID = """
             {
               "id": "sample",
-              "version": 1,
               "description": "A sample suite",
               "cases": [
                 {
@@ -35,7 +36,7 @@ class EvalDatasetLoaderTest extends UnitTest {
                   "rubric": "the agent answers rather than calling a tool",
                   "checks": [
                     {"kind": "contains_all", "args": ["hello", "there"]},
-                    {"kind": "tool_not_called", "args": ["web_search"]},
+                    {"kind": "tools_called_within", "args": ["web_search"]},
                     {"kind": "max_llm_calls", "limit": 1}
                   ]
                 }
@@ -85,11 +86,10 @@ class EvalDatasetLoaderTest extends UnitTest {
 
     @Test
     void loadsSuiteWithEveryFieldMapped() throws Exception {
-        var suite = EvalDatasetLoader.loadSuite(write("sample.v1.json", VALID));
+        var suite = EvalDatasetLoader.loadSuite(write("sample.json", VALID));
 
         assertEquals("sample", suite.id());
-        assertEquals(1, suite.version());
-        assertEquals("sample.v1", suite.qualifiedId());
+        assertTrue(suite.qualifiedId().startsWith("sample@"), suite.qualifiedId());
         assertEquals(1, suite.cases().size());
         var evalCase = suite.cases().getFirst();
         assertEquals("greets-back", evalCase.id());
@@ -105,9 +105,9 @@ class EvalDatasetLoaderTest extends UnitTest {
     @Test
     void loadAllReadsEverySuiteInFilenameOrder() throws Exception {
         var dir = Files.createTempDirectory(root, "all");
-        Files.writeString(dir.resolve("sample.v1.json"), VALID);
-        Files.writeString(dir.resolve("beta.v2.json"),
-                VALID.replace("\"sample\"", "\"beta\"").replace("\"version\": 1", "\"version\": 2"));
+        Files.writeString(dir.resolve("sample.json"), VALID);
+        Files.writeString(dir.resolve("beta.json"),
+                VALID.replace("\"sample\"", "\"beta\""));
 
         var suites = EvalDatasetLoader.loadAll(dir);
 
@@ -116,22 +116,89 @@ class EvalDatasetLoaderTest extends UnitTest {
         assertEquals("sample", suites.get(1).id());
     }
 
-    // ==================== Rejections ====================
+    // ==================== Fingerprint (JCLAW-883) ====================
 
     @Test
-    void rejectsFilenameThatDoesNotCarryTheVersion() throws Exception {
-        var msg = refusal("sample.json", VALID);
-        assertNotNull(msg, "a suite file without a version in its name must be refused");
-        assertTrue(msg.contains("<id>.v<version>.json"), msg);
+    void editingACheckMovesTheFingerprint() throws Exception {
+        // The property the old .v<N> filename scheme asserted by hand and could not
+        // enforce: an in-place edit under an unchanged version was undetectable.
+        var before = EvalDatasetLoader.loadSuite(write("sample.json", VALID));
+        var after = EvalDatasetLoader.loadSuite(write("sample.json",
+                VALID.replace("\"max_llm_calls\", \"limit\": 1", "\"max_llm_calls\", \"limit\": 2")));
+
+        assertNotEquals(before.fingerprint(), after.fingerprint(),
+                "changing what a case asserts must change the fingerprint");
     }
 
     @Test
-    void rejectsVersionThatDisagreesWithTheFilename() throws Exception {
-        // The filename is what stops a published suite being edited in place, so a
-        // body/name mismatch is a hard failure rather than a preference.
+    void rewordingProseLeavesTheFingerprintAlone() throws Exception {
+        // Rubric and description explain why a case exists; neither changes a
+        // verdict. A fingerprint that moved on prose would produce warnings people
+        // learn to click past, which is worse than no warning.
+        var before = EvalDatasetLoader.loadSuite(write("sample.json", VALID));
+        var after = EvalDatasetLoader.loadSuite(write("sample.json", VALID
+                .replace("A sample suite", "A sample suite, reworded")
+                .replace("the agent answers rather than calling a tool", "answers directly")));
+
+        assertEquals(before.fingerprint(), after.fingerprint(),
+                "clarifying prose must not invalidate a baseline");
+    }
+
+    @Test
+    void reorderingCasesMovesTheFingerprint() throws Exception {
+        // Order is part of the canonical form. Two suites holding the same cases in a
+        // different order score the same, but they are not the same file, and a
+        // fingerprint that ignored order would need a canonical sort to stay honest.
+        var twoCases = VALID.replace("\"cases\": [",
+                """
+                "cases": [
+                    {"id": "second", "input": "hi", "rubric": "another case",
+                     "checks": [{"kind": "contains_all", "args": ["hi"]}]},""");
+        var swapped = VALID.replace("""
+                    {
+                      "id": "greets-back",""", """
+                    {"id": "second", "input": "hi", "rubric": "another case",
+                     "checks": [{"kind": "contains_all", "args": ["hi"]}]},
+                    {
+                      "id": "greets-back",""");
+
+        assertNotEquals(
+                EvalDatasetLoader.loadSuite(write("sample.json", twoCases)).fingerprint(),
+                EvalDatasetLoader.loadSuite(write("sample.json", swapped)).fingerprint());
+    }
+
+    // ==================== Rejections ====================
+
+    @Test
+    void aSecondCopyOfASuiteIsCaughtByTheFilenameGuard() throws Exception {
+        // Why loadAll needs no duplicate check of its own: the filename IS the
+        // uniqueness key, so a copied suite is rejected for disagreeing with its
+        // name long before any id collision could be observed.
+        var dir = Files.createTempDirectory(root, "collision");
+        Files.writeString(dir.resolve("sample.json"), VALID);
+        Files.writeString(dir.resolve("copy-of-sample.json"), VALID);
+
+        var e = assertThrows(IllegalArgumentException.class, () -> EvalDatasetLoader.loadAll(dir));
+        assertTrue(e.getMessage().contains("does not match the filename"), e.getMessage());
+    }
+
+    @Test
+    void rejectsAFilenameThatIsNotJustTheSuiteId() throws Exception {
+        // Including a leftover .v<N> segment: the filename is the id and nothing
+        // else now, so a versioned name is a stale file rather than an older suite.
         var msg = refusal("sample.v2.json", VALID);
+        assertNotNull(msg, "a filename carrying anything but the id must be refused");
+        assertTrue(msg.contains("<id>.json"), msg);
+    }
+
+    @Test
+    void rejectsAVersionKeyLeftInTheBody() throws Exception {
+        // Not silently ignored: a suite still carrying "version" was written against
+        // the old scheme, and accepting it would leave the author believing a number
+        // nothing reads is still protecting their baseline.
+        var msg = refusal("sample.json", VALID.replace("\"id\": \"sample\",", "\"id\": \"sample\", \"version\": 1,"));
         assertNotNull(msg);
-        assertTrue(msg.contains("does not match the filename"), msg);
+        assertTrue(msg.contains("version"), msg);
     }
 
     @Test
@@ -141,37 +208,63 @@ class EvalDatasetLoaderTest extends UnitTest {
                 "cases": [
                     {"id": "greets-back", "input": "hi", "rubric": "a second case reusing the id",
                      "checks": [{"kind": "contains_all", "args": ["hi"]}]},""");
-        var msg = refusal("sample.v1.json", body);
+        var msg = refusal("sample.json", body);
         assertNotNull(msg);
         assertTrue(msg.contains("duplicate case id"), msg);
     }
 
     @Test
     void rejectsUnknownCheckKind() throws Exception {
-        var msg = refusal("sample.v1.json", VALID.replace("\"contains_all\"", "\"vibes_check\""));
+        var msg = refusal("sample.json", VALID.replace("\"contains_all\"", "\"vibes_check\""));
         assertNotNull(msg);
         assertTrue(msg.contains("unknown check kind 'vibes_check'"), msg);
     }
 
     @Test
     void rejectsUnknownKeyRatherThanIgnoringIt() throws Exception {
-        var msg = refusal("sample.v1.json", VALID.replace("\"rubric\":", "\"expectd\": \"typo\", \"rubric\":"));
+        var msg = refusal("sample.json", VALID.replace("\"rubric\":", "\"expectd\": \"typo\", \"rubric\":"));
         assertNotNull(msg);
         assertTrue(msg.contains("unknown key 'expectd'"), msg);
     }
 
     @Test
     void rejectsCheckKindWithTheWrongArgCount() throws Exception {
-        var msg = refusal("sample.v1.json", VALID.replace(
-                "{\"kind\": \"tool_not_called\", \"args\": [\"web_search\"]}",
-                "{\"kind\": \"tool_not_called\", \"args\": [\"web_search\", \"exec\"]}"));
+        var msg = refusal("sample.json", VALID.replace(
+                "{\"kind\": \"tools_called_within\", \"args\": [\"web_search\"]}",
+                "{\"kind\": \"matches\", \"args\": [\"a\", \"b\"]}"));
         assertNotNull(msg);
         assertTrue(msg.contains("expected 1 arg(s), got 2"), msg);
     }
 
     @Test
+    void acceptsToolsCalledExactlyWithAnEmptyArgList() throws Exception {
+        // The one kind where an empty list is the assertion rather than an authoring
+        // slip: it means "the turn called no tool at all" (JCLAW-883).
+        var suite = EvalDatasetLoader.loadSuite(write("sample.json", VALID.replace(
+                "{\"kind\": \"tools_called_within\", \"args\": [\"web_search\"]}",
+                "{\"kind\": \"tools_called_exactly\", \"args\": []}")));
+
+        var check = suite.cases().getFirst().checks().stream()
+                .filter(c -> c.kind() == EvalCheck.Kind.TOOLS_CALLED_EXACTLY)
+                .findFirst()
+                .orElseThrow();
+        assertTrue(check.args().isEmpty());
+    }
+
+    @Test
+    void rejectsToolsCalledExactlyWithoutAnArgsArray() throws Exception {
+        // Permissive on length, still strict on shape — a missing args array is an
+        // authoring mistake, not a way to spell "no tools".
+        var msg = refusal("sample.json", VALID.replace(
+                "{\"kind\": \"tools_called_within\", \"args\": [\"web_search\"]}",
+                "{\"kind\": \"tools_called_exactly\"}"));
+        assertNotNull(msg);
+        assertTrue(msg.contains("'args' must be an array"), msg);
+    }
+
+    @Test
     void rejectsInvalidRegex() throws Exception {
-        var msg = refusal("sample.v1.json", VALID.replace(
+        var msg = refusal("sample.json", VALID.replace(
                 "{\"kind\": \"contains_all\", \"args\": [\"hello\", \"there\"]}",
                 "{\"kind\": \"matches\", \"args\": [\"([unclosed\"]}"));
         assertNotNull(msg);
@@ -182,7 +275,7 @@ class EvalDatasetLoaderTest extends UnitTest {
     void rejectsSchemaKeywordTheScorerDoesNotImplement() throws Exception {
         // The whole point of the load-time gate: an unimplemented keyword would let
         // invalid structured output through while the report claimed a pass.
-        var msg = refusal("sample.v1.json", VALID.replace(
+        var msg = refusal("sample.json", VALID.replace(
                 "{\"kind\": \"contains_all\", \"args\": [\"hello\", \"there\"]}",
                 "{\"kind\": \"json_schema\", \"schema\": {\"type\": \"object\", \"minProperties\": 2}}"));
         assertNotNull(msg);
@@ -191,7 +284,7 @@ class EvalDatasetLoaderTest extends UnitTest {
 
     @Test
     void rejectsUnsupportedKeywordNestedInsideAProperty() throws Exception {
-        var msg = refusal("sample.v1.json", VALID.replace(
+        var msg = refusal("sample.json", VALID.replace(
                 "{\"kind\": \"contains_all\", \"args\": [\"hello\", \"there\"]}",
                 "{\"kind\": \"json_schema\", \"schema\": {\"type\": \"object\", "
                         + "\"properties\": {\"total\": {\"type\": \"number\", \"minimum\": 0}}}}"));
@@ -204,18 +297,18 @@ class EvalDatasetLoaderTest extends UnitTest {
     void rejectsCaseWithNoChecks() throws Exception {
         var body = """
                 {
-                  "id": "sample", "version": 1, "description": "A sample suite",
+                  "id": "sample", "description": "A sample suite",
                   "cases": [{"id": "empty", "input": "hi", "rubric": "nothing asserted", "checks": []}]
                 }
                 """;
-        var msg = refusal("sample.v1.json", body);
+        var msg = refusal("sample.json", body);
         assertNotNull(msg);
         assertTrue(msg.contains("'checks' must be a non-empty array"), msg);
     }
 
     @Test
     void rejectsBlankRubric() throws Exception {
-        var msg = refusal("sample.v1.json",
+        var msg = refusal("sample.json",
                 VALID.replace("\"the agent answers rather than calling a tool\"", "\"  \""));
         assertNotNull(msg);
         assertTrue(msg.contains("'rubric' must be a non-blank string"), msg);

@@ -1,19 +1,20 @@
 # Evals
 
-Versioned datasets that measure agent behaviour, the offline runner that scores
-against them (JCLAW-875), and the capture path that drives a live agent to
-produce a run worth scoring (JCLAW-883). Epic JCLAW-833.
+Datasets that measure agent behaviour, the offline runner that scores against
+them (JCLAW-875), and the capture path that drives a live agent to produce a run
+worth scoring (JCLAW-883). Epic JCLAW-833.
 
 The point of this directory is to be a **ruler**. Every story in the agentic
 harness epic — planning, critic, best-of-N, retries — is a claim about quality,
 and claims need something to be measured against that does not move while the
-thing under test changes. That is why suites are versioned in git and why a
-published suite is never edited in place.
+thing under test changes. Suites live in git so the history is there, and every
+run records a fingerprint of the suite content that scored it — so when the ruler
+does move, nothing compares across the change without saying so.
 
 ```
 evals/
   schema/eval-suite.schema.json   the format contract (what authors read)
-  suites/<id>.v<N>.json           the datasets (what the runner reads)
+  suites/<id>.json                the datasets (what the runner reads)
   reports/                        run output — gitignored
 ```
 
@@ -38,23 +39,20 @@ malformed suite fails the build rather than the next eval run.
 
 ## Dataset format
 
-One suite per file, named `<id>.v<version>.json`, with the version repeated in
-the body. The filename is what keeps two versions of a suite side by side; the
-loader refuses a file where the two disagree.
+One suite per file, named `<id>.json`. The filename is the suite's identity and
+nothing else; the loader refuses a file whose body id disagrees with its name.
 
 ```json
 {
   "id": "tool-selection",
-  "version": 1,
   "description": "Does the agent reach for the right tool?",
   "cases": [
     {
-      "id": "wall-clock-uses-datetime",
+      "id": "wall-clock-datetime-optional",
       "input": "What time is it?",
-      "rubric": "The clock is a local tool, not a web fact.",
+      "rubric": "The harness already injects the current time, so the clock tool is allowed but not required.",
       "checks": [
-        { "kind": "tool_called", "args": ["datetime"] },
-        { "kind": "tool_not_called", "args": ["web_search"] },
+        { "kind": "tools_called_within", "args": ["datetime"] },
         { "kind": "max_llm_calls", "limit": 2 }
       ]
     }
@@ -75,8 +73,8 @@ Every kind is decidable from the response alone — no judge model.
 | `not_contains_any` | `args`: substrings | none of them appears |
 | `matches` | `args`: one regex | the regex finds a match |
 | `json_schema` | `schema` | the response parses as JSON and validates |
-| `tool_called` | `args`: one tool name | the agent called that tool |
-| `tool_not_called` | `args`: one tool name | the agent did not call it |
+| `tools_called_exactly` | `args`: every tool name allowed | the calls made equal that list as a multiset — no extras, no repeats. `[]` means no tool at all |
+| `tools_called_within` | `args`: the tools permitted | every call is in the list, but none is required — the "or" form. Extras and repeats still fail |
 | `max_llm_calls` | `limit` | the turn spent at most `limit` model calls |
 
 `json_schema` implements a subset: `type`, `properties`, `required`, `items`,
@@ -91,6 +89,60 @@ around a JSON body is the defect a structured-output case exists to catch.
 `max_llm_calls` is the epic's efficiency NFR written as an assertion. It scores
 against the per-turn `llm_call_count` (JCLAW-882), so a story that buys quality
 with an extra model call has to declare the purchase.
+
+### Why tool checks are allowlists
+
+There used to be a `tool_called` / `tool_not_called` pair. JCLAW-883 removed
+them: they were a **denylist**, which only catches rogue behaviour someone
+predicted, and is therefore structurally unable to express "only what was
+necessary".
+
+`arithmetic-needs-no-tool` is the worked example. Its rubric says *"any tool call
+here is pure overhead"*, but the denylist version of it could only forbid the two
+tools the author happened to name — a stray `task_manager` or `generate_image`
+call passed while breaking the case's stated intent. The same hole is why the
+first live sweep's errant task creation was invisible to the suite: the case that
+caused it asserted one `tool_called` and nothing else, so the agent could have
+called that tool five times plus `exec` and still scored a pass. It now asserts
+`tools_called_exactly: []`, which is what the rubric said all along.
+
+`tools_called_exactly` is the **allowlist** counterpart, and it collapses three
+concerns into one assertion:
+
+- **Wrong tool** — anything outside the list is `unexpected`.
+- **Superfluous repeat** — the comparison is a multiset, so calling a
+  once-listed tool twice fails.
+- **Rogue side effects** — an agent can only touch the world through tools, so
+  an unsanctioned effect shows up as an unsanctioned call.
+
+That last one is the important one and it has a boundary worth stating: this
+detects the *call*, not the *effect*. A tool the case legitimately allows can
+still do more than intended — `task_manager` called once, with wrong content.
+Catching that needs assertions over resulting state, which nothing here does.
+
+Order is not compared. Two tools the agent could equally have called in either
+order are not a behaviour difference worth failing a suite over.
+
+### When a tool is optional: `tools_called_within`
+
+Sometimes two behaviours are both correct. Asked "what time is it?", an agent that
+calls `datetime` is right, and so is one that answers straight from the timestamp
+`CurrentTimeInjector` already stamped onto the user message — that injection
+exists precisely to save the round-trip, so demanding the tool would reward a
+wasted call.
+
+`tools_called_within: ["datetime"]` accepts both. Every call must be in the
+allowance, but none is required. Extras and repeats still fail, so the case keeps
+its teeth: a web search fails it, and so does calling the clock twice.
+
+Reach for `tools_called_exactly` when the tool genuinely is mandatory —
+`date-difference-uses-datetime` in `tool-selection` is the contrast, because
+the injected clock answers "now" and nothing else, so a span between two dates
+has to come from the tool.
+
+Prevention and measurement are different jobs, and the two mechanisms compose:
+`__evaltest__`'s opt-in tool surface means an ungranted tool *cannot* fire, while
+`tools_called_exactly` catches a granted tool used when it should not have been.
 
 ### What is deliberately missing
 
@@ -108,7 +160,7 @@ The runner scores whatever produced the responses; the file is the contract.
 ```json
 {
   "suite": "grounding",
-  "version": 1,
+  "fingerprint": "bf5ff8047a1d",
   "responses": {
     "carries-the-figure-from-source": {
       "output": "The transfer lasted 209 days.",
@@ -177,7 +229,7 @@ The isolation above covers the turn's bookkeeping. It does not cover what the
 agent *does*. Tools execute for real. A case that induces a `task_manager` call
 creates a real scheduled task; a case that induces a write tool writes.
 
-This is not theoretical. The first live run of `tool-selection.v1` against the
+This is not theoretical. The first live run of `tool-selection` against the
 operator's `main` agent created a recurring task (`check-deploy-queue-weekday`,
 cron `0 0 9 * * 1-5`) that had to be deleted by hand — the suite contains a case
 designed to make the agent reach for the task manager, and it did.
@@ -217,8 +269,37 @@ police, and a rate-limited provider's retries would score as agent failures.
 
 ## Changing a suite
 
+**Edit it in place.** Git holds the history, and `git diff` shows exactly which
+cases changed — which a new file beside the old one does not.
+
 Adding a case is safe: a case absent from the baseline is not a regression.
 
-Changing or removing a case is not — it redefines what the pass rate means.
-Copy the file to `<id>.v<N+1>.json`, bump the `version` in the body, and leave
-the old one in place until nothing compares against it.
+Changing or removing a case redefines what the pass rate means, and that is what
+the fingerprint is for. Every run records a short hash of the suite content that
+scored it, printed beside the id as `tool-selection@6e7927aeefe4`. Compare two
+runs whose fingerprints differ and the CLI says so before it prints anything
+else, because case ids can match across two rulers while meaning different
+things.
+
+What the hash covers: each case's id and input, and each check's kind, args,
+schema and limit, in order. What it deliberately ignores: `description` and
+`rubric`. Both are prose explaining why a case exists and neither changes a
+verdict, so sharpening a rubric must not invalidate a baseline — a fingerprint
+that moved on cosmetic edits would produce warnings people learn to click past.
+
+### Why not a version number in the filename
+
+That is what this directory used to do (`<id>.v<N>.json`, the version repeated in
+the body, a new file for every change). JCLAW-883 removed it, for three reasons
+found by trying to use it:
+
+- **It was never enforced.** Nothing detected an edit made in place under an
+  unchanged version, so the scheme protected against the author who remembered to
+  bump and was blind to the one who did not — which is the failure that actually
+  happens. The fingerprint is computed, not asserted.
+- **It made the documented workflow impossible.** The loader deduplicated on id
+  alone, so publishing the `v2` this README told you to publish was rejected as a
+  duplicate. The first person to follow the instructions was the one who found out.
+- **Git already did the versioning half.** History, diffs, and recovering a
+  deleted suite were all available; the filename convention added duplication,
+  highest-version resolution, and files that accumulate with no defined end.

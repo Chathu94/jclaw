@@ -97,7 +97,7 @@ Commands:
   status    Show whether backend and frontend are running
   logs      Tail the production application log
   loadtest  Drive the in-process load-test harness against /api/chat/stream
-  evals     Validate the versioned eval dataset in evals/suites, and score a
+  evals     Validate the eval dataset in evals/suites, and score a
             recorded agent run against it. Offline — no backend, no model.
   test      Run backend tests (play autotest), frontend tests (pnpm test),
             and frontend quality gates (stylelint, lint, typecheck), and
@@ -762,9 +762,9 @@ usage_evals() {
     if is_developer_clone; then
         cat <<EOF
 Usage: ${INVOKE} evals [--suites <dir>] [--responses <file>] [--baseline <file>] [--out <file>]
-       ${INVOKE} evals --capture <file> --agent <name> --suite <id> [--version <n>] [--concurrency <n>]
+       ${INVOKE} evals --capture <file> --agent <name> --suite <id> [--concurrency <n>]
 
-Work with the versioned eval dataset in evals/suites (JCLAW-875, JCLAW-883).
+Work with the eval dataset in evals/suites (JCLAW-875, JCLAW-883).
 
 Validating and scoring are entirely offline: they start no backend, call no
 model, and touch no database, so running them costs nothing on the serving
@@ -795,7 +795,7 @@ clean up everything a sweep created.
 
 Options:
   --suites <dir>     Suite directory (default: evals/suites)
-  --responses <file> A recorded run: {"suite":…, "version":…, "responses":
+  --responses <file> A recorded run: {"suite":…, "fingerprint":…, "responses":
                      {"<caseId>": {"output":…, "toolsCalled":[…], "llmCalls":N}}}
   --baseline <file>  An earlier --out report; exits non-zero if a case that
                      passed there fails now
@@ -803,7 +803,6 @@ Options:
   --capture <file>   Drive a live agent and write the recorded run here
   --agent <name>     Which agent to drive (required with --capture)
   --suite <id>       Which suite to drive (required with --capture)
-  --version <n>      Suite version (default: the highest shipped)
   --concurrency <n>  Cases in front of the model at once (default: 4, max 16)
 
 Exit codes: 0 clean, 1 invalid dataset / failing case / regression / capture
@@ -3210,7 +3209,7 @@ if segs:
 
 # ─── Eval dataset (JCLAW-875) ───
 
-# Runs services.evals.EvalRunner over the versioned suites in evals/. Offline:
+# Runs services.evals.EvalRunner over the suites in evals/.  Offline:
 # no backend, no model, no DB — so it can run on a laptop mid-edit and costs
 # nothing on the serving path.
 #
@@ -3226,14 +3225,13 @@ if segs:
 # application secret — because it is the same trust boundary: an operator-run
 # harness on the local host with no plaintext admin credential to log in with.
 do_evals_capture() {
-    local out="" agent="" suite="" version="" concurrency=""
+    local out="" agent="" suite="" concurrency=""
     local -a rest=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --capture)     out="${2:-}";         shift 2 ;;
             --agent)       agent="${2:-}";       shift 2 ;;
             --suite)       suite="${2:-}";       shift 2 ;;
-            --version)     version="${2:-}";     shift 2 ;;
             --concurrency) concurrency="${2:-}"; shift 2 ;;
             *)             rest+=("$1");         shift   ;;
         esac
@@ -3270,7 +3268,6 @@ do_evals_capture() {
 
     local body
     body=$(printf '{"suite":"%s","agent":"%s"' "$suite" "$agent")
-    [[ -n "$version" ]]     && body+=$(printf ',"version":%s' "$version")
     [[ -n "$concurrency" ]] && body+=$(printf ',"concurrency":%s' "$concurrency")
     body+='}'
 

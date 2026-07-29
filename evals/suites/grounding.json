@@ -1,6 +1,5 @@
 {
   "id": "grounding",
-  "version": 1,
   "description": "Does the agent answer from the supplied source only — carrying the right figure, citing the right chunk, and saying so when the source does not contain the answer?",
   "cases": [
     {

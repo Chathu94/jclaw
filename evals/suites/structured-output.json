@@ -1,6 +1,5 @@
 {
   "id": "structured-output",
-  "version": 1,
   "description": "When a caller asks for JSON, does the agent emit JSON that actually validates — no prose wrapper, no invented fields, no stringified numbers?",
   "cases": [
     {

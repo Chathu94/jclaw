@@ -36,7 +36,7 @@ class EvalCaptureTest extends UnitTest {
     }
 
     private static EvalSuite suiteAsking(String caseId, EvalCheck... checks) {
-        return new EvalSuite("capture-fixture", 1, "fixture",
+        return new EvalSuite("capture-fixture", "fixture",
                 List.of(new EvalCase(caseId, "what time is it?", "the clock is a local tool",
                         List.of(checks))));
     }
@@ -52,7 +52,7 @@ class EvalCaptureTest extends UnitTest {
                 (agent, prompt, sink) -> "It is 11:04.");
 
         assertEquals("capture-fixture", capture.suite());
-        assertEquals(1, capture.version());
+        assertEquals(suite.fingerprint(), capture.fingerprint(), "the recording names which suite content produced it");
         assertEquals("It is 11:04.", capture.responses().get("clock").output());
         assertNull(capture.responses().get("clock").error());
     }
@@ -60,7 +60,7 @@ class EvalCaptureTest extends UnitTest {
     @Test
     void capturedRecordCarriesToolNamesInCallOrder() {
         // ParallelToolExecutor commits one serialized ToolCall per call, in order;
-        // tool_called / tool_not_called score against exactly this list.
+        // the tools_called_* checks score against exactly this list.
         var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
             sink.appendAssistantMessage(null, DATETIME_CALL, null, null, false);
             sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);
@@ -129,8 +129,7 @@ class EvalCaptureTest extends UnitTest {
         // scorer consumes it with no knowledge that an agent produced it.
         var suite = suiteAsking("clock",
                 EvalCheck.of(EvalCheck.Kind.CONTAINS_ALL, List.of("11:04")),
-                EvalCheck.of(EvalCheck.Kind.TOOL_CALLED, List.of("datetime")),
-                EvalCheck.of(EvalCheck.Kind.TOOL_NOT_CALLED, List.of("web_search")));
+                EvalCheck.of(EvalCheck.Kind.TOOLS_CALLED_EXACTLY, List.of("datetime")));
 
         var capture = EvalCapture.run(suite, evalAgent(), 1, (agent, prompt, sink) -> {
             LatencyTrace.countLlmCall();

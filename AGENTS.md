@@ -53,12 +53,18 @@ pnpm test                 # Vitest (unit)
 ./jclaw.sh evals --capture run.json --agent __evaltest__ --suite <id>   # drive a live agent
 ```
 
-Versioned agent-behaviour datasets live in `evals/suites/` (`<id>.v<N>.json`);
+Agent-behaviour datasets live in `evals/suites/` (`<id>.json`);
 `evals/README.md` is the format contract. Validating and scoring are offline —
 no backend, no model call, no DB — and `play autotest` validates the dataset via
-`EvalSuiteConformanceTest`, so a malformed suite fails the build. Suites are
-measuring sticks: add cases freely, but change or delete one only by publishing
-a new `.v<N+1>` file beside it, or past pass rates stop comparing.
+`EvalSuiteConformanceTest`, so a malformed suite fails the build.
+
+Suites are measuring sticks, so edit them in place and let git hold the history:
+every run records a content fingerprint (`tool-selection@6e7927aeefe4`), and
+comparing two runs whose fingerprints differ says so before printing anything
+else. The fingerprint covers case inputs and checks, not `rubric`/`description`,
+so clarifying prose never invalidates a baseline. JCLAW-883 replaced the older
+`<id>.v<N>.json` convention, which nothing enforced — an in-place edit under an
+unchanged version was undetectable.
 
 `--capture` is the exception: it drives real agent turns, so it needs the
 backend running and it spends model calls. It POSTs to `/api/evals/capture`

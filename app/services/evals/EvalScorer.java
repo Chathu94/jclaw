@@ -93,23 +93,53 @@ public final class EvalScorer {
                 }
             }
             case JSON_SCHEMA -> scoreSchema(check, response, failures);
-            case TOOL_CALLED -> {
-                if (!response.toolsCalled().contains(check.arg())) {
-                    failures.add("tool_called: " + check.arg() + " was not called (called: "
-                            + response.toolsCalled() + ")");
-                }
-            }
-            case TOOL_NOT_CALLED -> {
-                if (response.toolsCalled().contains(check.arg())) {
-                    failures.add("tool_not_called: " + check.arg() + " was called");
-                }
-            }
+            case TOOLS_CALLED_EXACTLY -> scoreToolsCalledExactly(check, response, failures);
+            case TOOLS_CALLED_WITHIN -> scoreToolsCalledWithin(check, response, failures);
             case MAX_LLM_CALLS -> {
                 if (response.llmCalls() > check.limit()) {
                     failures.add("max_llm_calls: used " + response.llmCalls() + " calls, budget " + check.limit());
                 }
             }
         }
+    }
+
+    /**
+     * Multiset comparison of expected against actual tool calls. Reports the extra
+     * calls and the missing ones separately, and always echoes what was actually
+     * called: "did the wrong thing" and "did the right thing twice" need different
+     * fixes, and a failure that only said "mismatch" would send the reader back to
+     * re-run the case by hand.
+     */
+    private static void scoreToolsCalledExactly(EvalCheck check, Response response, List<String> failures) {
+        var outstanding = new ArrayList<>(check.args());
+        var unexpected = new ArrayList<String>();
+        for (var called : response.toolsCalled()) {
+            // remove() takes one occurrence, so a second call to a once-listed tool
+            // falls through to unexpected — which is the redundant-call case.
+            if (!outstanding.remove(called)) unexpected.add(called);
+        }
+        if (unexpected.isEmpty() && outstanding.isEmpty()) return;
+
+        var parts = new ArrayList<String>();
+        if (!unexpected.isEmpty()) parts.add("unexpected " + unexpected);
+        if (!outstanding.isEmpty()) parts.add("missing " + outstanding);
+        failures.add("tools_called_exactly: " + String.join(", ", parts)
+                + " (expected " + check.args() + ", called " + response.toolsCalled() + ")");
+    }
+
+    /**
+     * Sub-multiset comparison: every call must be in the allowance, but none of them
+     * is required. The "or" form — see {@link EvalCheck.Kind#TOOLS_CALLED_WITHIN}.
+     */
+    private static void scoreToolsCalledWithin(EvalCheck check, Response response, List<String> failures) {
+        var allowance = new ArrayList<>(check.args());
+        var unexpected = new ArrayList<String>();
+        for (var called : response.toolsCalled()) {
+            if (!allowance.remove(called)) unexpected.add(called);
+        }
+        if (unexpected.isEmpty()) return;
+        failures.add("tools_called_within: unexpected " + unexpected
+                + " (allowed " + check.args() + ", called " + response.toolsCalled() + ")");
     }
 
     private static void scoreSchema(EvalCheck check, Response response, List<String> failures) {

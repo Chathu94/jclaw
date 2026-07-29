@@ -24,7 +24,7 @@ class EvalRunnerTest extends UnitTest {
                 List.of(EvalCheck.of(EvalCheck.Kind.CONTAINS_ALL, List.of(expected))));
     }
 
-    private static final EvalSuite SUITE = new EvalSuite("sample", 1, "fixture",
+    private static final EvalSuite SUITE = new EvalSuite("sample", "fixture",
             List.of(caseSaying("alpha", "alpha"), caseSaying("beta", "beta")));
 
     /** Scores {@link #SUITE} against recorded responses — the shape a replayed run has. */
@@ -45,7 +45,7 @@ class EvalRunnerTest extends UnitTest {
                 "beta", new EvalScorer.Response("beta", List.of(), 2)));
 
         assertEquals("sample", report.suiteId());
-        assertEquals(1, report.version());
+        assertEquals(SUITE.fingerprint(), report.fingerprint(), "the report names which suite content scored it");
         assertEquals(List.of("alpha", "beta"),
                 report.results().stream().map(EvalReport.CaseResult::caseId).toList());
         assertEquals(1.0, report.passRate(), 0.0001);
@@ -144,7 +144,7 @@ class EvalRunnerTest extends UnitTest {
         // Six cases, ceiling of 2: the semaphore must keep the peak at 2 no matter
         // how many virtual threads the pool creates.
         var cases = IntStream.range(0, 6).mapToObj(i -> caseSaying("case-" + i, "ok")).toList();
-        var suite = new EvalSuite("bounded", 1, "fixture", cases);
+        var suite = new EvalSuite("bounded", "fixture", cases);
         var inFlight = new AtomicInteger();
         var peak = new AtomicInteger();
 
@@ -170,7 +170,7 @@ class EvalRunnerTest extends UnitTest {
         var cases = IntStream.range(0, 8)
                 .mapToObj(i -> caseSaying("case-" + i, "ok"))
                 .toList();
-        var suite = new EvalSuite("slow", 1, "fixture", cases);
+        var suite = new EvalSuite("slow", "fixture", cases);
 
         var startNs = System.nanoTime();
         var report = EvalRunner.run(suite, testCase -> {
@@ -197,7 +197,7 @@ class EvalRunnerTest extends UnitTest {
         var restored = EvalReport.fromJson(report.toJson());
 
         assertEquals(report.suiteId(), restored.suiteId());
-        assertEquals(report.version(), restored.version());
+        assertEquals(report.fingerprint(), restored.fingerprint());
         assertEquals(report.passRate(), restored.passRate(), 0.0001);
         assertEquals(report.totalLlmCalls(), restored.totalLlmCalls());
         assertEquals(report.results().get(1).failures(), restored.results().get(1).failures());
@@ -218,7 +218,7 @@ class EvalRunnerTest extends UnitTest {
 
     @Test
     void newCasesAreNotRegressions() {
-        var baseline = new EvalReport("sample", 1,
+        var baseline = new EvalReport("sample", SUITE.fingerprint(),
                 List.of(EvalReport.CaseResult.scored("alpha", true, List.of(), 1, 1)));
         var current = runWith(Map.of("alpha", new EvalScorer.Response("alpha", List.of(), 1)));
 
@@ -234,7 +234,7 @@ class EvalRunnerTest extends UnitTest {
 
         var summary = report.summary();
 
-        assertTrue(summary.contains("sample.v1"), summary);
+        assertTrue(summary.contains("sample@" + SUITE.fingerprint()), summary);
         assertTrue(summary.contains("FAIL"), summary);
         assertTrue(summary.contains("beta"), summary);
         assertTrue(summary.contains("missing \"beta\""), summary);

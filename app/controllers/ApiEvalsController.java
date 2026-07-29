@@ -11,7 +11,6 @@ import services.evals.EvalSuite;
 import utils.ApiResponses;
 
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.List;
 
 import static utils.GsonHolder.GSON;
@@ -35,7 +34,7 @@ import static utils.GsonHolder.GSON;
  */
 public class ApiEvalsController extends Controller {
 
-    /** Where the versioned suites live, relative to the app root. */
+    /** Where the suites live, relative to the app root. */
     private static final String SUITE_DIR = "evals/suites";
 
     /**
@@ -52,7 +51,7 @@ public class ApiEvalsController extends Controller {
 
     /**
      * {@code POST /api/evals/capture} with
-     * {@code {"suite": "<id>", "agent": "<name>", "version": <n>?, "concurrency": <n>?}}.
+     * {@code {"suite": "<id>", "agent": "<name>", "concurrency": <n>?}}.
      *
      * <p>Both {@code suite} and {@code agent} are required. Defaulting the agent —
      * to the main one, or to whatever is first in the table — would let a sweep run
@@ -83,7 +82,7 @@ public class ApiEvalsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
         }
 
-        var suite = resolveSuite(suiteId, readInt(body, "version", 0));
+        var suite = resolveSuite(suiteId);
         int concurrency = Math.clamp(readInt(body, "concurrency", EvalRunner.DEFAULT_CONCURRENCY),
                 1, MAX_CONCURRENCY);
 
@@ -91,11 +90,11 @@ public class ApiEvalsController extends Controller {
     }
 
     /**
-     * Load the dataset and pick one suite. A {@code version} of 0 means "unspecified":
-     * the highest shipped version wins, and the caller can see which one ran because
-     * the recorded file names it.
+     * Load the dataset and pick one suite by id. There is one file per suite, and the
+     * capture records its content fingerprint, so the caller can always tell exactly
+     * which content ran without naming a version up front.
      */
-    private static EvalSuite resolveSuite(String suiteId, int version) {
+    private static EvalSuite resolveSuite(String suiteId) {
         List<EvalSuite> suites;
         try {
             suites = EvalDatasetLoader.loadAll(Path.of(SUITE_DIR));
@@ -108,13 +107,11 @@ public class ApiEvalsController extends Controller {
         }
         var match = suites.stream()
                 .filter(s -> s.id().equals(suiteId))
-                .filter(s -> version <= 0 || s.version() == version)
-                .max(Comparator.comparingInt(EvalSuite::version))
+                .findFirst()
                 .orElse(null);
         if (match == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
-                    "No suite '%s'%s in %s".formatted(
-                            suiteId, version > 0 ? " at version " + version : "", SUITE_DIR));
+                    "No suite '%s' in %s".formatted(suiteId, SUITE_DIR));
         }
         return match;
     }

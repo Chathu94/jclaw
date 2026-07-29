@@ -32,10 +32,38 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
         MATCHES,
         /** The response text parses as JSON and satisfies {@link #schema()}. */
         JSON_SCHEMA,
-        /** The single arg names a tool the agent called. */
-        TOOL_CALLED,
-        /** The single arg names a tool the agent did not call. */
-        TOOL_NOT_CALLED,
+        /**
+         * The tools the agent actually called, compared as a MULTISET, equal these
+         * exactly — no extra tool, and no repeat beyond the number listed. Empty
+         * args asserts the agent called no tool at all.
+         *
+         * <p>An allowlist. It replaced a {@code tool_called} / {@code tool_not_called}
+         * pair, which was a denylist and therefore only caught rogue behaviour
+         * someone predicted: {@code arithmetic-needs-no-tool} says in its rubric that
+         * "any tool call here is pure overhead" but could only forbid the two tools
+         * it happened to name, so a stray {@code task_manager} call passed it. This
+         * kind is how a case says "only what was necessary" and means it (JCLAW-883).
+         *
+         * <p>Order is not compared. Two tools the agent could equally have called in
+         * either order are not a behaviour difference worth failing a suite over.
+         */
+        TOOLS_CALLED_EXACTLY,
+        /**
+         * Every tool the agent called appears in the args, but none of them is
+         * required — the calls are a sub-multiset of the allowance. Extras still
+         * fail, and so does a repeat beyond the listed count.
+         *
+         * <p>This is how a case spells "or". The clock is the motivating example:
+         * {@code CurrentTimeInjector} stamps the current time onto the last user
+         * message, so an agent that answers "what time is it?" with no tool call is
+         * behaving correctly, and so is one that calls {@code datetime} once —
+         * {@code tools_called_within: [datetime]} accepts both while still rejecting
+         * a web search or a second clock call. Use {@link #TOOLS_CALLED_EXACTLY}
+         * when the tool really is mandatory, and {@code exactly: []} to demand no
+         * tool at all; an empty allowance here would just be a confusing spelling of
+         * that, so the loader rejects it.
+         */
+        TOOLS_CALLED_WITHIN,
         /** The turn used at most {@link #limit()} model calls (JCLAW-833's NFR). */
         MAX_LLM_CALLS;
 
@@ -70,7 +98,7 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
         return new EvalCheck(Kind.MAX_LLM_CALLS, List.of(), null, limit);
     }
 
-    /** The single argument of a one-arg kind (matches, tool_called, tool_not_called). */
+    /** The single argument of a one-arg kind (today only {@code matches}). */
     public String arg() {
         return args.getFirst();
     }

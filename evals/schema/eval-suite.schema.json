@@ -2,20 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jclaw.dev/evals/schema/eval-suite.schema.json",
   "title": "JClaw eval suite",
-  "description": "A versioned set of eval cases. One suite per file, named <id>.v<version>.json. JCLAW-875.",
+  "description": "A set of eval cases. One suite per file, named <id>.json. Edit suites in place — git holds the history, and each run records a content fingerprint so two runs scored by different suite content are never compared silently. JCLAW-875, JCLAW-883.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["id", "version", "description", "cases"],
+  "required": ["id", "description", "cases"],
   "properties": {
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
-      "description": "Suite identifier. Must match the filename prefix."
-    },
-    "version": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "Suite version. Must match the .v<N> segment of the filename. Bump by adding a new file beside the old one — never by editing a published suite in place, or the pass rates stop comparing."
+      "description": "Suite identifier. Must match the filename."
     },
     "description": {
       "type": "string",
@@ -68,17 +63,17 @@
             "not_contains_any",
             "matches",
             "json_schema",
-            "tool_called",
-            "tool_not_called",
+            "tools_called_exactly",
+            "tools_called_within",
             "max_llm_calls"
           ],
           "description": "Every kind is decidable without a model call. Model-judged checks land with the critic (JCLAW-836)."
         },
         "args": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "items": { "type": "string" },
-          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tool_called / tool_not_called: one tool name (exact)."
+          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tools_called_exactly: the complete set of tool names the turn may call, compared as a multiset — an empty array asserts no tool at all. tools_called_within: the tools the turn MAY call, none of them required — the 'or' form, for when a tool is optional because the harness already supplied what it would return. Tool assertions are allowlists on purpose: a denylist only catches rogue calls someone predicted. Per-kind arity is enforced by EvalDatasetLoader; only tools_called_exactly permits an empty array."
         },
         "schema": {
           "type": "object",

@@ -70,22 +70,106 @@ class EvalScorerTest extends UnitTest {
 
     // ==================== Tool and call-budget checks ====================
 
+    // ==================== tools_called_exactly (JCLAW-883) ====================
+
+    private static EvalScorer.Response calling(String... tools) {
+        return new EvalScorer.Response("answer", List.of(tools), 1);
+    }
+
+    private static EvalCheck exactly(String... tools) {
+        return EvalCheck.of(EvalCheck.Kind.TOOLS_CALLED_EXACTLY, List.of(tools));
+    }
+
     @Test
-    void toolChecksReadTheCalledToolList() {
-        var response = new EvalScorer.Response("done", List.of("web_search", "web_fetch"), 3);
+    void toolsCalledExactlyPassesOnTheSameMultisetInAnyOrder() {
+        var failures = EvalScorer.failures(
+                caseWith(exactly("web_fetch", "datetime")),
+                calling("datetime", "web_fetch"));
 
-        assertTrue(EvalScorer.failures(
-                caseWith(EvalCheck.of(EvalCheck.Kind.TOOL_CALLED, List.of("web_search"))), response).isEmpty());
+        assertTrue(failures.isEmpty(), () -> "order is not a behaviour difference: " + failures);
+    }
 
-        var missing = EvalScorer.failures(
-                caseWith(EvalCheck.of(EvalCheck.Kind.TOOL_CALLED, List.of("datetime"))), response);
-        assertEquals(1, missing.size());
-        assertTrue(missing.getFirst().contains("was not called"), missing.getFirst());
+    @Test
+    void toolsCalledExactlyCatchesTheToolNobodyListed() {
+        // The gap this kind exists to close. The tool_not_called it replaced was a
+        // denylist, so it only caught rogue calls someone predicted — the first live
+        // sweep created a real scheduled task through exactly this hole.
+        var failures = EvalScorer.failures(
+                caseWith(exactly("datetime")),
+                calling("datetime", "task_manager"));
 
-        var forbidden = EvalScorer.failures(
-                caseWith(EvalCheck.of(EvalCheck.Kind.TOOL_NOT_CALLED, List.of("web_fetch"))), response);
-        assertEquals(1, forbidden.size());
-        assertTrue(forbidden.getFirst().contains("was called"), forbidden.getFirst());
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("unexpected [task_manager]"), failures.getFirst());
+    }
+
+    @Test
+    void toolsCalledExactlyCatchesARedundantSecondCall() {
+        // Calling the right tool twice is still a superfluous call.
+        var failures = EvalScorer.failures(
+                caseWith(exactly("web_search")),
+                calling("web_search", "web_search"));
+
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("unexpected [web_search]"), failures.getFirst());
+    }
+
+    @Test
+    void toolsCalledExactlyReportsMissingAndUnexpectedSeparately() {
+        var failures = EvalScorer.failures(
+                caseWith(exactly("web_fetch")),
+                calling("web_search"));
+
+        var only = failures.getFirst();
+        assertTrue(only.contains("unexpected [web_search]"), only);
+        assertTrue(only.contains("missing [web_fetch]"), only);
+    }
+
+    @Test
+    void toolsCalledExactlyWithNoArgsDemandsNoToolAtAll() {
+        // What arithmetic-needs-no-tool's rubric actually says: "any tool call here
+        // is pure overhead". v1 could only forbid the two tools it named.
+        assertTrue(EvalScorer.failures(caseWith(exactly()), calling()).isEmpty());
+
+        var failures = EvalScorer.failures(caseWith(exactly()), calling("datetime"));
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("unexpected [datetime]"), failures.getFirst());
+    }
+
+    // ==================== tools_called_within — the "or" form ====================
+
+    private static EvalCheck within(String... tools) {
+        return EvalCheck.of(EvalCheck.Kind.TOOLS_CALLED_WITHIN, List.of(tools));
+    }
+
+    @Test
+    void toolsCalledWithinAcceptsBothTheToolAndItsAbsence() {
+        // The clock case: CurrentTimeInjector already supplies the time, so answering
+        // with no tool is correct — and so is one datetime call.
+        assertTrue(EvalScorer.failures(caseWith(within("datetime")), calling()).isEmpty(),
+                "no tool call is within the allowance");
+        assertTrue(EvalScorer.failures(caseWith(within("datetime")), calling("datetime")).isEmpty(),
+                "the optional tool is within the allowance");
+    }
+
+    @Test
+    void toolsCalledWithinStillRejectsAToolOutsideTheAllowance() {
+        var failures = EvalScorer.failures(
+                caseWith(within("datetime")),
+                calling("web_search"));
+
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("unexpected [web_search]"), failures.getFirst());
+    }
+
+    @Test
+    void toolsCalledWithinStillRejectsARepeat() {
+        // Optional does not mean unlimited: a second clock call is still overhead.
+        var failures = EvalScorer.failures(
+                caseWith(within("datetime")),
+                calling("datetime", "datetime"));
+
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("unexpected [datetime]"), failures.getFirst());
     }
 
     @Test
@@ -184,7 +268,7 @@ class EvalScorerTest extends UnitTest {
     void everyFailingCheckIsReported() {
         var failures = EvalScorer.failures(
                 caseWith(EvalCheck.of(EvalCheck.Kind.CONTAINS_ALL, List.of("51")),
-                        EvalCheck.of(EvalCheck.Kind.TOOL_NOT_CALLED, List.of("exec")),
+                        exactly(),
                         EvalCheck.maxLlmCalls(1)),
                 new EvalScorer.Response("fifty-one", List.of("exec"), 2));
 

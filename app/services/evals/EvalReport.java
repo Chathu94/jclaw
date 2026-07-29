@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
  * back as the baseline of a later run — which is what makes regression detection
  * mean anything across commits.
  */
-public record EvalReport(String suiteId, int version, List<CaseResult> results) {
+public record EvalReport(String suiteId, String fingerprint, List<CaseResult> results) {
 
     /**
      * One case's verdict. {@code failures} is empty exactly when {@code passed}.
@@ -108,6 +108,16 @@ public record EvalReport(String suiteId, int version, List<CaseResult> results) 
     }
 
     /**
+     * True when {@code baseline} was scored by different suite content (JCLAW-883).
+     * Case ids can match across two rulers while meaning different things, so a
+     * regression list computed across a fingerprint change is not trustworthy and
+     * the CLI says so instead of printing it as fact.
+     */
+    public boolean scoredByDifferentSuiteThan(EvalReport baseline) {
+        return baseline != null && fingerprint != null && !fingerprint.equals(baseline.fingerprint());
+    }
+
+    /**
      * Case ids that passed in {@code baseline} and fail here. Cases absent from the
      * baseline are not regressions — a new case has no history to regress from, and
      * counting it as one would make every suite addition look like a break.
@@ -138,7 +148,7 @@ public record EvalReport(String suiteId, int version, List<CaseResult> results) 
     /** One line per case plus a totals line, for the CLI. */
     public String summary() {
         var out = new ArrayList<String>();
-        out.add(suiteId + ".v" + version);
+        out.add(suiteId + "@" + fingerprint);
         for (var r : results) {
             out.add(String.format(Locale.ROOT, "  %-5s %-40s %5d ms  %d call(s)",
                     label(r), r.caseId(), r.latencyMs(), r.llmCalls()));

@@ -68,7 +68,7 @@ public final class EvalCapture {
      * A recorded run, shaped exactly like the file {@code --responses} consumes so
      * the two paths cannot drift: whatever this writes, the offline scorer reads.
      */
-    public record Capture(String suite, int version, Map<String, EvalScorer.Response> responses) {}
+    public record Capture(String suite, String fingerprint, Map<String, EvalScorer.Response> responses) {}
 
     /**
      * Find {@code __evaltest__}, provisioning it on first use — the same
@@ -148,7 +148,7 @@ public final class EvalCapture {
         // the same suite diff line by line, matching how the report already behaves.
         var responses = new LinkedHashMap<String, EvalScorer.Response>();
         captured.forEach(e -> responses.put(e.getKey(), e.getValue()));
-        return new Capture(suite.id(), suite.version(), responses);
+        return new Capture(suite.id(), suite.fingerprint(), responses);
     }
 
     private static EvalScorer.Response captureOne(EvalCase testCase, Agent agent, TurnRunner turns) {
@@ -176,7 +176,8 @@ public final class EvalCapture {
      * redirect task fires away from the chat schema.
      *
      * <p>Its one job beyond discarding is recording tool names in call order, which
-     * is what the {@code tool_called} / {@code tool_not_called} checks score against.
+     * is what the {@code tools_called_exactly} / {@code tools_called_within} checks
+     * score against.
      */
     private static final class CaptureSink implements AgentExecutionSink {
 

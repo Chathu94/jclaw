@@ -78,7 +78,7 @@ public final class EvalRunner {
      */
     public static EvalReport run(EvalSuite suite, Responder responder, int maxConcurrency) {
         var results = mapCasesBounded(suite.cases(), maxConcurrency, testCase -> score(testCase, responder));
-        return new EvalReport(suite.id(), suite.version(), results);
+        return new EvalReport(suite.id(), suite.fingerprint(), results);
     }
 
     /**
@@ -150,8 +150,17 @@ public final class EvalRunner {
         return (System.nanoTime() - startNs) / 1_000_000L;
     }
 
-    /** The recorded-responses file: {@code {"suite":…, "version":…, "responses":{caseId: {…}}}}. */
-    private record ResponseFile(String suite, int version, Map<String, EvalScorer.Response> responses) {}
+    /**
+     * The recorded-responses file:
+     * {@code {"suite":…, "fingerprint":…, "responses":{caseId: {…}}}}.
+     *
+     * <p>The fingerprint records which suite content produced the recording, so
+     * re-scoring it later against an edited suite is caught rather than silently
+     * mixing two rulers. It is optional on the way in: a hand-written recording is
+     * a legitimate thing to score, and demanding a hash nobody can compute by hand
+     * would make the offline path harder to use for no safety gained.
+     */
+    private record ResponseFile(String suite, String fingerprint, Map<String, EvalScorer.Response> responses) {}
 
     /**
      * CLI entry point — see {@code ./jclaw.sh evals} and {@code evals/README.md}.
@@ -214,16 +223,23 @@ public final class EvalRunner {
             throws IOException {
         var recorded = GsonHolder.GSON.fromJson(Files.readString(responsesPath), ResponseFile.class);
         if (recorded == null || recorded.suite() == null || recorded.responses() == null) {
-            System.out.println(responsesPath + ": expected {\"suite\":…, \"version\":…, \"responses\":{…}}");
+            System.out.println(responsesPath + ": expected {\"suite\":…, \"fingerprint\":…, \"responses\":{…}}");
             return 1;
         }
         var suite = suites.stream()
-                .filter(s -> s.id().equals(recorded.suite()) && s.version() == recorded.version())
+                .filter(s -> s.id().equals(recorded.suite()))
                 .findFirst()
                 .orElse(null);
         if (suite == null) {
-            System.out.println("No suite " + recorded.suite() + ".v" + recorded.version() + " in the dataset");
+            System.out.println("No suite '" + recorded.suite() + "' in the dataset");
             return 1;
+        }
+        // Scoring a recording against edited suite content is legal — that is how you
+        // re-measure an old run against a sharper check — but it must never happen
+        // silently, because the recorded answers came from the questions as they were.
+        if (recorded.fingerprint() != null && !recorded.fingerprint().equals(suite.fingerprint())) {
+            System.out.println("Note: recorded against " + recorded.suite() + "@" + recorded.fingerprint()
+                    + ", scoring against @" + suite.fingerprint() + " — the suite changed since capture.");
         }
 
         // Missing recordings surface through the same path as a broken responder,
@@ -246,7 +262,16 @@ public final class EvalRunner {
         var exit = report.passed() == report.results().size() ? 0 : 1;
         var baseline = opts.get(OPT_BASELINE);
         if (baseline != null) {
-            var regressions = report.regressionsAgainst(EvalReport.fromJson(Files.readString(Path.of(baseline))));
+            var before = EvalReport.fromJson(Files.readString(Path.of(baseline)));
+            if (report.scoredByDifferentSuiteThan(before)) {
+                // Case ids can match across two rulers while meaning different things,
+                // so this is stated before the list rather than left for the reader to
+                // infer from a suspicious number of "regressions".
+                System.out.println("Warning: " + baseline + " was scored against @" + before.fingerprint()
+                        + " and this run against @" + report.fingerprint()
+                        + " — the suite changed, so the comparison below is between two different measuring sticks.");
+            }
+            var regressions = report.regressionsAgainst(before);
             if (!regressions.isEmpty()) {
                 System.out.println("Regressions against " + baseline + ": " + String.join(", ", regressions));
                 exit = 1;
