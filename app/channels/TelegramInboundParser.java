@@ -452,7 +452,7 @@ public final class TelegramInboundParser {
     private static void collectPhotoAttachment(Message msg, List<PendingAttachment> attachments) {
         if (!msg.hasPhoto() || msg.getPhoto() == null || msg.getPhoto().isEmpty()) return;
         var sizes = msg.getPhoto();
-        var best = sizes.get(sizes.size() - 1);
+        var best = sizes.getLast();
         long bytes = best.getFileSize() != null ? best.getFileSize() : 0L;
         attachments.add(new PendingAttachment(
                 best.getFileId(), null, "image/jpeg", bytes,

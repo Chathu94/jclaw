@@ -47,8 +47,8 @@ final class FsLineEditor {
         // split with -1 keeps trailing empty segments; we drop the final empty slot
         // produced by a trailing newline so lineCount reflects authored lines.
         var lines = new ArrayList<>(List.of(original.split("\r\n|\n|\r", -1)));
-        if (hadTrailingNewline && !lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) {
-            lines.remove(lines.size() - 1);
+        if (hadTrailingNewline && !lines.isEmpty() && lines.getLast().isEmpty()) {
+            lines.removeLast();
         }
         int lineCount = lines.size();
 

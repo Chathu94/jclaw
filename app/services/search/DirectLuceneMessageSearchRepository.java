@@ -353,7 +353,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      */
     public static List<ScoredId> normalizeByTop(List<ScoredId> rawDesc) {
         if (rawDesc.isEmpty()) return rawDesc;
-        double topScore = rawDesc.get(0).score();
+        double topScore = rawDesc.getFirst().score();
         if (topScore <= 0.0) {
             return rawDesc.stream().map(s -> new ScoredId(s.id(), 1.0)).toList();
         }

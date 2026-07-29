@@ -271,9 +271,9 @@ public final class TelegramOutboundPlanner {
             // Telegram requires 2-10. Emit it as a single send rather than a 1-item
             // MediaGroupSegment that sendMediaGroup would reject and fall back from.
             if (chunk.size() == 1) {
-                out.add(chunk.get(0));
+                out.add(chunk.getFirst());
             } else {
-                out.add(new MediaGroupSegment(chunk, chunk.get(0).caption()));
+                out.add(new MediaGroupSegment(chunk, chunk.getFirst().caption()));
             }
         }
     }
