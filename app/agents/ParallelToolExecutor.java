@@ -318,6 +318,30 @@ public final class ParallelToolExecutor {
     }
 
     /**
+     * JCLAW-836: record the verdict for one tool result. Failures are logged at
+     * INFO rather than WARN — a tool reporting an error is normal traffic the model
+     * is expected to handle, and logging it as a warning would train operators to
+     * ignore the category before the metric has said anything.
+     *
+     * <p>Never throws: a defect in verification must not cost the turn its tool
+     * result, which would turn an observability feature into an outage.
+     */
+    private static void verifyAndCount(String toolName, ToolRegistry.ToolResult result) {
+        try {
+            var verification = ToolResultVerifier.verify(toolName, result);
+            if (verification.verdict() == ToolResultVerifier.Verdict.SKIPPED) return;
+            LatencyTrace.countToolVerification(verification.failed());
+            if (verification.failed()) {
+                EventLogger.info("tool",
+                        "Tool '%s' result flagged %s".formatted(toolName, verification.verdict()),
+                        verification.reason());
+            }
+        } catch (RuntimeException e) {
+            EventLogger.warn("tool", "Tool-result verification threw for '%s': %s".formatted(toolName, e));
+        }
+    }
+
+    /**
      * Commit phase: append to message history and persist to DB in
      * original order, preserving LLM tool_result ordering invariants.
      */
@@ -331,6 +355,13 @@ public final class ParallelToolExecutor {
             var tc = toolCalls.get(i);
             var text = result.text();
             var structured = result.structuredJson();
+            // JCLAW-836 stage 1: judge the result, do not change it. The model still
+            // receives exactly what the tool returned — including its errors, which it
+            // needs in order to react — and the verdict becomes a per-turn metric so
+            // the failure rate is a number before anything acts on it. This is the
+            // single chokepoint for both the sync and streaming tool paths, and it
+            // runs on the turn's thread, so the LatencyTrace binding is in scope.
+            verifyAndCount(tc.function().name(), result);
             currentMessages.add(ChatMessage.toolResult(tc.id(), tc.function().name(), text));
             if (imageCollector != null) {
                 MessageDeduplicator.extractImageUrls(text, imageCollector);

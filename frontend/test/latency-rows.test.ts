@@ -300,6 +300,23 @@ describe('count segments live in their own view (JCLAW-884)', () => {
     expect(rows.find(r => r.key === 'llm_call_cached')!.label).toBe('Cache-served calls / turn')
   })
 
+  it('classifies tool_verify_failed as a count despite the missing _count suffix (JCLAW-836)', () => {
+    // The pair is a rate: tool_verify_count carries the suffix and would be
+    // routed correctly on its own, but its numerator does not. Left unlisted,
+    // tool_verify_failed renders as a duration and gets summed into Total.
+    const latency = buildLatencyRows({
+      ttft: h(3, 50),
+      tool_verify_count: h(3, 2),
+      tool_verify_failed: h(3, 1),
+      total: h(3, 800),
+    })
+    expect(latency.map(r => r.key)).toEqual(['ttft', 'total'])
+
+    const counts = buildCountRows({ tool_verify_count: h(3, 2), tool_verify_failed: h(3, 1) })
+    expect(counts.map(r => r.key)).toEqual(['tool_verify_count', 'tool_verify_failed'])
+    expect(counts[1]!.label).toBe('Tool results flagged / turn')
+  })
+
   it('omits the cached companion when turns recorded none', () => {
     // The backend clamps recorded values to a minimum of 1, so a turn with no
     // cache hits omits llm_call_cached entirely rather than recording a 0 that

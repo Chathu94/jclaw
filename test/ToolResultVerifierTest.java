@@ -1,0 +1,155 @@
+import agents.ToolRegistry;
+import agents.ToolResultVerifier;
+import agents.ToolResultVerifier.Verdict;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
+import utils.LatencyStats;
+import utils.LatencyTrace;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * JCLAW-836 stage 1: the deterministic tool-result checks.
+ *
+ * <p>Exercises {@code check} rather than {@code verify} for the verdict cases, so
+ * nothing here writes {@code verification.enabled} or {@code verification.skipTools} —
+ * play1 runs test classes concurrently and a flipped process-global setting would
+ * silently change tool behaviour under whatever else is mid-run.
+ */
+class ToolResultVerifierTest extends UnitTest {
+
+    @Test
+    void ordinaryResultPasses() {
+        var v = ToolResultVerifier.check(ToolRegistry.ToolResult.text("Singapore is UTC+8."));
+        assertEquals(Verdict.OK, v.verdict());
+        assertFalse(v.failed());
+    }
+
+    @Test
+    void blankResultIsEmpty() {
+        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(ToolRegistry.ToolResult.text("")).verdict());
+        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(ToolRegistry.ToolResult.text("   \n ")).verdict());
+        assertEquals(Verdict.EMPTY, ToolResultVerifier.check(ToolRegistry.ToolResult.text(null)).verdict());
+    }
+
+    @Test
+    void codebaseErrorConventionIsFlagged() {
+        // The two shapes ToolRegistry itself emits, plus a tool following the same
+        // convention (web_fetch on a 404 — observed on a live eval turn, JCLAW-891).
+        for (var text : new String[]{
+                "Error: Unknown tool 'nope'",
+                "Error executing tool: connection reset",
+                "Error fetching URL: HTTP 404"}) {
+            var v = ToolResultVerifier.check(ToolRegistry.ToolResult.text(text));
+            assertEquals(Verdict.ERROR_REPORTED, v.verdict(), text);
+            assertTrue(v.failed(), text);
+        }
+    }
+
+    /**
+     * The heuristic's whole value depends on this: a page or search result that
+     * merely mentions an error is not a failed tool call. A substring match would
+     * flag most of the web and make the metric unreadable within a day.
+     */
+    @Test
+    void proseMentioningErrorIsNotFlagged() {
+        for (var text : new String[]{
+                "The report describes an error in the 1997 census.",
+                "Errors and Omissions Insurance — a primer",
+                "Erroneous data was corrected in v2."}) {
+            assertEquals(Verdict.OK, ToolResultVerifier.check(ToolRegistry.ToolResult.text(text)).verdict(), text);
+        }
+    }
+
+    @Test
+    void unparseableStructuredJsonIsFlagged() {
+        var bad = new ToolRegistry.ToolResult("3 results found", "{not json");
+        assertEquals(Verdict.MALFORMED_JSON, ToolResultVerifier.check(bad).verdict());
+
+        var good = new ToolRegistry.ToolResult("3 results found", "{\"results\":[]}");
+        assertEquals(Verdict.OK, ToolResultVerifier.check(good).verdict());
+    }
+
+    /**
+     * A call the registry refused never reached a tool, so there is no output to
+     * judge. Counting it here would double-count the offered-set defect JCLAW-883
+     * already measures separately.
+     */
+    @Test
+    void nonDispatchedResultIsSkipped() {
+        var refused = ToolRegistry.ToolResult.refused(
+                "Error: tool 'web_search' is not enabled", ToolRegistry.ToolResult.Outcome.NOT_ENABLED);
+        var v = ToolResultVerifier.verify("web_search", refused);
+        assertEquals(Verdict.SKIPPED, v.verdict());
+        assertFalse(v.failed(), "SKIPPED is an absence of a verdict, not a failure");
+
+        assertEquals(Verdict.SKIPPED, ToolResultVerifier.verify("web_search", null).verdict());
+    }
+
+    @Test
+    void skipListParsesLenientlyAndCaseInsensitively() {
+        assertEquals(java.util.Set.of(), ToolResultVerifier.parseSkipTools(null));
+        assertEquals(java.util.Set.of(), ToolResultVerifier.parseSkipTools("  "));
+        assertEquals(java.util.Set.of("web_fetch", "shell_exec"),
+                ToolResultVerifier.parseSkipTools(" Web_Fetch , ,shell_exec "));
+    }
+
+    /** Verification is on by default, so an ordinary result goes through the checks. */
+    @Test
+    void verifyAppliesChecksUnderDefaultConfig() {
+        assertEquals(Verdict.ERROR_REPORTED,
+                ToolResultVerifier.verify("datetime", ToolRegistry.ToolResult.text("Error: no such zone")).verdict());
+    }
+
+    /**
+     * The story's deliverable is a per-turn rate, so both halves have to reach
+     * {@link LatencyStats}. Unique channel names per assertion: LatencyStats is a
+     * JVM-global singleton and play1 runs test classes concurrently, so a shared
+     * channel would mix in samples from whatever else is mid-run (the constraint
+     * {@code LatencyTraceTest} already documents).
+     */
+    @Test
+    void cleanTurnRecordsTheDenominatorAndNoFailures() {
+        var channel = "tv-clean-" + System.nanoTime();
+        var trace = LatencyTrace.forTurn(channel, null);
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        try (var _ = LatencyTrace.bind(trace)) {
+            LatencyTrace.countToolVerification(false);
+            LatencyTrace.countToolVerification(false);
+        }
+        trace.end();
+
+        var stats = LatencyStats.snapshot().getAsJsonObject(channel);
+        assertEquals(2L, stats.getAsJsonObject("tool_verify_count").get("sum_ms").getAsLong());
+        // Zero-suppressed: LatencyStats clamps to a minimum of 1, so emitting
+        // "0 failures" would record as 1 and invent a failure rate on every
+        // clean turn — which would make the metric worse than not having it.
+        assertFalse(stats.has("tool_verify_failed"),
+                "a turn with no flagged result must not emit the failure segment");
+    }
+
+    @Test
+    void flaggedResultRecordsBothHalvesOfTheRate() {
+        var channel = "tv-failed-" + System.nanoTime();
+        var trace = LatencyTrace.forTurn(channel, null);
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        try (var _ = LatencyTrace.bind(trace)) {
+            LatencyTrace.countToolVerification(false);
+            LatencyTrace.countToolVerification(true);
+        }
+        trace.end();
+
+        var stats = LatencyStats.snapshot().getAsJsonObject(channel);
+        assertEquals(2L, stats.getAsJsonObject("tool_verify_count").get("sum_ms").getAsLong(),
+                "the denominator counts every verified result, flagged or not");
+        assertEquals(1L, stats.getAsJsonObject("tool_verify_failed").get("sum_ms").getAsLong());
+    }
+
+    /** Outside a turn there is nothing to bill, matching {@code countLlmCall}. */
+    @Test
+    void countingOutsideATurnIsANoOp() {
+        LatencyTrace.countToolVerification(true);
+    }
+}

@@ -138,13 +138,15 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
  *
  * The `_count` suffix is honoured as well as the explicit list so a segment the
  * backend adds later lands in the right view instead of appearing as an unknown
- * row in the latency table. `llm_call_cached` is named for what it counts rather
- * than suffixed, so it is listed explicitly.
+ * row in the latency table. `llm_call_cached` and `tool_verify_failed` are named
+ * for what they count rather than suffixed, so they are listed explicitly —
+ * without that, they render as duration rows and get summed into Total.
  */
 const COUNT_SEGMENTS: ReadonlySet<string> = new Set([
   'tool_round_count',
   'llm_call_count',
   'llm_call_cached',
+  'tool_verify_failed',
 ])
 
 export function isCountSegment(key: string): boolean {
@@ -153,12 +155,20 @@ export function isCountSegment(key: string): boolean {
 
 /** Order of the counts view. Calls first — it is the number the JCLAW-833
  *  efficiency NFR is written against — then what it decomposes into. */
-export const COUNT_ORDER = ['llm_call_count', 'llm_call_cached', 'tool_round_count'] as const
+export const COUNT_ORDER = [
+  'llm_call_count',
+  'llm_call_cached',
+  'tool_round_count',
+  'tool_verify_count',
+  'tool_verify_failed',
+] as const
 
 export const COUNT_LABELS: Record<string, string> = {
   llm_call_count: 'LLM calls / turn',
   llm_call_cached: 'Cache-served calls / turn',
   tool_round_count: 'Tool rounds / turn',
+  tool_verify_count: 'Tool results checked / turn',
+  tool_verify_failed: 'Tool results flagged / turn',
 }
 
 /** Histograms carry a windowed sum alongside the percentiles. Meaningless for a

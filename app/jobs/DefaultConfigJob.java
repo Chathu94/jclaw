@@ -2,6 +2,7 @@ package jobs;
 
 import agents.AgentRunner;
 import agents.SkillLoader;
+import agents.ToolResultVerifier;
 import models.Agent;
 import models.Config;
 import play.Logger;
@@ -273,6 +274,11 @@ public class DefaultConfigJob extends Job<Void> {
     private void seedToolConfig() {
         // Chat settings — values reference the source constants to stay in sync
         seedIfAbsent("chat.maxToolRounds", String.valueOf(AgentRunner.DEFAULT_MAX_TOOL_ROUNDS));
+        // JCLAW-836 stage 1: in-process tool-result checks. Default on because they
+        // cost no model call and no I/O; the skip list is the per-tool-type dial the
+        // story asks for, empty until a check is shown to misfire on some tool.
+        seedIfAbsent(ToolResultVerifier.CFG_ENABLED, "true");
+        seedIfAbsent(ToolResultVerifier.CFG_SKIP_TOOLS, "");
         seedIfAbsent("chat.maxContextMessages", "50");
 
         // Ollama keep_alive (how long the model + KV cache stays resident) moved from a

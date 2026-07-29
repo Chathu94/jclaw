@@ -40,6 +40,8 @@ public final class LatencyTrace {
     private final AtomicInteger toolRoundCount = new AtomicInteger();
     private final AtomicInteger llmCallCount = new AtomicInteger();
     private final AtomicInteger llmCachedCallCount = new AtomicInteger();
+    private final AtomicInteger toolVerifyCount = new AtomicInteger();
+    private final AtomicInteger toolVerifyFailedCount = new AtomicInteger();
     private final AtomicBoolean ended = new AtomicBoolean();
 
     // Turn binding for the provider dispatch point (JCLAW-882). LlmProvider holds
@@ -190,6 +192,23 @@ public final class LatencyTrace {
     }
 
     /**
+     * Count one verified tool result against the turn bound to the calling thread
+     * (JCLAW-836). Recorded from the tool-result commit phase, which runs on the
+     * turn's own thread rather than the dispatch virtual threads, so the binding is
+     * the same one {@link #countLlmCall()} uses.
+     *
+     * <p>Both a total and a failure count, because a failure count alone cannot be
+     * read as a rate — a quiet turn and a flawless one would look identical. No-op
+     * outside a turn, matching {@code countLlmCall}.
+     */
+    public static void countToolVerification(boolean failed) {
+        var trace = CURRENT.get();
+        if (trace == null) return;
+        trace.toolVerifyCount.incrementAndGet();
+        if (failed) trace.toolVerifyFailedCount.incrementAndGet();
+    }
+
+    /**
      * Note that the call that just completed had its prompt served (at least in
      * part) from the provider's cache. An instance method rather than a lookup of
      * {@link #current()} because the streaming completion callback fires on the
@@ -233,6 +252,7 @@ public final class LatencyTrace {
         recordStreamSegments(prologueDone);
         recordToolSegments();
         recordLlmCallSegments();
+        recordToolVerificationSegments();
     }
 
     /**
@@ -327,6 +347,25 @@ public final class LatencyTrace {
         // cache-served share can never exceed the calls it is a share of.
         int cached = Math.min(llmCachedCallCount.get(), calls);
         if (cached > 0) emit("llm_call_cached", cached);
+    }
+
+    /**
+     * Per-turn tool-verification counts (JCLAW-836). The pass/fail RATE is what the
+     * story asks for, and a rate needs both numbers: read it as
+     * {@code sum(tool_verify_failed) / sum(tool_verify_count)} across turns, since
+     * percentiles are not additive.
+     *
+     * <p>Suppressed at zero for the same reason as the LLM-call segments —
+     * {@link LatencyStats} clamps to a minimum of 1 because HdrHistogram takes
+     * positive values only, so emitting "0 failures" would record as 1 and invent a
+     * failure rate on every clean turn.
+     */
+    private void recordToolVerificationSegments() {
+        int verified = toolVerifyCount.get();
+        if (verified == 0) return;
+        emit("tool_verify_count", verified);
+        int failed = toolVerifyFailedCount.get();
+        if (failed > 0) emit("tool_verify_failed", failed);
     }
 
     /** Record one segment to both the live histogram and the persisted time-series. */
