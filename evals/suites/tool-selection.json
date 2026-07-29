@@ -98,13 +98,23 @@
     {
       "id": "recurring-reminder-uses-task-manager",
       "input": "Remind me every weekday at 9am to check the deploy queue.",
-      "rubric": "A recurring reminder is a scheduled task, not a message the agent can promise to send later, and listing existing tasks first is a round-trip the request did not need. The result assertion confirms a task was actually created \u2014 arguments only say what was asked for. It deliberately does not pin the cron string: '0 0 9 * * 1-5' and '0 0 9 * * MON-FRI' are the same schedule, and substring matching cannot tell equivalent spellings apart, so asserting one would fail a correct agent.",
+      "rubric": "A recurring reminder is a scheduled task, not a message the agent can promise to send later. The task_manager description instructs the model to call listRecurringTasks before creating one so duplicates do not accumulate, so the documented protocol is two calls and this case asserts that protocol rather than a bare minimum \u2014 an earlier version demanded one call and failed an agent that was following its tool's own instructions. The result assertion confirms a task was actually created; it deliberately does not pin the cron string, since '0 0 9 * * 1-5' and '0 0 9 * * MON-FRI' are the same schedule and substring matching cannot tell equivalent spellings apart.",
       "checks": [
         {
           "kind": "tools_called_exactly",
           "args": [
+            "task_manager",
             "task_manager"
           ]
+        },
+        {
+          "kind": "tool_args_include",
+          "args": [
+            "task_manager"
+          ],
+          "schema": {
+            "action": "listRecurringTasks"
+          }
         },
         {
           "kind": "tool_args_include",
@@ -124,7 +134,7 @@
         },
         {
           "kind": "max_llm_calls",
-          "limit": 2
+          "limit": 3
         }
       ]
     },
