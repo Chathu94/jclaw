@@ -135,6 +135,21 @@ public interface AgentExecutionSink {
     void appendToolResult(String toolCallId, String result, String structuredJson);
 
     /**
+     * JCLAW-883: note whether the registry actually dispatched the call behind
+     * {@code toolCallId}, or refused it as an unknown / not-offered name.
+     *
+     * <p>Default no-op: the persistence sinks store the tool's text either way, and
+     * the model sees the refusal as its result. The eval capture overrides it,
+     * because "the agent called three tools" and "the agent invented three names and
+     * executed nothing" are different measurements and the text alone separates them
+     * only by matching on the word "Error".
+     *
+     * @param toolCallId id correlating with the {@code tool_calls} entry
+     * @param outcome    whether a tool ran, and if not, why not
+     */
+    default void noteToolOutcome(String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {}
+
+    /**
      * Convenience overload: tool result with no structured payload.
      *
      * @param toolCallId id correlating this result with the assistant

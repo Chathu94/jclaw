@@ -1,3 +1,4 @@
+import agents.ToolRegistry;
 import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -58,12 +59,47 @@ class EvalCaptureTest extends UnitTest {
     }
 
     @Test
+    void aRefusedCallIsAttemptedButNotCalled() {
+        // JCLAW-883: toolsCalled used to record every emitted call, so a live sweep
+        // reported three "calls" to httpFetch/http_fetch/webSearch on a turn that
+        // executed nothing. The checks score toolsCalled, so that read as the agent
+        // having used tools it never reached.
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, DATETIME_CALL, null, null, false);
+            sink.noteToolOutcome("call_1", ToolRegistry.ToolResult.Outcome.DISPATCHED);
+            sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);
+            sink.noteToolOutcome("call_2", ToolRegistry.ToolResult.Outcome.NOT_ENABLED);
+            return "It is 11:04.";
+        });
+
+        var recorded = capture.responses().get("clock");
+        assertEquals(List.of("datetime"), recorded.toolsCalled(), "only what a tool actually ran");
+        assertEquals(List.of("datetime", "web_search"), recorded.toolsAttempted(), "everything emitted");
+        assertEquals(List.of("web_search"), recorded.toolsRefused());
+    }
+
+    @Test
+    void anInventedToolNameCountsAsAttemptedOnly() {
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);
+            sink.noteToolOutcome("call_2", ToolRegistry.ToolResult.Outcome.UNKNOWN_TOOL);
+            return "I have no search tool.";
+        });
+
+        var recorded = capture.responses().get("clock");
+        assertTrue(recorded.toolsCalled().isEmpty(), "a name that reached no tool is not a call");
+        assertEquals(List.of("web_search"), recorded.toolsAttempted());
+    }
+
+    @Test
     void capturedRecordCarriesToolNamesInCallOrder() {
         // ParallelToolExecutor commits one serialized ToolCall per call, in order;
         // the tools_called_* checks score against exactly this list.
         var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
             sink.appendAssistantMessage(null, DATETIME_CALL, null, null, false);
+            sink.noteToolOutcome("call_1", ToolRegistry.ToolResult.Outcome.DISPATCHED);
             sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);
+            sink.noteToolOutcome("call_2", ToolRegistry.ToolResult.Outcome.DISPATCHED);
             return "It is 11:04.";
         });
 
@@ -134,6 +170,7 @@ class EvalCaptureTest extends UnitTest {
         var capture = EvalCapture.run(suite, evalAgent(), 1, (agent, prompt, sink) -> {
             LatencyTrace.countLlmCall();
             sink.appendAssistantMessage(null, DATETIME_CALL, null, null, false);
+            sink.noteToolOutcome("call_1", ToolRegistry.ToolResult.Outcome.DISPATCHED);
             return "It is 11:04.";
         });
 

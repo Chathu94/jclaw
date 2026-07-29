@@ -23,10 +23,19 @@ import java.util.regex.Pattern;
 public final class EvalScorer {
 
     /**
-     * What the agent produced for one case. {@code toolsCalled} is the tool names in
-     * call order; {@code llmCalls} is the model calls the turn spent (the
+     * What the agent produced for one case: the answer, the tools it reached for in
+     * call order, and {@code llmCalls} — the model calls the turn spent (the
      * {@code llm_call_count} segment JCLAW-882 adds), which is what
      * {@link EvalCheck.Kind#MAX_LLM_CALLS} asserts against.
+     *
+     * <p>{@code toolsCalled} holds only calls a tool actually ran; {@code toolsAttempted}
+     * holds every name the model emitted, including ones it invented and ones the
+     * agent was not granted (JCLAW-883). The checks score against {@code toolsCalled},
+     * because that is what produced side effects and did the work — a live sweep once
+     * recorded three "calls" to {@code httpFetch}, {@code http_fetch} and
+     * {@code webSearch} on a turn that executed nothing at all. The difference between
+     * the two lists is {@link #toolsRefused()}, itself a quality signal: an agent
+     * guessing tool names is burning model calls to accomplish nothing.
      *
      * <p>{@code error} is non-null when the turn never produced an answer — the
      * provider was down, the run timed out, the agent threw (JCLAW-883). Carrying
@@ -36,21 +45,38 @@ public final class EvalScorer {
      * recorded" and throw away the one detail someone debugging the sweep needs.
      * Older recordings have no {@code error} field and deserialise to null.
      */
-    public record Response(String output, List<String> toolsCalled, int llmCalls, String error) {
+    public record Response(String output, List<String> toolsCalled, List<String> toolsAttempted,
+                           int llmCalls, String error) {
 
         public Response {
             output = output == null ? "" : output;
             toolsCalled = toolsCalled == null ? List.of() : List.copyOf(toolsCalled);
+            // Older recordings carry only toolsCalled, and at that time it meant
+            // "attempted" — every emitted call, dispatched or not. Defaulting the new
+            // field to it preserves what those files actually recorded.
+            toolsAttempted = toolsAttempted == null ? toolsCalled : List.copyOf(toolsAttempted);
         }
 
-        /** A turn that produced an answer. */
+        /** A turn that produced an answer, where every attempted call also ran. */
         public Response(String output, List<String> toolsCalled, int llmCalls) {
-            this(output, toolsCalled, llmCalls, null);
+            this(output, toolsCalled, toolsCalled, llmCalls, null);
+        }
+
+        /** A turn where some attempts were refused: {@code toolsCalled} is the dispatched subset. */
+        public Response(String output, List<String> toolsCalled, List<String> toolsAttempted, int llmCalls) {
+            this(output, toolsCalled, toolsAttempted, llmCalls, null);
         }
 
         /** A turn that never produced an answer, and why. */
         public static Response failed(String reason) {
-            return new Response("", List.of(), 0, reason);
+            return new Response("", List.of(), List.of(), 0, reason);
+        }
+
+        /** Names the model emitted that never reached a tool — invented, or not granted. */
+        public List<String> toolsRefused() {
+            var refused = new java.util.ArrayList<>(toolsAttempted);
+            toolsCalled.forEach(refused::remove);
+            return List.copyOf(refused);
         }
     }
 

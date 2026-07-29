@@ -137,12 +137,16 @@ class ParallelToolExecutionTest extends UnitTest {
         var conv = (models.Conversation) services.Tx.run(() ->
                 services.ConversationService.findById(convId));
         var sink = new agents.ConversationSink(conv);
+        // JCLAW-883: trailing Set is the turn's offered tool names, which the
+        // dispatch guard checks against. null = unrestricted; these tests exercise
+        // scheduling semantics, not the guard.
         var m = agents.ParallelToolExecutor.class.getDeclaredMethod("executeToolsParallel",
                 List.class, Agent.class, Long.class, List.class,
                 java.util.function.Consumer.class, java.util.function.Consumer.class,
-                List.class, AtomicBoolean.class, agents.AgentExecutionSink.class);
+                List.class, AtomicBoolean.class, agents.AgentExecutionSink.class,
+                java.util.Set.class);
         m.setAccessible(true);
-        m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled, sink);
+        m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled, sink, null);
     }
 
     @Test

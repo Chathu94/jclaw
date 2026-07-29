@@ -80,6 +80,12 @@ auto-provisioned on first capture, for which **every tool is opt-in** so it can
 only reach what you granted it in the agent editor. Deleting that agent cleans
 up everything a sweep created.
 
+Related, and not eval-specific: per-agent tool config used to be schema-only —
+it hid a tool from the model but did not stop it running, so a model that guessed
+a real tool name bypassed the operator's configuration. JCLAW-883 added the
+execution guard in `ToolRegistry.execute`/`executeRich` for native tools; MCP
+tools already gated through `AgentSkillAllowedTool`.
+
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.
 

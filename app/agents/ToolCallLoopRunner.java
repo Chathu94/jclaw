@@ -15,7 +15,9 @@ import utils.LatencyTrace;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /**
  * Per-LLM-round tool-call orchestrators. Extracted from
@@ -68,6 +70,21 @@ public final class ToolCallLoopRunner {
 
     /** Passthrough-outcome tag for the audio/image structured logs (AudioRetryStrategy / ImageRetryStrategy). */
     private static final String OUTCOME_ERROR = "error";
+
+    /**
+     * The tool names this turn actually put in front of the model, for the dispatch
+     * guard in {@link ToolRegistry#executeRich(String, String, Agent, Set)}
+     * (JCLAW-883).
+     *
+     * <p>Derived from the same {@code tools} list the request carried, so "what the
+     * model was told it could call" and "what it is allowed to call" cannot drift.
+     * Computed here rather than in the executor because the tool-dispatch threads
+     * hold no JPA transaction, and recomputing per-agent config there throws.
+     */
+    private static Set<String> offeredToolNames(List<ToolDef> tools) {
+        if (tools == null) return Set.of();
+        return tools.stream().map(t -> t.function().name()).collect(Collectors.toSet());
+    }
 
     /**
      * JCLAW-291: result wrapper for {@link #callWithToolLoop}. Caller
@@ -362,7 +379,7 @@ public final class ToolCallLoopRunner {
                 "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
         ParallelToolExecutor.executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
-                currentMessages, null, null, null, null, sink);
+                currentMessages, null, null, null, null, sink, offeredToolNames(tools));
 
         // JCLAW-291: cooperative-cancel checkpoint between tool calls
         // and the next LLM round. If /subagent kill landed during the
@@ -464,7 +481,8 @@ public final class ToolCallLoopRunner {
         int streamingToolResultsAnchor = currentMessages.size();
         var toolRoundStartNs = System.nanoTime();
         ParallelToolExecutor.executeToolsParallel(toolCalls, ctx.agent(), ctx.conversationId(), currentMessages,
-                ctx.cb().onStatus(), ctx.cb().onToolCall(), ctx.collectedImages(), ctx.isCancelled(), ctx.sink());
+                ctx.cb().onStatus(), ctx.cb().onToolCall(), ctx.collectedImages(), ctx.isCancelled(), ctx.sink(),
+                offeredToolNames(ctx.tools()));
         ctx.trace().addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);

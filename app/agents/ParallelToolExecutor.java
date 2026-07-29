@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -68,7 +69,8 @@ public final class ParallelToolExecutor {
      * to call from multiple virtual threads concurrently.
      */
     static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Long conversationId,
-                                               Long taskRunId, Consumer<String> onStatus) {
+                                               Long taskRunId, Consumer<String> onStatus,
+                                               Set<String> offeredTools) {
         var rawName = toolCall.function().name();
         var rawArgs = toolCall.function().arguments();
         // JCLAW-281: when the model invokes a server-level mcp_<server> handle
@@ -104,7 +106,7 @@ public final class ParallelToolExecutor {
         // id for task fires) to tools that need it (ccr_retrieve) via
         // ToolContext, set on this tool's own VT.
         var result = ToolContext.withScope(conversationId, taskRunId,
-                () -> ToolRegistry.executeRich(rawName, rawArgs, agent));
+                () -> ToolRegistry.executeRich(rawName, rawArgs, agent, offeredTools));
         var text = result.text();
         var resultPreview = text.length() > 200
                 ? text.substring(0, 200) + "... (%d chars)".formatted(text.length()) : text;
@@ -164,7 +166,8 @@ public final class ParallelToolExecutor {
                                       Consumer<AgentRunner.ToolCallEvent> onToolCall,
                                       List<String> imageCollector,
                                       AtomicBoolean isCancelled,
-                                      AgentExecutionSink sink) {
+                                      AgentExecutionSink sink,
+                                      Set<String> offeredTools) {
         int n = toolCalls.size();
         if (n == 0) return;
 
@@ -178,10 +181,12 @@ public final class ParallelToolExecutor {
 
         if (n == 1) {
             if (isCancelled == null || !isCancelled.get()) {
-                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, onStatus);
+                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, onStatus,
+                        offeredTools);
             }
         } else {
-            dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, isCancelled);
+            dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, isCancelled,
+                    offeredTools);
         }
 
         commitToolResults(toolCalls, results, currentMessages, onToolCall, imageCollector, sink);
@@ -205,7 +210,8 @@ public final class ParallelToolExecutor {
      */
     private static void dispatchMultiToolCalls(List<ToolCall> toolCalls, Agent agent, Long conversationId,
                                                Long taskRunId, ToolRegistry.ToolResult[] results,
-                                               Consumer<String> onStatus, AtomicBoolean isCancelled) {
+                                               Consumer<String> onStatus, AtomicBoolean isCancelled,
+                                               Set<String> offeredTools) {
         var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
         var safeCalls = new ArrayList<Integer>();
         for (int i = 0; i < toolCalls.size(); i++) {
@@ -221,7 +227,7 @@ public final class ParallelToolExecutor {
         int workUnits = safeCalls.size() + unsafeGroups.size();
         var latch = new CountDownLatch(workUnits);
         var ctx = new DispatchContext(
-                toolCalls, agent, conversationId, taskRunId, onStatus, isCancelled, latch);
+                toolCalls, agent, conversationId, taskRunId, onStatus, isCancelled, latch, offeredTools);
         // JCLAW-882: the work-unit threads below inherit nothing, so an LLM call
         // a tool makes on its own (a subagent's bootstrap summary, a memory
         // rerank) would dispatch unbound and go uncounted. Hand each unit the
@@ -265,14 +271,16 @@ public final class ParallelToolExecutor {
      */
     private record DispatchContext(List<ToolCall> toolCalls, Agent agent, Long conversationId,
                                    Long taskRunId, Consumer<String> onStatus,
-                                   AtomicBoolean isCancelled, CountDownLatch latch) {}
+                                   AtomicBoolean isCancelled, CountDownLatch latch,
+                                   Set<String> offeredTools) {}
 
     /** Body of one parallel-safe work unit: dispatch a single call. */
     private static void runSafeCall(DispatchContext ctx, ToolRegistry.ToolResult[] results, int i) {
         try {
             if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
             results[i] = runToolCallSafely(
-                    ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.onStatus());
+                    ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.onStatus(),
+                    ctx.offeredTools());
         } finally {
             ctx.latch().countDown();
         }
@@ -284,7 +292,8 @@ public final class ParallelToolExecutor {
             for (int idx : group) {
                 if (ctx.isCancelled() != null && ctx.isCancelled().get()) break;
                 results[idx] = runToolCallSafely(
-                        ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.onStatus());
+                        ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.onStatus(),
+                        ctx.offeredTools());
             }
         } finally {
             ctx.latch().countDown();
@@ -296,9 +305,10 @@ public final class ParallelToolExecutor {
      * {@code Error executing tool} {@link ToolRegistry.ToolResult}.
      */
     private static ToolRegistry.ToolResult runToolCallSafely(ToolCall tc, Agent agent, Long conversationId,
-                                                             Long taskRunId, Consumer<String> onStatus) {
+                                                             Long taskRunId, Consumer<String> onStatus,
+                                                             Set<String> offeredTools) {
         try {
-            return runToolCall(tc, agent, conversationId, taskRunId, onStatus);
+            return runToolCall(tc, agent, conversationId, taskRunId, onStatus, offeredTools);
         } catch (Exception e) {
             EventLogger.error("tool", agent.name, null,
                     "Tool '%s' threw: %s"
@@ -345,6 +355,9 @@ public final class ParallelToolExecutor {
                     attHolder.set(sink.appendAssistantMessage(null, gson.toJson(tc), attachments));
                 }
                 sink.appendToolResult(tc.id(), r, s);
+                // JCLAW-883: the sink already has the name (from the assistant turn
+                // above) and the text; this is the third fact — whether a tool ran.
+                sink.noteToolOutcome(tc.id(), result.outcome());
             });
             // JCLAW-170: surface the completed call to the SSE stream so the
             // chat UI can render a per-call row with the structured result

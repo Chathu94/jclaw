@@ -2,6 +2,7 @@ package services.evals;
 
 import agents.AgentExecutionSink;
 import agents.AgentRunner;
+import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import services.AttachmentService;
@@ -13,6 +14,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Drives a live agent through an {@link EvalSuite} and records what it produced,
@@ -52,11 +54,17 @@ import java.util.Map;
  * {@code task_manager} call creates a real scheduled task, one that induces a
  * write tool writes.
  *
- * <p>This is not theoretical: the first live run of {@code tool-selection.v1}
+ * <p>This is not theoretical: the first live run of {@code tool-selection}
  * against the operator's {@code main} agent created a recurring task that had to
  * be deleted by hand. Point capture at a calibrated agent whose tool surface is
  * scoped to what the suite needs — see {@code __evaltest__} in
  * {@code evals/README.md} — not at an agent you actually use.
+ *
+ * <p>Scoping that surface is enforced at execution as well as in the schema
+ * (JCLAW-883). The second sweep proved why it had to be: pointed at an
+ * {@code __evaltest__} granted nothing, the model guessed {@code web_search} and
+ * ran it, because per-agent tool config was consulted only when building the list
+ * of tools sent to the model.
  */
 public final class EvalCapture {
 
@@ -161,7 +169,8 @@ public final class EvalCapture {
         var sink = new CaptureSink();
         try (var _ = LatencyTrace.bind(trace)) {
             var content = turns.run(agent, testCase.input(), sink);
-            return new EvalScorer.Response(content, sink.toolsCalled(), trace.llmCallCount());
+            return new EvalScorer.Response(content, sink.toolsCalled(), sink.toolsAttempted(),
+                    trace.llmCallCount());
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY,
                     "Eval case '%s' errored: %s".formatted(testCase.id(), e));
@@ -184,7 +193,14 @@ public final class EvalCapture {
         // ParallelToolExecutor commits results from the turn's thread, but tool
         // dispatch itself fans out across virtual threads; synchronize so a
         // multi-tool round cannot lose a name to a torn ArrayList write.
-        private final List<String> tools = Collections.synchronizedList(new ArrayList<>());
+        private final List<String> attempted = Collections.synchronizedList(new ArrayList<>());
+
+        // Correlates the assistant turn (which carries the name) with the outcome
+        // that arrives afterwards keyed by call id. commitToolResults fires
+        // appendAssistantMessage, appendToolResult and noteToolOutcome for one call
+        // before moving to the next, so the id is always already known here.
+        private final Map<String, String> nameByCallId = new ConcurrentHashMap<>();
+        private final List<String> dispatched = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
@@ -203,6 +219,13 @@ public final class EvalCapture {
         }
 
         @Override
+        public void noteToolOutcome(String toolCallId, ToolRegistry.ToolResult.Outcome outcome) {
+            if (outcome != ToolRegistry.ToolResult.Outcome.DISPATCHED) return;
+            var name = nameByCallId.get(toolCallId);
+            if (name != null) dispatched.add(name);
+        }
+
+        @Override
         public String executionLabel() {
             return "eval-capture";
         }
@@ -216,17 +239,27 @@ public final class EvalCapture {
          */
         private void recordToolName(String toolCallJson) {
             try {
-                var fn = JsonParser.parseString(toolCallJson).getAsJsonObject().getAsJsonObject("function");
+                var obj = JsonParser.parseString(toolCallJson).getAsJsonObject();
+                var fn = obj.getAsJsonObject("function");
                 if (fn == null) return;
                 var name = fn.get("name");
-                if (name != null && !name.isJsonNull()) tools.add(name.getAsString());
+                if (name == null || name.isJsonNull()) return;
+                attempted.add(name.getAsString());
+                var id = obj.get("id");
+                if (id != null && !id.isJsonNull()) nameByCallId.put(id.getAsString(), name.getAsString());
             } catch (RuntimeException e) {
                 EventLogger.warn(EVENT_CATEGORY, "Unparseable tool call in eval capture: " + e);
             }
         }
 
+        /** Calls a tool actually ran. */
         List<String> toolsCalled() {
-            return List.copyOf(tools);
+            return List.copyOf(dispatched);
+        }
+
+        /** Every name the model emitted, dispatched or refused. */
+        List<String> toolsAttempted() {
+            return List.copyOf(attempted);
         }
     }
 }

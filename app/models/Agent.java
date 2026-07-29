@@ -198,7 +198,9 @@ public class Agent extends Model {
      * JCLAW-883: the agent eval sweeps run against. Its tool surface is opt-in
      * for EVERY tool (see {@code ToolRegistry.computeDisabledTools}), so an
      * operator calibrates it to exactly what a suite needs and a sweep cannot
-     * reach a tool nobody granted.
+     * reach a tool nobody granted — enforced at execution by
+     * {@code ToolRegistry.execute}, not merely omitted from the schema, because a
+     * model that guesses a real tool name would otherwise run it.
      *
      * <p>Unlike the loadtest agents this is deliberately NOT in
      * {@code ApiAgentsController.isReservedName}: reserved rows are hidden from

@@ -41,15 +41,50 @@ public class ToolRegistry {
      *                       so re-opening a conversation keeps the richer
      *                       render. {@code null} means "no structured view".
      */
-    public record ToolResult(String text, String structuredJson, List<GeneratedAttachment> attachments, VideoJobRef videoJob) {
+    public record ToolResult(String text, String structuredJson, List<GeneratedAttachment> attachments,
+                             VideoJobRef videoJob, Outcome outcome) {
+
+        /**
+         * Whether the registry actually handed this call to a tool (JCLAW-883).
+         *
+         * <p>Without it, "the tool ran and reported a problem" and "the tool never
+         * ran" are both just a {@code text} beginning with "Error:", separable only
+         * by matching on that prose. The eval capture needs them apart — a model
+         * that invents three tool names and executes nothing has not called three
+         * tools — and so does anything else that later wants to count real work.
+         */
+        public enum Outcome {
+            /** Handed to the tool. Its {@code text} is the tool's own output, success or failure. */
+            DISPATCHED,
+            /** No tool of that name is registered — typically a name the model invented. */
+            UNKNOWN_TOOL,
+            /** Registered, but not among the tools this turn offered the model. */
+            NOT_ENABLED
+        }
+
         /** Back-compat 2-arg form — most tools produce no inline attachment. */
         public ToolResult(String text, String structuredJson) {
-            this(text, structuredJson, List.of(), null);
+            this(text, structuredJson, List.of(), null, Outcome.DISPATCHED);
         }
         public ToolResult {
             attachments = attachments == null ? List.of() : List.copyOf(attachments);
+            outcome = outcome == null ? Outcome.DISPATCHED : outcome;
         }
+
+        /** 4-arg form: a dispatched result. Refusals use {@link #refused}. */
+        public ToolResult(String text, String structuredJson, List<GeneratedAttachment> attachments, VideoJobRef videoJob) {
+            this(text, structuredJson, attachments, videoJob, Outcome.DISPATCHED);
+        }
+
         public static ToolResult text(String text) { return new ToolResult(text, null, List.of(), null); }
+
+        /** A call the registry declined to dispatch, and why. */
+        public static ToolResult refused(String text, Outcome outcome) {
+            return new ToolResult(text, null, List.of(), null, outcome);
+        }
+
+        /** True when a tool actually ran — the signal {@code toolsCalled} is built from. */
+        public boolean dispatched() { return outcome == Outcome.DISPATCHED; }
         /** JCLAW-228: a tool ({@code generate_image}) that produced an image to inline on the
          *  assistant turn. The commit path ({@link ParallelToolExecutor}) attaches it to
          *  the assistant message via {@link AgentExecutionSink}; the model still sees {@code text}. */
@@ -371,6 +406,46 @@ public class ToolRegistry {
     }
 
     /**
+     * JCLAW-883: refuse a call for a tool this turn did not offer the model.
+     *
+     * <p>{@code offered} is the name set from {@link #getToolDefsForAgent}, computed
+     * once in the turn's prologue where a transaction exists and threaded down to
+     * the dispatch point. It is NOT recomputed here: tool calls run on their own
+     * virtual threads with no JPA transaction open — "no JDBC connection is held
+     * during LLM HTTP calls or tool execution" — so reading per-agent config at this
+     * point throws {@code No active EntityManager} and kills the dispatch.
+     *
+     * <p>Why the guard is needed at all: {@link #loadDisabledTools} used to be
+     * consulted only when building the schema, so per-agent tool config hid a tool
+     * from the model without stopping it running. The first {@code __evaltest__}
+     * sweep — against an agent granted nothing — guessed {@code web_search} and it
+     * executed and returned live results; three sibling guesses ({@code httpFetch},
+     * {@code http_fetch}, {@code webSearch}) failed only because those names do not
+     * exist. The same hole left {@code generate_image} / {@code generate_video} /
+     * {@code generate_audio}, default-off precisely because they cost money and
+     * time, reachable on any agent by a lucky guess.
+     *
+     * <p>"Only what was offered" rather than "not disabled" because it needs no
+     * lookup and covers both holes with one rule. Grouped (MCP) per-action adapters
+     * are unaffected: {@code McpServerTool} invokes them object-directly and never
+     * resolves them through this registry, so they never reach this check. The
+     * server-level {@code mcp_<group>} handle IS offered and IS checked, which is
+     * correct — an MCP server switched off for an agent should not run.
+     *
+     * <p>{@code null} means unrestricted, for callers that are not dispatching a
+     * model-chosen call (tests, internal invocation).
+     */
+    private static boolean notOffered(String toolName, Set<String> offered) {
+        return offered != null && !offered.contains(toolName);
+    }
+
+    /** Phrased so the model stops rather than retrying, and without enumerating what it cannot see. */
+    private static String notEnabledError(String toolName) {
+        return ("Error: Tool '%s' is not enabled for this agent. Do not retry it — "
+                + "use only the tools listed in your request.").formatted(toolName);
+    }
+
+    /**
      * JCLAW-170: rich-output sibling of {@link #execute}. Same validation
      * semantics (unknown tool, empty args, malformed args); on success
      * returns the tool's {@link ToolResult} so callers that want the
@@ -379,9 +454,22 @@ public class ToolRegistry {
      * to a text-only result.
      */
     public static ToolResult executeRich(String toolName, String argsJson, Agent agent) {
+        return executeRich(toolName, argsJson, agent, null);
+    }
+
+    /**
+     * Dispatch restricted to {@code offered} — the tool names this turn actually put
+     * in front of the model (JCLAW-883). Pass {@code null} to skip the restriction;
+     * every model-driven dispatch passes the real set.
+     */
+    public static ToolResult executeRich(String toolName, String argsJson, Agent agent, Set<String> offered) {
         var tool = tools.get(toolName);
         if (tool == null) {
-            return ToolResult.text("Error: Unknown tool '%s'".formatted(toolName));
+            return ToolResult.refused("Error: Unknown tool '%s'".formatted(toolName),
+                    ToolResult.Outcome.UNKNOWN_TOOL);
+        }
+        if (notOffered(toolName, offered)) {
+            return ToolResult.refused(notEnabledError(toolName), ToolResult.Outcome.NOT_ENABLED);
         }
         if (argsJson == null || argsJson.isEmpty()) {
             return ToolResult.text(
@@ -403,9 +491,17 @@ public class ToolRegistry {
     }
 
     public static String execute(String toolName, String argsJson, Agent agent) {
+        return execute(toolName, argsJson, agent, null);
+    }
+
+    /** Text-only sibling of {@link #executeRich(String, String, Agent, Set)}. */
+    public static String execute(String toolName, String argsJson, Agent agent, Set<String> offered) {
         var tool = tools.get(toolName);
         if (tool == null) {
             return "Error: Unknown tool '%s'".formatted(toolName);
+        }
+        if (notOffered(toolName, offered)) {
+            return notEnabledError(toolName);
         }
         // Defense-in-depth: validate the args JSON is parseable BEFORE invoking the
         // tool. When the LLM hits its output-token budget mid-tool-call, the

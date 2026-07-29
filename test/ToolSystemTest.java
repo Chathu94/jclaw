@@ -1495,6 +1495,46 @@ class ToolSystemTest extends UnitTest {
     }
 
     @Test
+    void aToolTheTurnNeverOfferedIsRefusedAtExecution() {
+        // JCLAW-883: hiding a tool from getToolDefsForAgent only stops the model
+        // being TOLD about it. A model that guesses a real name used to execute it
+        // anyway — the first __evaltest__ sweep guessed web_search on an agent
+        // granted nothing and got live results back.
+        //
+        // The guard takes the offered set as a parameter rather than re-reading
+        // per-agent config: tool calls dispatch on their own virtual threads with no
+        // JPA transaction open, so a lookup here throws "No active EntityManager".
+        var offered = java.util.Set.<String>of();
+        var name = ToolRegistry.listTools().getFirst().name();
+
+        var refused = ToolRegistry.executeRich(name, "{}", agent, offered);
+        assertEquals(ToolRegistry.ToolResult.Outcome.NOT_ENABLED, refused.outcome());
+        assertFalse(refused.dispatched());
+        assertTrue(refused.text().contains("is not enabled for this agent"), refused.text());
+
+        var allowed = ToolRegistry.executeRich(name, "{}", agent, java.util.Set.of(name));
+        assertEquals(ToolRegistry.ToolResult.Outcome.DISPATCHED, allowed.outcome(),
+                "an offered tool runs normally");
+    }
+
+    @Test
+    void anInventedToolNameIsRefusedAsUnknownNotAsNotEnabled() {
+        // The two refusals are different findings: one says the model hallucinated,
+        // the other says the operator did not grant it.
+        var result = ToolRegistry.executeRich("httpFetch", "{}", agent, java.util.Set.of("web_fetch"));
+
+        assertEquals(ToolRegistry.ToolResult.Outcome.UNKNOWN_TOOL, result.outcome());
+        assertTrue(result.text().contains("Unknown tool"), result.text());
+    }
+
+    @Test
+    void anUnrestrictedCallStillDispatches() {
+        // null offered = "not a model-chosen dispatch" — internal callers and tests.
+        var name = ToolRegistry.listTools().getFirst().name();
+        assertTrue(ToolRegistry.executeRich(name, "{}", agent, null).dispatched());
+    }
+
+    @Test
     void evalTestAgentGrantsToolsOnlyWhenAskedTo() {
         // JCLAW-883: the eval agent inverts the per-agent default — every tool is
         // opt-in, not just the costly ones. An eval sweep runs unattended against

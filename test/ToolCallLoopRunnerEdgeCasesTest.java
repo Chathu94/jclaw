@@ -565,8 +565,10 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                                             List<ChatMessage> messages) {
         var conv = (Conversation) Tx.run(() -> ConversationService.findById(convId));
         AgentExecutionSink sink = new ConversationSink(conv);
+        // null offeredTools = unrestricted: these cases exercise dispatch mechanics
+        // (throwing tools, truncated args), not the JCLAW-883 offered-set guard.
         ParallelToolExecutor.executeToolsParallel(
-                calls, agent, convId, messages, null, null, null, new AtomicBoolean(false), sink);
+                calls, agent, convId, messages, null, null, null, new AtomicBoolean(false), sink, null);
     }
 
     private static ToolRegistry.Tool throwingTool(String name, RuntimeException error) {

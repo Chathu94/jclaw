@@ -164,8 +164,9 @@ The runner scores whatever produced the responses; the file is the contract.
   "responses": {
     "carries-the-figure-from-source": {
       "output": "The transfer lasted 209 days.",
-      "toolsCalled": [],
-      "llmCalls": 1
+      "toolsCalled": ["web_fetch"],
+      "toolsAttempted": ["web_fetch", "httpFetch"],
+      "llmCalls": 2
     },
     "distractor-is-not-repeated": {
       "error": "provider unreachable"
@@ -176,6 +177,28 @@ The runner scores whatever produced the responses; the file is the contract.
 
 `error` marks a case the agent never answered. It is optional, and older
 recordings without it read as answered.
+
+### `toolsCalled` vs `toolsAttempted`
+
+- **`toolsCalled`** — names where a tool actually ran. **The checks score against
+  this**, because it is what produced side effects and did the work.
+- **`toolsAttempted`** — every name the model emitted, including ones it invented
+  and ones the agent was not granted.
+
+They were one field until JCLAW-883, and it recorded attempts while being named
+for calls. A live sweep made the cost concrete: a turn that executed *nothing*
+recorded `toolsCalled: ["httpFetch", "http_fetch", "webSearch"]`, because the
+model guessed three names that do not exist. Scored against that, the agent
+looked like it had used three tools.
+
+The difference between the lists is itself worth reading. An agent guessing tool
+names is spending model calls to accomplish nothing — in that same sweep it
+burned four calls to produce an apology. `max_llm_calls` catches the cost;
+`toolsAttempted` says why.
+
+Older recordings carry only `toolsCalled`, and at that time it meant *attempted*.
+The loader defaults `toolsAttempted` to it rather than to empty, so those files
+keep meaning what they recorded.
 
 ## Errored is not failed
 
@@ -248,6 +271,13 @@ operator switches things *on*, in the agent editor, per suite. That inversion
 lives in `ToolRegistry.computeDisabledTools` alongside the same rule that makes
 `generate_image` and `generate_video` opt-in, and it holds for tools added to the
 registry later — which seeding disabled rows at provisioning would not.
+
+It is enforced at execution, not only in the schema. That distinction cost a
+round: the first `__evaltest__` sweep was offered no tools, guessed `web_search`
+anyway, and it *ran* — because per-agent tool config was consulted only when
+building the tool list sent to the model. `ToolRegistry.execute` now refuses a
+native tool the agent has not been granted (JCLAW-883). MCP tools keep their own
+execution gate, the `AgentSkillAllowedTool` allowlist, and are not double-gated.
 
 The practical consequence: a fresh `__evaltest__` fails every `tool_called` check
 until you grant the tools that suite needs. That is the safe direction to be
