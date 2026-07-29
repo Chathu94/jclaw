@@ -9,6 +9,7 @@ import services.evals.EvalSuite;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 /**
@@ -66,8 +67,8 @@ class EvalRunnerTest extends UnitTest {
 
     @Test
     void responderFailureCostsOneCaseNotTheRun() {
-        // A missing recording (or a responder that throws) must read as a failed
-        // case; losing the other verdicts would make a partial sweep unreadable.
+        // A missing recording (or a responder that throws) must not cost the other
+        // verdicts; losing them would make a partial sweep unreadable.
         var report = runWith(Map.of("alpha", new EvalScorer.Response("alpha", List.of(), 1)));
 
         assertEquals(2, report.results().size());
@@ -75,6 +76,91 @@ class EvalRunnerTest extends UnitTest {
         assertFalse(report.results().get(1).passed());
         assertTrue(report.results().get(1).failures().getFirst().contains("no response recorded"),
                 report.results().get(1).failures().toString());
+    }
+
+    // ==================== Errored vs failed (JCLAW-883) ====================
+
+    @Test
+    void aCaseThatNeverAnsweredIsErroredNotFailed() {
+        // "the agent errored" and "the agent answered wrongly" are different
+        // findings — collapsing them would send someone hunting a prompt bug
+        // when the provider was simply down.
+        var report = runWith(Map.of("alpha", new EvalScorer.Response("alpha", List.of(), 1)));
+
+        var beta = report.results().get(1);
+        assertTrue(beta.errored(), "a missing answer is an error, not a wrong answer");
+        assertFalse(beta.passed());
+        assertEquals(1, report.errored());
+    }
+
+    @Test
+    void erroredCasesLeaveThePassRateOverWhatWasActuallyScored() {
+        // alpha answered and passed; beta never answered. Scoring beta as a failure
+        // would report 50% and understate the agent; dropping it silently would
+        // report 100% and overstate confidence. One scored case, one pass.
+        var report = runWith(Map.of("alpha", new EvalScorer.Response("alpha", List.of(), 1)));
+
+        assertEquals(1, report.scored());
+        assertEquals(1.0, report.passRate(), 0.0001);
+        assertTrue(report.summary().contains("1 case(s) errored and were not scored"), report.summary());
+        assertTrue(report.summary().contains("ERROR beta"), report.summary());
+    }
+
+    @Test
+    void aCaptureThatRecordedAnErrorIsNotScoredAgainstTheAgent() {
+        // The live-capture shape: the recording exists but carries a reason instead
+        // of an answer. Scoring its empty output would manufacture check failures.
+        var report = runWith(Map.of(
+                "alpha", new EvalScorer.Response("alpha", List.of(), 1),
+                "beta", EvalScorer.Response.failed("provider timeout after 30s")));
+
+        var beta = report.results().get(1);
+        assertTrue(beta.errored());
+        assertEquals(List.of("provider timeout after 30s"), beta.failures(),
+                "the recorded reason survives to the report rather than being replaced by check output");
+    }
+
+    @Test
+    void anErroredCaseIsNotARegression() {
+        var baseline = runWith(Map.of(
+                "alpha", new EvalScorer.Response("alpha", List.of(), 1),
+                "beta", new EvalScorer.Response("beta", List.of(), 1)));
+        var current = runWith(Map.of(
+                "alpha", new EvalScorer.Response("alpha", List.of(), 1),
+                "beta", EvalScorer.Response.failed("provider timeout")));
+
+        assertTrue(current.regressionsAgainst(baseline).isEmpty(),
+                "beta stopped answering, which says nothing about whether its behaviour changed");
+    }
+
+    @Test
+    void aCaseCannotBothPassAndError() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new EvalReport.CaseResult("x", true, List.of(), 1, 1, true));
+    }
+
+    @Test
+    void fanOutRespectsTheConcurrencyCeiling() {
+        // Six cases, ceiling of 2: the semaphore must keep the peak at 2 no matter
+        // how many virtual threads the pool creates.
+        var cases = IntStream.range(0, 6).mapToObj(i -> caseSaying("case-" + i, "ok")).toList();
+        var suite = new EvalSuite("bounded", 1, "fixture", cases);
+        var inFlight = new AtomicInteger();
+        var peak = new AtomicInteger();
+
+        var report = EvalRunner.run(suite, testCase -> {
+            peak.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(50);
+            } finally {
+                inFlight.decrementAndGet();
+            }
+            return new EvalScorer.Response("ok", List.of(), 1);
+        }, 2);
+
+        assertEquals(6, report.results().size());
+        assertEquals(1.0, report.passRate(), 0.0001);
+        assertTrue(peak.get() <= 2, "expected at most 2 cases in flight, peaked at " + peak.get());
     }
 
     @Test
@@ -133,7 +219,7 @@ class EvalRunnerTest extends UnitTest {
     @Test
     void newCasesAreNotRegressions() {
         var baseline = new EvalReport("sample", 1,
-                List.of(new EvalReport.CaseResult("alpha", true, List.of(), 1, 1)));
+                List.of(EvalReport.CaseResult.scored("alpha", true, List.of(), 1, 1)));
         var current = runWith(Map.of("alpha", new EvalScorer.Response("alpha", List.of(), 1)));
 
         assertTrue(current.regressionsAgainst(baseline).isEmpty(),
@@ -149,8 +235,10 @@ class EvalRunnerTest extends UnitTest {
         var summary = report.summary();
 
         assertTrue(summary.contains("sample.v1"), summary);
-        assertTrue(summary.contains("FAIL beta"), summary);
+        assertTrue(summary.contains("FAIL"), summary);
+        assertTrue(summary.contains("beta"), summary);
         assertTrue(summary.contains("missing \"beta\""), summary);
         assertTrue(summary.contains("1/2 passed (50%)"), summary);
+        assertFalse(summary.contains("errored"), "no case errored, so the totals line stays clean: " + summary);
     }
 }

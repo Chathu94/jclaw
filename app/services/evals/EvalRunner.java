@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.function.Function;
 
 /**
  * Runs an {@link EvalSuite} against a responder and scores it (JCLAW-875).
@@ -23,9 +25,13 @@ import java.util.concurrent.Future;
  * calls a sweep does spend are the responder's, and the suite can assert a budget
  * on them via {@link EvalCheck.Kind#MAX_LLM_CALLS}.
  *
- * <p>{@link Responder} is the seam. Today the shipped implementation replays
- * recorded responses (see {@link #main}); the agent-backed responder lands with
- * the critic work in JCLAW-836, which is the story that owns invoking a model.
+ * <p>{@link Responder} is the seam. This CLI's implementation replays recorded
+ * responses (see {@link #main}) and stays free of the Play runtime — the command
+ * is a plain {@code java -cp} that boots no framework. The agent-backed responder
+ * ({@link EvalCapture}, JCLAW-883) necessarily needs JPA and a provider, so it
+ * runs inside the app behind {@code POST /api/evals/capture} and writes the same
+ * recorded format this CLI consumes. That split is why capture is not simply
+ * another flag here.
  */
 public final class EvalRunner {
 
@@ -35,6 +41,15 @@ public final class EvalRunner {
         EvalScorer.Response respond(EvalCase testCase) throws Exception;
     }
 
+    /**
+     * Cases allowed in front of a model at once when the caller does not say
+     * (JCLAW-883). Four is deliberately modest: a sweep is a background quality
+     * check, not a throughput test, and a provider that rate-limits under it
+     * would turn agent quality into a function of how many cases the suite
+     * happens to contain.
+     */
+    public static final int DEFAULT_CONCURRENCY = 4;
+
     private static final String DEFAULT_SUITE_DIR = "evals/suites";
     private static final String OPT_SUITES = "--suites";
     private static final String OPT_RESPONSES = "--responses";
@@ -43,20 +58,53 @@ public final class EvalRunner {
 
     private EvalRunner() {}
 
+    /** Fans out at {@link #DEFAULT_CONCURRENCY}. */
+    public static EvalReport run(EvalSuite suite, Responder responder) {
+        return run(suite, responder, DEFAULT_CONCURRENCY);
+    }
+
     /**
      * Scores every case in {@code suite}, fanning out across virtual threads — the
      * cases are independent and each one blocks on a model, so the sweep costs about
      * as long as its slowest case rather than the sum. Results keep suite order so
      * two runs of the same suite diff line by line.
+     *
+     * <p>{@code maxConcurrency} bounds how many cases may be in front of a model at
+     * once (JCLAW-883). Every case still gets its own virtual thread — those are
+     * cheap and the ordering guarantee depends on them — but the semaphore caps the
+     * concurrent model calls. An unbounded sweep would contradict the NFR the suite
+     * exists to police: it would hammer a provider into rate-limiting, and the
+     * resulting retries and timeouts would score as agent failures.
      */
-    public static EvalReport run(EvalSuite suite, Responder responder) {
-        List<Future<EvalReport.CaseResult>> futures;
+    public static EvalReport run(EvalSuite suite, Responder responder, int maxConcurrency) {
+        var results = mapCasesBounded(suite.cases(), maxConcurrency, testCase -> score(testCase, responder));
+        return new EvalReport(suite.id(), suite.version(), results);
+    }
+
+    /**
+     * Apply {@code fn} to every case on its own virtual thread, with at most
+     * {@code maxConcurrency} running at once, preserving suite order in the result.
+     *
+     * <p>Shared with {@link EvalCapture} so the ceiling is defined once: capture and
+     * live scoring are the two paths that put a model behind {@code fn}, and a bound
+     * that only one of them honoured would be no bound at all.
+     */
+    static <T> List<T> mapCasesBounded(List<EvalCase> cases, int maxConcurrency, Function<EvalCase, T> fn) {
+        var permits = new Semaphore(Math.max(1, maxConcurrency));
+        List<Future<T>> futures;
         try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            futures = suite.cases().stream()
-                    .map(testCase -> pool.submit(() -> score(testCase, responder)))
+            futures = cases.stream()
+                    .map(testCase -> pool.submit(() -> {
+                        permits.acquire();
+                        try {
+                            return fn.apply(testCase);
+                        } finally {
+                            permits.release();
+                        }
+                    }))
                     .toList();
         }
-        var results = new ArrayList<EvalReport.CaseResult>(futures.size());
+        var results = new ArrayList<T>(futures.size());
         for (var future : futures) {
             try {
                 results.add(future.get());
@@ -67,28 +115,35 @@ public final class EvalRunner {
                 throw new IllegalStateException("Eval case failed outside scoring", e.getCause());
             }
         }
-        return new EvalReport(suite.id(), suite.version(), results);
+        return results;
     }
 
     private static EvalReport.CaseResult score(EvalCase testCase, Responder responder) {
         var startNs = System.nanoTime();
         try {
             var response = responder.respond(testCase);
+            // A capture that recorded a failure for this case carries the reason
+            // rather than an answer. Scoring its empty output would manufacture a
+            // pile of check failures that say nothing about the agent's quality.
+            if (response.error() != null) {
+                return errored(testCase, startNs, response.error());
+            }
             var failures = EvalScorer.failures(testCase, response);
-            return new EvalReport.CaseResult(testCase.id(), failures.isEmpty(), failures,
+            return EvalReport.CaseResult.scored(testCase.id(), failures.isEmpty(), failures,
                     elapsedMs(startNs), response.llmCalls());
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return failed(testCase, startNs, "responder interrupted");
+            return errored(testCase, startNs, "responder interrupted");
         } catch (Exception e) {
             // A responder that throws on one case must not cost the sweep the other
-            // cases' verdicts — a broken case is a failed case, not a failed run.
-            return failed(testCase, startNs, "responder failed: " + e);
+            // cases' verdicts. It is an errored case, not a failing one: nothing was
+            // measured, so nothing can be said about the agent.
+            return errored(testCase, startNs, "responder failed: " + e);
         }
     }
 
-    private static EvalReport.CaseResult failed(EvalCase testCase, long startNs, String message) {
-        return new EvalReport.CaseResult(testCase.id(), false, List.of(message), elapsedMs(startNs), 0);
+    private static EvalReport.CaseResult errored(EvalCase testCase, long startNs, String message) {
+        return EvalReport.CaseResult.errored(testCase.id(), message, elapsedMs(startNs));
     }
 
     private static long elapsedMs(long startNs) {

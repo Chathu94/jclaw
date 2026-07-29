@@ -762,10 +762,13 @@ usage_evals() {
     if is_developer_clone; then
         cat <<EOF
 Usage: ${INVOKE} evals [--suites <dir>] [--responses <file>] [--baseline <file>] [--out <file>]
+       ${INVOKE} evals --capture <file> --agent <name> --suite <id> [--version <n>] [--concurrency <n>]
 
-Work with the versioned eval dataset in evals/suites (JCLAW-875). Entirely
-offline: it starts no backend, calls no model, and touches no database, so
-running it costs nothing on the serving path.
+Work with the versioned eval dataset in evals/suites (JCLAW-875, JCLAW-883).
+
+Validating and scoring are entirely offline: they start no backend, call no
+model, and touch no database, so running them costs nothing on the serving
+path. Capturing is the exception and says so — see below.
 
 With no --responses it validates the dataset — every suite parses, every
 check kind is one the scorer implements, every JSON Schema keyword is one it
@@ -774,7 +777,16 @@ enforces — and prints the case/check counts. That is the same validation
 eval run.
 
 With --responses it scores a recorded agent run: pass rate, per-case
-latency, failed checks by name, and the LLM calls the run spent.
+latency, failed checks by name, and the LLM calls the run spent. Cases the
+agent never answered are reported as errored and kept out of the pass rate,
+so a provider outage does not read as a quality collapse.
+
+With --capture it drives a live agent through a suite and writes the recorded
+run. This one needs the backend running, and it spends real model calls. The
+agent is required, never defaulted — a sweep that silently ran against your
+working agent is the accident this guards against. Turns leave no
+conversation, no message history and no memories behind, and their latency is
+not recorded into the Chat Performance histograms.
 
 Options:
   --suites <dir>     Suite directory (default: evals/suites)
@@ -783,13 +795,20 @@ Options:
   --baseline <file>  An earlier --out report; exits non-zero if a case that
                      passed there fails now
   --out <file>       Write the report as JSON (feed it back as --baseline)
+  --capture <file>   Drive a live agent and write the recorded run here
+  --agent <name>     Which agent to drive (required with --capture)
+  --suite <id>       Which suite to drive (required with --capture)
+  --version <n>      Suite version (default: the highest shipped)
+  --concurrency <n>  Cases in front of the model at once (default: 4, max 16)
 
-Exit codes: 0 clean, 1 invalid dataset / failing case / regression, 2 usage.
+Exit codes: 0 clean, 1 invalid dataset / failing case / regression / capture
+failure, 2 usage.
 
 Examples:
   ${INVOKE} evals                                              # validate the dataset
   ${INVOKE} evals --responses run.json --out report.json       # score a recorded run
   ${INVOKE} evals --responses run.json --baseline report.json  # catch regressions
+  ${INVOKE} evals --capture run.json --agent evalbot --suite tool-selection
 EOF
     else
         cat <<EOF
@@ -3193,8 +3212,98 @@ if segs:
 # Invoked as a plain `java -cp`, not through `play`, because the eval classes
 # deliberately depend on nothing from the Play runtime; booting the framework
 # just to read JSON files would trade a 200 ms command for a multi-second one.
+# Drives a suite against a live agent via POST /api/evals/capture and writes the
+# recorded run to a file (JCLAW-883). Unlike the offline path below this needs the
+# running backend: capturing means real agent turns, which need JPA, a configured
+# provider and the tool registry. Scoring what it writes stays offline.
+#
+# Auth mirrors loadtest — loopback plus the X-Loadtest-Auth header carrying the
+# application secret — because it is the same trust boundary: an operator-run
+# harness on the local host with no plaintext admin credential to log in with.
+do_evals_capture() {
+    local out="" agent="" suite="" version="" concurrency=""
+    local -a rest=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --capture)     out="${2:-}";         shift 2 ;;
+            --agent)       agent="${2:-}";       shift 2 ;;
+            --suite)       suite="${2:-}";       shift 2 ;;
+            --version)     version="${2:-}";     shift 2 ;;
+            --concurrency) concurrency="${2:-}"; shift 2 ;;
+            *)             rest+=("$1");         shift   ;;
+        esac
+    done
+
+    if [[ ${#rest[@]} -gt 0 ]]; then
+        echo "Error: unknown option(s) for capture: ${rest[*]}"
+        usage_evals
+        exit 2
+    fi
+    # The agent is required rather than defaulted: a sweep that silently ran
+    # against the operator's working agent is the accident worth designing out.
+    if [[ -z "$out" || -z "$agent" || -z "$suite" ]]; then
+        echo "Error: --capture needs --agent <name> and --suite <id>."
+        usage_evals
+        exit 2
+    fi
+
+    load_env_file
+    local var_name secret
+    var_name=$(secret_var_name)
+    secret=${!var_name:-}
+    if [[ -z "$secret" ]]; then
+        echo "Error: $var_name is not set — capture authenticates with it via the"
+        echo "       X-Loadtest-Auth header. Generate or rotate via: $0 secret"
+        exit 1
+    fi
+
+    if ! curl -s -o /dev/null -w '%{http_code}' "http://localhost:$BACKEND_PORT/" | grep -q '^[23]'; then
+        echo "Error: Backend is not responding on port $BACKEND_PORT."
+        echo "       Start it first: $0 ${DEV_MODE:+--dev }start"
+        exit 1
+    fi
+
+    local body
+    body=$(printf '{"suite":"%s","agent":"%s"' "$suite" "$agent")
+    [[ -n "$version" ]]     && body+=$(printf ',"version":%s' "$version")
+    [[ -n "$concurrency" ]] && body+=$(printf ',"concurrency":%s' "$concurrency")
+    body+='}'
+
+    echo "==> Capturing suite '$suite' against agent '$agent'..."
+    local tmp status
+    tmp=$(mktemp)
+    status=$(curl -s -o "$tmp" -w '%{http_code}' \
+        -H "X-Loadtest-Auth: $secret" \
+        -H "Content-Type: application/json" \
+        -X POST --data "$body" \
+        "http://localhost:$BACKEND_PORT/api/evals/capture")
+
+    if [[ "$status" != "200" ]]; then
+        echo "Error: capture failed (HTTP $status)"
+        cat "$tmp"
+        echo
+        rm -f "$tmp"
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "$out")"
+    mv "$tmp" "$out"
+    echo "==> Recorded run written to $out"
+    echo "    Score it: $0 evals --responses $out --out reports/\$(date +%Y%m%d-%H%M).json"
+}
+
 do_evals() {
     cd "$SCRIPT_DIR"
+
+    # --capture drives a live agent, so it goes over HTTP to the running backend
+    # rather than through the offline java path below.
+    local arg
+    for arg in ${EVAL_ARGS[@]+"${EVAL_ARGS[@]}"}; do
+        if [[ "$arg" == "--capture" ]]; then
+            do_evals_capture ${EVAL_ARGS[@]+"${EVAL_ARGS[@]}"}
+            return
+        fi
+    done
 
     local classes="$SCRIPT_DIR/precompiled/java"
     if [[ ! -d "$classes" ]]; then

@@ -50,14 +50,22 @@ pnpm test                 # Vitest (unit)
 ```bash
 ./jclaw.sh evals                                       # validate the eval dataset
 ./jclaw.sh evals --responses run.json --out rep.json   # score a recorded agent run
+./jclaw.sh evals --capture run.json --agent <name> --suite <id>   # drive a live agent
 ```
 
 Versioned agent-behaviour datasets live in `evals/suites/` (`<id>.v<N>.json`);
-`evals/README.md` is the format contract. Runs are offline — no backend, no
-model call, no DB — and `play autotest` validates the dataset via
+`evals/README.md` is the format contract. Validating and scoring are offline —
+no backend, no model call, no DB — and `play autotest` validates the dataset via
 `EvalSuiteConformanceTest`, so a malformed suite fails the build. Suites are
 measuring sticks: add cases freely, but change or delete one only by publishing
 a new `.v<N+1>` file beside it, or past pass rates stop comparing.
+
+`--capture` is the exception: it drives real agent turns, so it needs the
+backend running and it spends model calls. It POSTs to `/api/evals/capture`
+behind the same loopback + `X-Loadtest-Auth` gate as the loadtest endpoints, and
+`--agent` is required rather than defaulted. Capture turns leave no
+conversation, no history and no memories behind, and are never recorded into the
+Chat Performance histograms — see `evals/README.md` for why each of those holds.
 
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.

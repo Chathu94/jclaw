@@ -178,6 +178,18 @@ public final class LatencyTrace {
     }
 
     /**
+     * Model calls counted against this turn so far (JCLAW-883). Readable without
+     * {@link #end()} because an eval sweep needs the number but must not emit the
+     * turn into {@link LatencyStats} — hundreds of eval turns landing in the
+     * request-path histograms would skew the very baseline JCLAW-833 measures
+     * against. Capture binds a trace, runs the turn, reads this, and drops the
+     * trace unended.
+     */
+    public int llmCallCount() {
+        return llmCallCount.get();
+    }
+
+    /**
      * Note that the call that just completed had its prompt served (at least in
      * part) from the provider's cache. An instance method rather than a lookup of
      * {@link #current()} because the streaming completion callback fires on the

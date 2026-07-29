@@ -26,11 +26,40 @@ import java.util.stream.Collectors;
  */
 public record EvalReport(String suiteId, int version, List<CaseResult> results) {
 
-    /** One case's verdict. {@code failures} is empty exactly when {@code passed}. */
-    public record CaseResult(String caseId, boolean passed, List<String> failures, long latencyMs, int llmCalls) {
+    /**
+     * One case's verdict. {@code failures} is empty exactly when {@code passed}.
+     *
+     * <p>{@code errored} separates "the agent never produced an answer" from "the
+     * agent answered wrongly" (JCLAW-883). Both leave {@code passed} false, but
+     * they are different findings: a wrong answer is a quality signal the suite
+     * exists to catch, while an error is the sweep failing to measure anything —
+     * a provider outage scored as a quality regression would send someone hunting
+     * a prompt bug that does not exist. An errored case therefore stays out of
+     * {@link EvalReport#passRate()} and {@link EvalReport#regressionsAgainst}.
+     *
+     * <p>Older report JSON has no {@code errored} field and deserialises to
+     * false, which is the honest reading: before this distinction existed, an
+     * error really was recorded as an ordinary failure.
+     */
+    public record CaseResult(String caseId, boolean passed, List<String> failures,
+                             long latencyMs, int llmCalls, boolean errored) {
 
         public CaseResult {
             failures = failures == null ? List.of() : List.copyOf(failures);
+            if (passed && errored) {
+                throw new IllegalArgumentException("A case cannot both pass and error: " + caseId);
+            }
+        }
+
+        /** A case that was actually scored — it produced an answer, right or wrong. */
+        public static CaseResult scored(String caseId, boolean passed, List<String> failures,
+                                        long latencyMs, int llmCalls) {
+            return new CaseResult(caseId, passed, failures, latencyMs, llmCalls, false);
+        }
+
+        /** A case that never yielded an answer: the responder threw, timed out, or had nothing recorded. */
+        public static CaseResult errored(String caseId, String reason, long latencyMs) {
+            return new CaseResult(caseId, false, List.of(reason), latencyMs, 0, true);
         }
     }
 
@@ -43,14 +72,34 @@ public record EvalReport(String suiteId, int version, List<CaseResult> results) 
         results = results == null ? List.of() : List.copyOf(results);
     }
 
-    /** Fraction of cases that passed, 0.0–1.0. An empty suite scores 0 rather than a vacuous 1. */
+    /**
+     * Fraction of SCORED cases that passed, 0.0–1.0. An empty suite — or one where
+     * every case errored — scores 0 rather than a vacuous 1.
+     *
+     * <p>Errored cases are excluded from the denominator rather than counted as
+     * failures, because they were never measured. Counting them would let a
+     * provider outage read as a quality collapse; excluding them silently would
+     * let a sweep that mostly failed to run report a confident number, so
+     * {@link #summary()} always prints the errored count beside this rate.
+     */
     public double passRate() {
-        if (results.isEmpty()) return 0.0;
-        return (double) results.stream().filter(CaseResult::passed).count() / results.size();
+        var scored = scored();
+        if (scored == 0) return 0.0;
+        return (double) passed() / scored;
     }
 
     public int passed() {
         return (int) results.stream().filter(CaseResult::passed).count();
+    }
+
+    /** Cases that produced an answer and were therefore actually judged. */
+    public int scored() {
+        return (int) results.stream().filter(r -> !r.errored()).count();
+    }
+
+    /** Cases where the agent never produced an answer (JCLAW-883). */
+    public int errored() {
+        return (int) results.stream().filter(CaseResult::errored).count();
     }
 
     /** Model calls spent across the whole suite — the epic's call-budget number (JCLAW-833). */
@@ -62,12 +111,18 @@ public record EvalReport(String suiteId, int version, List<CaseResult> results) 
      * Case ids that passed in {@code baseline} and fail here. Cases absent from the
      * baseline are not regressions — a new case has no history to regress from, and
      * counting it as one would make every suite addition look like a break.
+     *
+     * <p>Errored cases are not regressions either (JCLAW-883): the agent never
+     * answered, so nothing about its quality changed. They still surface in
+     * {@link #summary()} and still fail the run — they just do not masquerade as
+     * a behaviour change, which is the one reading that would send someone
+     * bisecting commits over a provider outage.
      */
     public List<String> regressionsAgainst(EvalReport baseline) {
         Map<String, Boolean> before = baseline.results().stream()
                 .collect(Collectors.toMap(CaseResult::caseId, CaseResult::passed, (a, b) -> a));
         return results.stream()
-                .filter(r -> !r.passed() && Boolean.TRUE.equals(before.get(r.caseId())))
+                .filter(r -> !r.passed() && !r.errored() && Boolean.TRUE.equals(before.get(r.caseId())))
                 .map(CaseResult::caseId)
                 .toList();
     }
@@ -85,12 +140,24 @@ public record EvalReport(String suiteId, int version, List<CaseResult> results) 
         var out = new ArrayList<String>();
         out.add(suiteId + ".v" + version);
         for (var r : results) {
-            out.add(String.format(Locale.ROOT, "  %-4s %-40s %5d ms  %d call(s)",
-                    r.passed() ? "PASS" : "FAIL", r.caseId(), r.latencyMs(), r.llmCalls()));
-            r.failures().forEach(f -> out.add("         " + f));
+            out.add(String.format(Locale.ROOT, "  %-5s %-40s %5d ms  %d call(s)",
+                    label(r), r.caseId(), r.latencyMs(), r.llmCalls()));
+            r.failures().forEach(f -> out.add("          " + f));
         }
-        out.add(String.format(Locale.ROOT, "  %d/%d passed (%.0f%%), %d LLM call(s) total",
-                passed(), results.size(), passRate() * 100, totalLlmCalls()));
+        // The errored count rides on the same line as the pass rate rather than
+        // below it: the rate is computed over scored cases only, so reading it
+        // without knowing how many never ran would overstate what was measured.
+        var totals = String.format(Locale.ROOT, "  %d/%d passed (%.0f%%), %d LLM call(s) total",
+                passed(), scored(), passRate() * 100, totalLlmCalls());
+        if (errored() > 0) {
+            totals += String.format(Locale.ROOT, ", %d case(s) errored and were not scored", errored());
+        }
+        out.add(totals);
         return String.join("\n", out);
+    }
+
+    private static String label(CaseResult r) {
+        if (r.errored()) return "ERROR";
+        return r.passed() ? "PASS" : "FAIL";
     }
 }

@@ -27,12 +27,30 @@ public final class EvalScorer {
      * call order; {@code llmCalls} is the model calls the turn spent (the
      * {@code llm_call_count} segment JCLAW-882 adds), which is what
      * {@link EvalCheck.Kind#MAX_LLM_CALLS} asserts against.
+     *
+     * <p>{@code error} is non-null when the turn never produced an answer — the
+     * provider was down, the run timed out, the agent threw (JCLAW-883). Carrying
+     * the reason in the same record is what lets a live capture and a replayed
+     * recording share one file format: the alternative, omitting the case
+     * entirely, would reach the scorer as an indistinguishable "no response
+     * recorded" and throw away the one detail someone debugging the sweep needs.
+     * Older recordings have no {@code error} field and deserialise to null.
      */
-    public record Response(String output, List<String> toolsCalled, int llmCalls) {
+    public record Response(String output, List<String> toolsCalled, int llmCalls, String error) {
 
         public Response {
             output = output == null ? "" : output;
             toolsCalled = toolsCalled == null ? List.of() : List.copyOf(toolsCalled);
+        }
+
+        /** A turn that produced an answer. */
+        public Response(String output, List<String> toolsCalled, int llmCalls) {
+            this(output, toolsCalled, llmCalls, null);
+        }
+
+        /** A turn that never produced an answer, and why. */
+        public static Response failed(String reason) {
+            return new Response("", List.of(), 0, reason);
         }
     }
 

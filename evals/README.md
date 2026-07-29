@@ -1,7 +1,8 @@
 # Evals
 
-Versioned datasets that measure agent behaviour, plus the offline runner that
-scores against them (JCLAW-875, epic JCLAW-833).
+Versioned datasets that measure agent behaviour, the offline runner that scores
+against them (JCLAW-875), and the capture path that drives a live agent to
+produce a run worth scoring (JCLAW-883). Epic JCLAW-833.
 
 The point of this directory is to be a **ruler**. Every story in the agentic
 harness epic — planning, critic, best-of-N, retries — is a claim about quality,
@@ -22,11 +23,15 @@ evals/
 ./jclaw.sh evals                                              # validate the dataset
 ./jclaw.sh evals --responses run.json --out reports/now.json  # score a recorded run
 ./jclaw.sh evals --responses run.json --baseline reports/last.json   # catch regressions
+
+# drive a live agent and write the run the scorer consumes
+./jclaw.sh evals --capture run.json --agent evalbot --suite tool-selection
 ```
 
-Everything here is **offline**: no backend, no database, no model call. Running
-evals costs nothing on the serving path, which is the epic's efficiency NFR
-applied to its own measurement tooling.
+Validating and scoring are **offline**: no backend, no database, no model call.
+Running them costs nothing on the serving path, which is the epic's efficiency
+NFR applied to its own measurement tooling. Capture is the one command that
+spends model calls, and it is opt-in by construction — see below.
 
 `play autotest` runs the same validation via `EvalSuiteConformanceTest`, so a
 malformed suite fails the build rather than the next eval run.
@@ -109,17 +114,66 @@ The runner scores whatever produced the responses; the file is the contract.
       "output": "The transfer lasted 209 days.",
       "toolsCalled": [],
       "llmCalls": 1
+    },
+    "distractor-is-not-repeated": {
+      "error": "provider unreachable"
     }
   }
 }
 ```
 
-A case with no recorded response fails with `no response recorded`, so a partial
-sweep reads as failing cases rather than a suspiciously short suite.
+`error` marks a case the agent never answered. It is optional, and older
+recordings without it read as answered.
 
-An agent-backed responder — one that drives a real JClaw agent instead of
-replaying a recording — plugs into `EvalRunner.Responder` and lands with the
-work that owns invoking a model (JCLAW-836).
+## Errored is not failed
+
+"The agent answered wrongly" and "the agent never answered" are different
+findings, and the report keeps them apart:
+
+- A **failed** case was measured. It counts against the pass rate and, if it
+  passed in the baseline, it is a regression.
+- An **errored** case was not measured. It is excluded from the pass rate's
+  denominator and is never a regression, because nothing about the agent's
+  behaviour was observed. The reason is printed next to the case, and the totals
+  line always states how many cases errored — a rate computed over four of ten
+  cases would otherwise read like a rate over ten.
+
+Both fail the run. A sweep that could not run is not a green sweep.
+
+A case with no recorded response at all errors with `no response recorded`, so a
+partial sweep reads as unmeasured cases rather than a suspiciously short suite.
+
+## Capturing a run from a live agent
+
+```bash
+./jclaw.sh evals --capture run.json --agent evalbot --suite tool-selection
+```
+
+This needs the backend running, because driving an agent needs what the offline
+CLI deliberately does without: JPA, a configured provider, and the tool registry.
+It POSTs to `/api/evals/capture`, gated the same way the loadtest endpoints are —
+loopback origin plus `X-Loadtest-Auth` carrying the application secret.
+
+Capture and scoring stay two steps on purpose: the recorded file is the boundary,
+so a sweep can be scored now, re-scored later against a changed suite, or diffed
+against a baseline, without paying for the model twice.
+
+**`--agent` is required and never defaults.** An eval sweep against the agent you
+actually work with is the accident worth designing out.
+
+What a sweep leaves behind: nothing. Turns run through `AgentRunner.runForTask`,
+which builds a transient conversation it never persists — so there are no history
+rows to clean up, which is a stronger guarantee than creating throwaway
+conversations and deleting them, since nothing survives a sweep that dies midway.
+`MemoryAutoCapture` fires from the two chat entrypoints and not from this one, so
+an eval cannot teach the agent about its own eval questions. The per-case
+`LatencyTrace` exists only to count model calls and is never ended, so no eval
+turn reaches `LatencyStats` — hundreds of them landing in the request-path
+histograms would corrupt the baseline JCLAW-833 measures against.
+
+`--concurrency` (default 4, max 16) bounds how many cases are in front of the
+model at once. Unbounded fan-out would contradict the NFR the suite exists to
+police, and a rate-limited provider's retries would score as agent failures.
 
 ## Changing a suite
 
