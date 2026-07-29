@@ -38,20 +38,20 @@ import java.util.Map;
  */
 class McpServerToolTest extends UnitTest {
 
-    /** Snapshot of the live registry so each test runs against a clean slate. */
-    private List<ToolRegistry.Tool> savedTools;
-
     @BeforeEach
     void saveRegistry() {
-        savedTools = ToolRegistry.listTools();
-        // Wipe the registry so adapter lookups during these tests can't be
-        // contaminated by tools other suites have registered.
-        ToolRegistry.publish(List.of());
+        // JCLAW-894: take the registry lock, because this class wipes a
+        // process-global that concurrently-running classes read. The old snapshot
+        // idiom (listTools() then publish(saved)) was also wrong in its own right:
+        // listTools() returns the MERGED map, while publish() replaces only the
+        // NATIVE one, so round-tripping promoted every MCP-discovered tool into the
+        // native slot, where nothing would ever unpublish it.
+        ToolRegistrySync.publishForTest(List.of());
     }
 
     @AfterEach
     void restoreRegistry() {
-        ToolRegistry.publish(savedTools);
+        ToolRegistrySync.release();
     }
 
     // ==================== identity metadata ====================

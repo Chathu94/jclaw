@@ -63,6 +63,10 @@ class DangerousActionGateTest extends UnitTest {
         server = new MockTelegramServer();
         server.start();
         TelegramChannel.installForTest(BOT_TOKEN, server.telegramUrl());
+        // JCLAW-894: lock the registry and start from the canonical native set, so
+        // this snapshot is a known baseline rather than whatever a concurrently
+        // running class last published.
+        ToolRegistrySync.canonicalForTest();
         originalTools = ToolRegistry.listTools();
         ToolRegistry.publish(List.of(stubTool(DANGEROUS_TOOL, true), stubTool(SAFE_TOOL, false),
                 new tools.JClawApiTool()));
@@ -70,7 +74,7 @@ class DangerousActionGateTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        ToolRegistry.publish(originalTools);
+        ToolRegistrySync.release();
         TelegramApprovalService.clearAll();
         DangerousActionGate.clearGrantsForTest();
         if (server != null) server.close();

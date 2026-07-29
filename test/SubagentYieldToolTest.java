@@ -67,11 +67,15 @@ class SubagentYieldToolTest extends UnitTest {
     // ───────── Tool-level validation ─────────
 
     @Test
-    void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(SubagentYieldTool.TOOL_NAME);
-        assertNotNull(tool, "subagent_yield must be registered by ToolRegistrationJob");
-        assertEquals(SubagentYieldTool.TOOL_NAME, tool.name());
-        assertEquals("System", tool.category());
+    void toolIsRegisteredAndDiscoverable() throws Exception {
+        // Name and category are properties of the tool itself, so they need
+        // no registry at all.
+        assertEquals(SubagentYieldTool.TOOL_NAME, new SubagentYieldTool().name());
+        assertEquals("System", new SubagentYieldTool().category());
+        // Only the registration is a registry fact, and reading it needs the
+        // registry in a known state — concurrent classes republish it (JCLAW-894).
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(SubagentYieldTool.TOOL_NAME), "subagent_yield must be registered by ToolRegistrationJob"));
     }
 
     @Test
@@ -786,7 +790,7 @@ class SubagentYieldToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
-                var tool = (SubagentYieldTool) ToolRegistry.lookupTool(SubagentYieldTool.TOOL_NAME);
+                var tool = new SubagentYieldTool();
                 resultRef.set(tool.execute(argsJson, parent));
             } catch (Exception e) {
                 errorRef.set(e);

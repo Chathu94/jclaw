@@ -58,11 +58,15 @@ class ConversationHistoryToolTest extends UnitTest {
     }
 
     @Test
-    void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(ConversationHistoryTool.TOOL_NAME);
-        assertNotNull(tool, "conversation_history must be registered by ToolRegistrationJob");
-        assertEquals(ConversationHistoryTool.TOOL_NAME, tool.name());
-        assertEquals("System", tool.category());
+    void toolIsRegisteredAndDiscoverable() throws Exception {
+        // Name and category are properties of the tool itself, so they need
+        // no registry at all.
+        assertEquals(ConversationHistoryTool.TOOL_NAME, new ConversationHistoryTool().name());
+        assertEquals("System", new ConversationHistoryTool().category());
+        // Only the registration is a registry fact, and reading it needs the
+        // registry in a known state — concurrent classes republish it (JCLAW-894).
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(ConversationHistoryTool.TOOL_NAME), "conversation_history must be registered by ToolRegistrationJob"));
     }
 
     @Test
@@ -265,7 +269,7 @@ class ConversationHistoryToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (ConversationHistoryTool) ToolRegistry.lookupTool(ConversationHistoryTool.TOOL_NAME);
+                var tool = new ConversationHistoryTool();
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);

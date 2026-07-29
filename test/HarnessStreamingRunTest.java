@@ -1,4 +1,3 @@
-import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
@@ -242,7 +241,7 @@ class HarnessStreamingRunTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
-                var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var tool = new SubagentSpawnTool();
                 resultRef.set(tool.execute(argsJson, parent));
             } catch (Exception e) {
                 errorRef.set(e);

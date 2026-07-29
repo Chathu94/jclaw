@@ -1,4 +1,5 @@
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,11 +31,21 @@ class ToolSystemTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
-        ToolRegistry.publish(java.util.List.of(
+        // JCLAW-894: publish UNDER THE LOCK and restore in @AfterEach. This class
+        // used to publish a four-tool stub here with no restore anywhere, so from
+        // its first test onward every other class in the JVM saw a registry missing
+        // exec, message, ccr_retrieve and the rest. That is what failed the
+        // autotest run on the v0.17.18 push.
+        ToolRegistrySync.publishForTest(java.util.List.of(
                 new TaskTool(), new CheckListTool(), new FileSystemTools(),
                 new WebFetchTool()
         ));
         agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1");
+    }
+
+    @AfterEach
+    void restoreRegistry() {
+        ToolRegistrySync.release();
     }
 
     /** Publish the base tools plus additional ones for tests that need them. */
@@ -44,6 +55,7 @@ class ToolSystemTest extends UnitTest {
                 new WebFetchTool()
         ));
         java.util.Collections.addAll(tools, extras);
+        // Already inside the @BeforeEach lock window; this only swaps the contents.
         ToolRegistry.publish(tools);
     }
 

@@ -81,38 +81,48 @@ class JobLifecycleTest extends UnitTest {
     // === ToolRegistrationJob ===
 
     @Test
-    void toolRegistrationPublishesBaseTools() {
+    void toolRegistrationPublishesBaseTools() throws Exception {
         // The always-on tools must land in the registry after registerAll.
         // This is the smoke test for the job's primary contract.
-        new jobs.ToolRegistrationJob().doJob();
+        // JCLAW-894: publishes AND reads back the registry, so both halves have to
+        // sit inside one lock window — otherwise a concurrent class can republish
+        // between the doJob() and the listTools().
+        ToolRegistrySync.withCanonicalTools(() -> {
+            new jobs.ToolRegistrationJob().doJob();
 
-        var names = ToolRegistry.listTools().stream()
-                .map(ToolRegistry.Tool::name)
-                .toList();
-        assertTrue(names.contains("filesystem"), "filesystem must always be registered");
-        assertTrue(names.contains("datetime"), "datetime must always be registered");
-        assertTrue(names.contains("task_manager"), "task_manager tool must always be registered");
-        assertTrue(names.contains("web_fetch"), "web_fetch must always be registered");
+            var names = ToolRegistry.listTools().stream()
+                    .map(ToolRegistry.Tool::name)
+                    .toList();
+            assertTrue(names.contains("filesystem"), "filesystem must always be registered");
+            assertTrue(names.contains("datetime"), "datetime must always be registered");
+            assertTrue(names.contains("task_manager"), "task_manager tool must always be registered");
+            assertTrue(names.contains("web_fetch"), "web_fetch must always be registered");
+        });
     }
 
     @Test
-    void toolRegistrationIncludesExecAndBrowserUnconditionally() {
+    void toolRegistrationIncludesExecAndBrowserUnconditionally() throws Exception {
         // JCLAW-172: shell.enabled and playwright.enabled used to gate these
         // two tools, but the global toggles are gone — per-agent enable lives
         // on the Tools page (AgentToolConfig) only. Both tools must register
         // every time {@link jobs.ToolRegistrationJob#registerAll} runs,
         // regardless of any config-DB state.
-        ConfigService.set("shell.enabled", "false");
-        ConfigService.set("playwright.enabled", "false");
-        jobs.ToolRegistrationJob.registerAll();
+        // JCLAW-894: same lock window for the register and the read-back. The
+        // config values are set INSIDE it too — the point of the test is that
+        // registerAll ignores them, so they must be in place before it runs.
+        ToolRegistrySync.withCanonicalTools(() -> {
+            ConfigService.set("shell.enabled", "false");
+            ConfigService.set("playwright.enabled", "false");
+            jobs.ToolRegistrationJob.registerAll();
 
-        var names = ToolRegistry.listTools().stream()
-                .map(ToolRegistry.Tool::name)
-                .toList();
-        assertTrue(names.contains("exec"),
-                "exec must register unconditionally after JCLAW-172");
-        assertTrue(names.contains("browser"),
-                "browser must register unconditionally after JCLAW-172");
+            var names = ToolRegistry.listTools().stream()
+                    .map(ToolRegistry.Tool::name)
+                    .toList();
+            assertTrue(names.contains("exec"),
+                    "exec must register unconditionally after JCLAW-172");
+            assertTrue(names.contains("browser"),
+                    "browser must register unconditionally after JCLAW-172");
+        });
     }
 
     // === BrowserCleanupJob ===

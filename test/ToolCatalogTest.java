@@ -20,12 +20,16 @@ class ToolCatalogTest extends UnitTest {
 
     @BeforeEach
     void saveRegistry() {
+        // JCLAW-894: lock the registry and start from the canonical native set, so
+        // this snapshot is a known baseline rather than whatever a concurrently
+        // running class last published.
+        ToolRegistrySync.canonicalForTest();
         originalTools = ToolRegistry.listTools();
     }
 
     @AfterEach
     void restoreRegistry() {
-        ToolRegistry.publish(originalTools);
+        ToolRegistrySync.release();
     }
 
     @Test

@@ -58,11 +58,15 @@ class ConversationSendToolTest extends UnitTest {
     }
 
     @Test
-    void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME);
-        assertNotNull(tool, "conversation_send must be registered by ToolRegistrationJob");
-        assertEquals(ConversationSendTool.TOOL_NAME, tool.name());
-        assertEquals("System", tool.category());
+    void toolIsRegisteredAndDiscoverable() throws Exception {
+        // Name and category are properties of the tool itself, so they need
+        // no registry at all.
+        assertEquals(ConversationSendTool.TOOL_NAME, new ConversationSendTool().name());
+        assertEquals("System", new ConversationSendTool().category());
+        // Only the registration is a registry fact, and reading it needs the
+        // registry in a known state — concurrent classes republish it (JCLAW-894).
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME), "conversation_send must be registered by ToolRegistrationJob"));
     }
 
     @Test
@@ -71,7 +75,7 @@ class ConversationSendToolTest extends UnitTest {
         // must serialize. Without the shared group, send's SubagentRun
         // lookup races spawn's INSERT commit and surfaces as "no
         // SubagentRun found for runId X" for a row the same turn created.
-        var tool = ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME);
+        var tool = new ConversationSendTool();
         assertEquals("subagent_lifecycle", tool.serializationGroup(),
                 "conversation_send must share the subagent_lifecycle group");
     }
@@ -225,7 +229,7 @@ class ConversationSendToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (ConversationSendTool) ToolRegistry.lookupTool(ConversationSendTool.TOOL_NAME);
+                var tool = new ConversationSendTool();
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);

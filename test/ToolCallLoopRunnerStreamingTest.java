@@ -69,6 +69,10 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
         SubagentRegistry.clear();
+        // JCLAW-894: lock the registry and start from the canonical native set, so
+        // this snapshot is a known baseline rather than whatever a concurrently
+        // running class last published.
+        ToolRegistrySync.canonicalForTest();
         originalTools = ToolRegistry.listTools();
     }
 
@@ -82,9 +86,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
             streamingServer.close();
             streamingServer = null;
         }
-        if (originalTools != null) {
-            ToolRegistry.publish(originalTools);
-        }
+        ToolRegistrySync.release();
         SubagentRegistry.clear();
         ConfigService.delete("chat.maxToolRounds");
     }

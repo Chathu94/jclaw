@@ -459,17 +459,18 @@ class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    void toolsMetaReturnsRichShape() {
+    void toolsMetaReturnsRichShape() throws Exception {
         // Publish a known tool set so this test is independent of whatever
         // the DefaultConfigJob did (or didn't) register in the test JVM.
-        var originalTools = agents.ToolRegistry.listTools();
-        try {
-            agents.ToolRegistry.publish(java.util.List.of(
-                    new tools.ShellExecTool(),
-                    new tools.FileSystemTools(),
-                    new tools.WebFetchTool(),
-                    new tools.DateTimeTool()
-            ));
+        // JCLAW-894: publish under the registry lock and let the helper restore —
+        // the old idiom snapshotted listTools() (the MERGED map) and republished it
+        // as natives, promoting any MCP tool into a slot nothing unpublishes.
+        ToolRegistrySync.withTools(java.util.List.of(
+                new tools.ShellExecTool(),
+                new tools.FileSystemTools(),
+                new tools.WebFetchTool(),
+                new tools.DateTimeTool()
+        ), () -> {
             login();
             var response = GET("/api/tools/meta");
             assertIsOk(response);
@@ -495,9 +496,7 @@ class ControllerApiTest extends FunctionalTest {
             // Presentational concerns must NOT leak into the backend response.
             assertFalse(content.contains("bg-neutral"), "no Tailwind classes in API");
             assertFalse(content.contains("<path"),      "no SVG markup in API");
-        } finally {
-            agents.ToolRegistry.publish(originalTools);
-        }
+        });
     }
 
     @Test

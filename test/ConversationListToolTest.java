@@ -55,11 +55,15 @@ class ConversationListToolTest extends UnitTest {
     }
 
     @Test
-    void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME);
-        assertNotNull(tool, "conversation_list must be registered by ToolRegistrationJob");
-        assertEquals(ConversationListTool.TOOL_NAME, tool.name());
-        assertEquals("System", tool.category());
+    void toolIsRegisteredAndDiscoverable() throws Exception {
+        // Name and category are properties of the tool itself, so they need
+        // no registry at all.
+        assertEquals(ConversationListTool.TOOL_NAME, new ConversationListTool().name());
+        assertEquals("System", new ConversationListTool().category());
+        // Only the registration is a registry fact, and reading it needs the
+        // registry in a known state — concurrent classes republish it (JCLAW-894).
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME), "conversation_list must be registered by ToolRegistrationJob"));
     }
 
     @Test
@@ -69,7 +73,7 @@ class ConversationListToolTest extends UnitTest {
         // see the just-spawned row in the list. Without the shared group,
         // list races spawn's SubagentRun INSERT commit and returns
         // count=0 — observed in the JCLAW-326 smoke test.
-        var tool = ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME);
+        var tool = new ConversationListTool();
         assertEquals("subagent_lifecycle", tool.serializationGroup(),
                 "conversation_list must share the subagent_lifecycle group");
     }
@@ -247,7 +251,7 @@ class ConversationListToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (ConversationListTool) ToolRegistry.lookupTool(ConversationListTool.TOOL_NAME);
+                var tool = new ConversationListTool();
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);

@@ -86,7 +86,7 @@ class AcpChannelGateTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var p = Tx.run(() -> (models.Agent) models.Agent.findById(parentId));
-                var tool = agents.ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var tool = new SubagentSpawnTool();
                 resultRef.set(tool.execute("{\"task\":\"gate-check\",\"runtime\":\"acp\"}", p));
             } catch (Exception e) {
                 errorRef.set(e);

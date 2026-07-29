@@ -62,11 +62,15 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
-        assertNotNull(tool, "subagent_spawn must be registered by ToolRegistrationJob");
-        assertEquals(SubagentSpawnTool.TOOL_NAME, tool.name());
-        assertEquals("System", tool.category());
+    void toolIsRegisteredAndDiscoverable() throws Exception {
+        // Name and category are properties of the tool itself, so they need no registry.
+        assertEquals(SubagentSpawnTool.TOOL_NAME, new SubagentSpawnTool().name());
+        assertEquals("System", new SubagentSpawnTool().category());
+        // Only the registration is a registry fact, and reading it needs the registry
+        // in a known state — concurrent classes republish it (JCLAW-894).
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME),
+                        "subagent_spawn must be registered by ToolRegistrationJob"));
     }
 
     @Test
@@ -90,8 +94,8 @@ class SubagentSpawnToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
-                var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
-                var yieldTool = ToolRegistry.lookupTool(tools.SubagentYieldTool.TOOL_NAME);
+                var spawnTool = new SubagentSpawnTool();
+                var yieldTool = new tools.SubagentYieldTool();
                 var yielded = agents.ToolContext.withScope(null, 9999L, () -> {
                     var spawn = spawnTool.execute(
                             "{\"task\":\"do work\",\"async\":true,\"mode\":\"session\"}", p);
@@ -130,8 +134,8 @@ class SubagentSpawnToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
-                var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
-                var yieldTool = ToolRegistry.lookupTool(tools.SubagentYieldTool.TOOL_NAME);
+                var spawnTool = new SubagentSpawnTool();
+                var yieldTool = new tools.SubagentYieldTool();
                 var yielded = agents.ToolContext.withScope(null, 8888L, () -> {
                     spawnTool.execute("{\"tasks\":[\"do A\",\"do B\",\"do C\"],\"mode\":\"session\"}", p);
                     return yieldTool.execute("{\"all\":true}", p);
@@ -187,8 +191,8 @@ class SubagentSpawnToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
-                var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
-                var yieldTool = ToolRegistry.lookupTool(tools.SubagentYieldTool.TOOL_NAME);
+                var spawnTool = new SubagentSpawnTool();
+                var yieldTool = new tools.SubagentYieldTool();
                 var yielded = agents.ToolContext.withScope(null, 8889L, () -> {
                     spawnTool.execute(
                             "{\"tasks\":[\"do A\",\"do B\"],\"mode\":\"session\",\"context\":\"inherit\"}", p);
@@ -227,7 +231,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // JCLAW-498: a fan-out larger than the breadth cap (default 5) is rejected
         // up front — no children spawned. Synchronous: no LLM mock needed.
         var parent = createAgent("p-batch-cap", "test-provider", "test-model");
-        var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var spawnTool = new SubagentSpawnTool();
         var result = agents.ToolContext.withScope(null, 7777L, () ->
                 spawnTool.execute("{\"tasks\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"],\"mode\":\"session\"}", parent));
         assertTrue(result.startsWith("Subagent spawn refused") && result.contains("breadth"),
@@ -242,7 +246,7 @@ class SubagentSpawnToolTest extends UnitTest {
         // unknown mode identically. Synchronous: the rejection precedes any spawn,
         // so no LLM mock is needed.
         var parent = createAgent("p-batch-mode", "test-provider", "test-model");
-        var spawnTool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var spawnTool = new SubagentSpawnTool();
 
         // The SAME typo mode down both paths must yield the SAME rejection.
         var singleErr = agents.ToolContext.withScope(null, 6001L, () ->
@@ -299,7 +303,7 @@ class SubagentSpawnToolTest extends UnitTest {
         var parent = createAgent("p-acp-none", "test-provider", "test-model");
         parent.acpAllowed = true;
         parent.save();
-        var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var tool = new SubagentSpawnTool();
         var result = tool.execute("{\"task\":\"x\",\"runtime\":\"acp\"}", parent);
         assertTrue(result.startsWith("Error:") && result.contains("acp")
                         && !result.contains("not permitted"),
@@ -316,7 +320,7 @@ class SubagentSpawnToolTest extends UnitTest {
         ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
         var parent = createAgent("p-acp-deny", "test-provider", "test-model");
         // acpAllowed defaults false for a custom agent — no grant.
-        var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+        var tool = new SubagentSpawnTool();
         var result = tool.execute("{\"task\":\"x\",\"runtime\":\"acp\"}", parent);
         assertTrue(result.startsWith("Error:") && result.contains("not permitted"),
                 "runtime=acp from an unprivileged non-main agent must be refused on permission: "
@@ -2197,7 +2201,7 @@ class SubagentSpawnToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
-                var tool = (SubagentSpawnTool) ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var tool = new SubagentSpawnTool();
                 resultRef.set(tool.execute(argsJson, parent));
             } catch (Exception e) {
                 errorRef.set(e);

@@ -99,11 +99,15 @@ class MessageToolTest extends UnitTest {
     }
 
     @Test
-    void toolIsRegisteredAndDiscoverable() {
-        var tool = ToolRegistry.lookupTool(MessageTool.TOOL_NAME);
-        assertNotNull(tool, "message must be registered by ToolRegistrationJob");
-        assertEquals(MessageTool.TOOL_NAME, tool.name());
-        assertEquals("System", tool.category());
+    void toolIsRegisteredAndDiscoverable() throws Exception {
+        // Name and category are properties of the tool itself, so they need
+        // no registry at all.
+        assertEquals(MessageTool.TOOL_NAME, new MessageTool().name());
+        assertEquals("System", new MessageTool().category());
+        // Only the registration is a registry fact, and reading it needs the
+        // registry in a known state — concurrent classes republish it (JCLAW-894).
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(MessageTool.TOOL_NAME), "message must be registered by ToolRegistrationJob"));
     }
 
     @Test
@@ -751,8 +755,7 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void pollActionIsDiscoverableInToolActions() {
-        var tool = ToolRegistry.lookupTool(MessageTool.TOOL_NAME);
-        assertNotNull(tool);
+        var tool = new MessageTool();
         boolean hasPoll = tool.actions().stream()
                 .anyMatch(a -> "poll".equals(a.name()));
         assertTrue(hasPoll, "the poll action must be advertised by the tool");
@@ -767,7 +770,7 @@ class MessageToolTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var caller = Tx.run(() -> (Agent) Agent.findById(callerAgentId));
-                var tool = (MessageTool) ToolRegistry.lookupTool(MessageTool.TOOL_NAME);
+                var tool = new MessageTool();
                 resultRef.set(tool.execute(argsJson, caller));
             } catch (Exception e) {
                 errorRef.set(e);

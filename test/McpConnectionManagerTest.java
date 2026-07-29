@@ -1,6 +1,5 @@
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
-import jobs.ToolRegistrationJob;
 import mcp.McpAllowlist;
 import mcp.McpConnectionManager;
 import models.Agent;
@@ -72,7 +71,7 @@ class McpConnectionManagerTest extends UnitTest {
         Fixtures.deleteDatabase();
         EventLogger.clear();
         // Clear out any tools other tests may have registered.
-        ToolRegistry.publish(List.of());
+        ToolRegistrySync.publishForTest(List.of());  // JCLAW-894: under the registry lock
         // Aggressively shrink the backoff window so this test stays under a few seconds.
         McpConnectionManager.setBackoff(50, 200);
         fixturePath = Files.createTempFile("mcp-cm-fixture-", ".js");
@@ -89,7 +88,7 @@ class McpConnectionManagerTest extends UnitTest {
         McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(120));
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
         // Re-run native tool registration so the next test sees the canonical set.
-        ToolRegistrationJob.registerAll();
+        ToolRegistrySync.release();
     }
 
     // ==================== happy path ====================

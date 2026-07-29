@@ -1,4 +1,3 @@
-import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import org.junit.jupiter.api.AfterEach;
@@ -127,7 +126,7 @@ class AcpWorkdirTest extends UnitTest {
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var p = Tx.run(() -> (Agent) Agent.findById(parentId));
-                var tool = ToolRegistry.lookupTool(SubagentSpawnTool.TOOL_NAME);
+                var tool = new SubagentSpawnTool();
                 resultRef.set(tool.execute("{\"task\":\"where-are-you\",\"runtime\":\"acp\"}", p));
             } catch (Exception e) {
                 errorRef.set(e);

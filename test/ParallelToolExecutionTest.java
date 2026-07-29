@@ -40,6 +40,10 @@ class ParallelToolExecutionTest extends UnitTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
+        // JCLAW-894: lock the registry and start from the canonical native set, so
+        // this snapshot is a known baseline rather than whatever a concurrently
+        // running class last published.
+        ToolRegistrySync.canonicalForTest();
         originalTools = ToolRegistry.listTools();
         concurrentExecutions = new AtomicInteger();
         peakConcurrency = new AtomicInteger();
@@ -56,7 +60,7 @@ class ParallelToolExecutionTest extends UnitTest {
     void restore() {
         // Restore the global tool registry FIRST so no other test sees the
         // sleep stubs published in setup().
-        ToolRegistry.publish(originalTools);
+        ToolRegistrySync.release();
         // Defensive: drop the per-test state holders so any straggling
         // virtual-thread callback that captured the old reference can't
         // mutate "stale" state into the next test method's view. The

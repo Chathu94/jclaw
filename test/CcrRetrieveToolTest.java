@@ -38,10 +38,16 @@ class CcrRetrieveToolTest extends UnitTest {
     }
 
     @Test
-    void registeredAsSystemTool() {
-        var t = ToolRegistry.lookupTool(CcrRetrieveTool.TOOL_NAME);
-        assertNotNull(t, "ccr_retrieve must be registered by ToolRegistrationJob");
-        assertEquals("System", t.category());
+    void registeredAsSystemTool() throws Exception {
+        // Category is a property of the tool itself, so it needs no registry.
+        assertEquals("System", new CcrRetrieveTool().category());
+        // Only the registration is a registry fact, and reading it needs the
+        // registry in a known state — concurrent classes republish it (JCLAW-894).
+        // This assertion is where the shared-static defect was first found: it is
+        // the same shape that failed on the v0.17.18 push.
+        ToolRegistrySync.withCanonicalTools(() ->
+                assertNotNull(ToolRegistry.lookupTool(CcrRetrieveTool.TOOL_NAME),
+                        "ccr_retrieve must be registered by ToolRegistrationJob"));
     }
 
     @Test

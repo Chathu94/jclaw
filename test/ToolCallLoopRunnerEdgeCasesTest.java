@@ -65,6 +65,10 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
         SubagentRegistry.clear();
+        // JCLAW-894: lock the registry and start from the canonical native set, so
+        // this snapshot is a known baseline rather than whatever a concurrently
+        // running class last published.
+        ToolRegistrySync.canonicalForTest();
         originalTools = ToolRegistry.listTools();
     }
 
@@ -74,9 +78,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
             llmServer.stop(0);
             llmServer = null;
         }
-        if (originalTools != null) {
-            ToolRegistry.publish(originalTools);
-        }
+        ToolRegistrySync.release();
         SubagentRegistry.clear();
         // Reset config keys mutated by individual tests so siblings in the
         // same JVM don't inherit them.

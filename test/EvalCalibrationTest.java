@@ -1,6 +1,8 @@
 import agents.ToolRegistry;
 import models.Agent;
 import models.AgentToolConfig;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
@@ -30,6 +32,22 @@ import java.util.function.Supplier;
  * to the sweep's virtual threads.
  */
 class EvalCalibrationTest extends UnitTest {
+
+    /**
+     * JCLAW-894: these tests assert exactly which tools an agent is offered, which
+     * reads the process-global registry. A concurrently-running class that
+     * republishes it changes the answer — ToolSystemTest's four-tool stub does not
+     * even contain datetime, which the first assertion below expects.
+     */
+    @BeforeEach
+    void lockRegistry() {
+        ToolRegistrySync.canonicalForTest();
+    }
+
+    @AfterEach
+    void unlockRegistry() {
+        ToolRegistrySync.release();
+    }
 
     /** Runs {@code block} in its own committed transaction — the established seeding idiom. */
     private static <T> T commitInFreshTx(Supplier<T> block) {

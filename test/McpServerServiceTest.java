@@ -1,7 +1,5 @@
-import agents.ToolRegistry;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
-import jobs.ToolRegistrationJob;
 import mcp.McpConnectionManager;
 import models.McpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -69,7 +67,7 @@ class McpServerServiceTest extends UnitTest {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping");
         Fixtures.deleteDatabase();
         EventLogger.clear();
-        ToolRegistry.publish(List.of());
+        ToolRegistrySync.publishForTest(List.of());  // JCLAW-894: under the registry lock
         // Same fast-backoff window the manager test uses, so failure-path
         // tests don't spend real seconds in the watchdog's reconnect loop.
         McpConnectionManager.setBackoff(50, 200);
@@ -85,7 +83,7 @@ class McpServerServiceTest extends UnitTest {
         McpConnectionManager.setBackoff(1_000, 30_000);
         McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(120));
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
-        ToolRegistrationJob.registerAll();
+        ToolRegistrySync.release();
     }
 
     @Test

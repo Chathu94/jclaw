@@ -1,7 +1,6 @@
 import agents.ToolRegistry;
 import agents.ToolResultVerifier;
 import agents.ToolResultVerifier.Verdict;
-import jobs.ToolRegistrationJob;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.ShellExecTool;
@@ -168,7 +167,7 @@ class ToolResultVerifierTest extends UnitTest {
 
     /** The verifier consults the tool, so a failed command stops scoring a clean pass. */
     @Test
-    void checkRoutesThroughTheToolsPostCondition() {
+    void checkRoutesThroughTheToolsPostCondition() throws Exception {
         // Establish the precondition rather than inherit it. This is the one case in
         // this class that needs a real registered tool, and the native set is a
         // process-global that concurrently-running classes replace: McpServerToolTest
@@ -177,16 +176,22 @@ class ToolResultVerifierTest extends UnitTest {
         // re-publishing first made this assertion fail on whichever run happened to
         // land inside one. registerAll() is the same "restore the canonical set" call
         // McpConnectionManagerTest and McpServerServiceTest already use for this.
-        ToolRegistrationJob.registerAll();
-        assertNotNull(ToolRegistry.lookupTool("exec"),
-                "exec must be registered for this wiring assertion to mean anything");
+        // JCLAW-894: hold the registry lock for the whole assertion. The original
+        // version of this test read the registry without establishing it and failed
+        // on the v0.17.18 push; 292173da then called registerAll() bare, which fixed
+        // that but could itself wipe a concurrent class's published adapter. The
+        // lock is what makes both directions safe.
+        ToolRegistrySync.withCanonicalTools(() -> {
+            assertNotNull(ToolRegistry.lookupTool("exec"),
+                    "exec must be registered for this wiring assertion to mean anything");
 
-        var failed = ToolResultVerifier.check("exec", ToolRegistry.ToolResult.text(execEnvelope(1, false)));
-        assertEquals(Verdict.POSTCONDITION_FAILED, failed.verdict());
-        assertTrue(failed.failed());
+            var failed = ToolResultVerifier.check("exec", ToolRegistry.ToolResult.text(execEnvelope(1, false)));
+            assertEquals(Verdict.POSTCONDITION_FAILED, failed.verdict());
+            assertTrue(failed.failed());
 
-        assertEquals(Verdict.OK,
-                ToolResultVerifier.check("exec", ToolRegistry.ToolResult.text(execEnvelope(0, false))).verdict());
+            assertEquals(Verdict.OK,
+                    ToolResultVerifier.check("exec", ToolRegistry.ToolResult.text(execEnvelope(0, false))).verdict());
+        });
     }
 
     /**
