@@ -86,7 +86,7 @@ public final class TextCompressor implements ContentCompressor {
         int words = WORD.split(block.strip()).length;
         if (words > LONG_BLOCK_WORDS) {
             // Long block: keep the first unit (always preserved) + a marker.
-            return units.get(0) + "\n[… summarized — " + (units.size() - 1) + " more lines/sentences]";
+            return units.getFirst() + "\n[… summarized — " + (units.size() - 1) + " more lines/sentences]";
         }
         // Short block: drop near-duplicate units, keep first occurrence.
         return String.join("\n", dedupByJaccard(units));

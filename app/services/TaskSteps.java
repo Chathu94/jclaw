@@ -83,7 +83,7 @@ public final class TaskSteps {
     public static String flattenForPrompt(String description) {
         var steps = parse(description);
         if (steps.isEmpty()) return description == null ? "" : description;
-        if (steps.size() == 1) return steps.get(0);
+        if (steps.size() == 1) return steps.getFirst();
         var sb = new StringBuilder();
         for (int i = 0; i < steps.size(); i++) {
             if (i > 0) sb.append('\n');

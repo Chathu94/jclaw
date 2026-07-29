@@ -34,7 +34,7 @@ public final class DiarizeModelStore extends ModelPrefetchStore<DiarizeModelStor
 
     /** SER model used when {@code transcription.diarization.emotionModel} is
      *  blank or no longer one of {@link #SER_MODELS}. */
-    public static final String DEFAULT_SER_REPO = SER_MODELS.get(0).repo();
+    public static final String DEFAULT_SER_REPO = SER_MODELS.getFirst().repo();
 
     /** Whether {@code repo} is one of the selectable SER models. */
     public static boolean isAllowedSer(String repo) {
