@@ -71,6 +71,25 @@ import java.util.stream.Collectors;
  * {@code commandCompositionRunsBothCommands} specifically asserts that
  * {@code echo hi; echo world} executes both statements, so any future attempt
  * to harden the allowlist into per-token gating will fail loudly.
+ *
+ * <h3>The configuration to avoid: {@code exec} alongside a web-reading tool</h3>
+ *
+ * <p>The reasoning above rests on "a hostile prompt that reaches this tool has already
+ * breached the prompt-injection perimeter." That perimeter is thinner than it sounds.
+ * Grant one agent both {@code exec} and any tool that pulls in text the operator did not
+ * write — {@code web_fetch}, {@code web_search}, {@code playwright_browser}, or an MCP
+ * server that reads issues, pages or email — and a single turn can ingest
+ * attacker-controlled instructions and reach a shell with the Play process's privileges.
+ * No operator mistake is required for that; enabling two individually reasonable tools is
+ * enough.
+ *
+ * <p>There is no in-process fix, which is precisely why this is documented rather than
+ * gated: any guard that could distinguish "content the model read" from "instruction the
+ * operator gave" would be the prompt-injection solution itself. The mitigations are
+ * operator-side and both are real: keep {@code exec} on agents that do not read the open
+ * web (a build agent and a research agent, not one agent doing both), or run the whole
+ * process inside an external sandbox (firejail, a container) so the blast radius is
+ * bounded no matter what reaches the shell.
  */
 public class ShellExecTool implements ToolRegistry.Tool {
 
