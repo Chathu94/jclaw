@@ -16,7 +16,12 @@ plugins {
 // app/ to match the production-only cleanup; test/ is intentionally out of scope.
 spotless {
     java {
-        target("app/**/*.java")
+        // JCLAW-895: tests are in scope too. They were excluded for no recorded
+        // reason, which left 436 files with no unused-import removal and no
+        // import-order enforcement — javac does not warn on either, and /quality
+        // sweeps only app/, so nothing looked. JCLAW-894 orphaned seven imports
+        // that had to be found by hand.
+        target("app/**/*.java", "test/**/*.java")
         removeUnusedImports()
         importOrder("", "javax", "java", "\\#")
     }
