@@ -47,7 +47,8 @@ public final class EvalScorer {
      * Older recordings have no {@code error} field and deserialise to null.
      */
     public record Response(String output, List<String> toolsCalled, List<String> toolsAttempted,
-                           Map<String, List<String>> toolArgs, int llmCalls, String error) {
+                           Map<String, List<String>> toolArgs, Map<String, List<String>> toolResults,
+                           int llmCalls, String error) {
 
         public Response {
             output = output == null ? "" : output;
@@ -59,16 +60,17 @@ public final class EvalScorer {
             // Optional: only a recording that asserts on arguments needs to carry them,
             // which keeps a hand-written response file as short as it was.
             toolArgs = toolArgs == null ? Map.of() : Map.copyOf(toolArgs);
+            toolResults = toolResults == null ? Map.of() : Map.copyOf(toolResults);
         }
 
         /** A turn that produced an answer, where every attempted call also ran. */
         public Response(String output, List<String> toolsCalled, int llmCalls) {
-            this(output, toolsCalled, toolsCalled, Map.of(), llmCalls, null);
+            this(output, toolsCalled, toolsCalled, Map.of(), Map.of(), llmCalls, null);
         }
 
         /** A turn where some attempts were refused: {@code toolsCalled} is the dispatched subset. */
         public Response(String output, List<String> toolsCalled, List<String> toolsAttempted, int llmCalls) {
-            this(output, toolsCalled, toolsAttempted, Map.of(), llmCalls, null);
+            this(output, toolsCalled, toolsAttempted, Map.of(), Map.of(), llmCalls, null);
         }
 
         /** Argument JSONs of the dispatched calls to {@code tool}, in call order. */
@@ -76,9 +78,14 @@ public final class EvalScorer {
             return toolArgs.getOrDefault(tool, List.of());
         }
 
+        /** Result text of the dispatched calls to {@code tool}, in call order (JCLAW-891). */
+        public List<String> resultsFor(String tool) {
+            return toolResults.getOrDefault(tool, List.of());
+        }
+
         /** A turn that never produced an answer, and why. */
         public static Response failed(String reason) {
-            return new Response("", List.of(), List.of(), Map.of(), 0, reason);
+            return new Response("", List.of(), List.of(), Map.of(), Map.of(), 0, reason);
         }
 
         /** Names the model emitted that never reached a tool — invented, or not granted. */
@@ -131,6 +138,7 @@ public final class EvalScorer {
             case TOOLS_CALLED_EXACTLY -> scoreToolsCalledExactly(check, response, failures);
             case TOOLS_CALLED_WITHIN -> scoreToolsCalledWithin(check, response, failures);
             case TOOL_ARGS_INCLUDE -> scoreToolArgsInclude(check, response, failures);
+            case TOOL_RESULT_INCLUDES -> scoreToolResultIncludes(check, response, failures);
             case MAX_LLM_CALLS -> {
                 if (response.llmCalls() > check.limit()) {
                     failures.add("max_llm_calls: used " + response.llmCalls() + " calls, budget " + check.limit());
@@ -199,6 +207,32 @@ public final class EvalScorer {
         }
         failures.add("tool_args_include: no " + tool + " call carried " + check.schema()
                 + " (saw " + calls + ")");
+    }
+
+    /**
+     * Did a dispatched call to this tool return the expected substrings? Passes when
+     * ANY such call carries them all, mirroring {@code tool_args_include}: a turn may
+     * use one tool several ways and the case asserts one of those happened.
+     */
+    private static void scoreToolResultIncludes(EvalCheck check, Response response, List<String> failures) {
+        var tool = check.arg();
+        var expected = check.args().subList(1, check.args().size());
+        var results = response.resultsFor(tool);
+        if (results.isEmpty()) {
+            // Separated from "returned something else" because they need different
+            // fixes: one is a tool-selection failure, the other a behaviour failure.
+            failures.add("tool_result_includes: " + tool + " recorded no dispatched call with a result"
+                    + (response.toolsCalled().contains(tool) ? " (called, but the run recorded no result)" : ""));
+            return;
+        }
+        for (var result : results) {
+            var haystack = result.toLowerCase(Locale.ROOT);
+            if (expected.stream().allMatch(n -> haystack.contains(n.toLowerCase(Locale.ROOT)))) return;
+        }
+        // Echo what came back: this check exists because a turn passed while its tool
+        // returned an HTTP 404, and a failure that hid the result would repeat that.
+        failures.add("tool_result_includes: no " + tool + " result carried " + expected
+                + " (saw " + results + ")");
     }
 
     /** Every key in {@code expected} present in {@code rawArgs} with an equal value. */

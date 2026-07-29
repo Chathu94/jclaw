@@ -250,7 +250,7 @@ public final class EvalCapture {
         try (var _ = LatencyTrace.bind(trace)) {
             var content = turns.run(agent, testCase.input(), sink);
             return new EvalScorer.Response(content, sink.toolsCalled(), sink.toolsAttempted(),
-                    sink.toolArgs(), trace.llmCallCount(), null);
+                    sink.toolArgs(), sink.toolResults(), trace.llmCallCount(), null);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY,
                     "Eval case '%s' errored: %s".formatted(testCase.id(), e));
@@ -289,6 +289,13 @@ public final class EvalCapture {
         // a positional index into every call the turn made.
         private final Map<String, List<String>> argsByTool = new ConcurrentHashMap<>();
 
+        // Result text of dispatched calls, per tool (JCLAW-891). Arguments say what
+        // the agent ASKED for; only this says what happened — a live sweep passed a
+        // case whose web_fetch returned "Error fetching URL: HTTP 404", because
+        // nothing looked at what came back.
+        private final Map<String, String> resultByCallId = new ConcurrentHashMap<>();
+        private final Map<String, List<String>> resultsByTool = new ConcurrentHashMap<>();
+
         @Override
         public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
             // The eval question is the input we already hold; nothing to record.
@@ -302,7 +309,11 @@ public final class EvalCapture {
 
         @Override
         public void appendToolResult(String toolCallId, String result, String structuredJson) {
-            // The checks assert on which tools ran, not what they returned.
+            // Stashed by call id rather than filed under the tool immediately: the
+            // outcome that decides whether this call counts arrives next, in
+            // noteToolOutcome. A refused call must contribute no result, for the same
+            // reason it contributes no name and no arguments.
+            if (result != null) resultByCallId.put(toolCallId, result);
         }
 
         @Override
@@ -314,6 +325,10 @@ public final class EvalCapture {
             var args = argsByCallId.get(toolCallId);
             if (args != null) {
                 argsByTool.computeIfAbsent(name, _ -> Collections.synchronizedList(new ArrayList<>())).add(args);
+            }
+            var result = resultByCallId.get(toolCallId);
+            if (result != null) {
+                resultsByTool.computeIfAbsent(name, _ -> Collections.synchronizedList(new ArrayList<>())).add(result);
             }
         }
 
@@ -363,8 +378,17 @@ public final class EvalCapture {
 
         /** Arguments of dispatched calls, per tool, in call order. */
         Map<String, List<String>> toolArgs() {
+            return snapshot(argsByTool);
+        }
+
+        /** Result text of dispatched calls, per tool, in call order. */
+        Map<String, List<String>> toolResults() {
+            return snapshot(resultsByTool);
+        }
+
+        private static Map<String, List<String>> snapshot(Map<String, List<String>> source) {
             var copy = new LinkedHashMap<String, List<String>>();
-            argsByTool.forEach((tool, args) -> copy.put(tool, List.copyOf(args)));
+            source.forEach((tool, values) -> copy.put(tool, List.copyOf(values)));
             return Map.copyOf(copy);
         }
     }

@@ -176,7 +176,7 @@ class EvalScorerTest extends UnitTest {
 
     private static EvalScorer.Response callingWithArgs(String tool, String... argJsons) {
         return new EvalScorer.Response("answer", List.of(tool), List.of(tool),
-                java.util.Map.of(tool, List.of(argJsons)), 1, null);
+                java.util.Map.of(tool, List.of(argJsons)), java.util.Map.of(), 1, null);
     }
 
     private static EvalCheck argsInclude(String tool, String expectedJson) {
@@ -226,7 +226,72 @@ class EvalScorerTest extends UnitTest {
         // the other an argument failure, and they send the reader to different fixes.
         var failures = EvalScorer.failures(
                 caseWith(argsInclude("datetime", "{\"action\":\"calculate\"}")),
-                new EvalScorer.Response("answer", List.of(), List.of(), java.util.Map.of(), 1, null));
+                new EvalScorer.Response("answer", List.of(), List.of(), java.util.Map.of(), java.util.Map.of(), 1, null));
+
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("recorded no dispatched call"), failures.getFirst());
+    }
+
+    // ==================== tool_result_includes (JCLAW-891) ====================
+
+    private static EvalScorer.Response returning(String tool, String... results) {
+        return new EvalScorer.Response("answer", List.of(tool), List.of(tool),
+                java.util.Map.of(), java.util.Map.of(tool, List.of(results)), 1, null);
+    }
+
+    private static EvalCheck resultIncludes(String tool, String... needles) {
+        var args = new java.util.ArrayList<String>();
+        args.add(tool);
+        args.addAll(List.of(needles));
+        return EvalCheck.of(EvalCheck.Kind.TOOL_RESULT_INCLUDES, args);
+    }
+
+    @Test
+    void toolResultIncludesCatchesATurnWhereTheToolFailed() {
+        // The gap this kind exists to close, observed live: the agent picked the right
+        // tool and passed the right arguments, the tool returned an HTTP 404, and
+        // every check passed because none of them looked at what came back.
+        var failed = returning("web_fetch", "Error fetching URL: HTTP 404 fetching https://example.com/pricing");
+
+        var failures = EvalScorer.failures(caseWith(resultIncludes("web_fetch", "pricing plan")), failed);
+        assertEquals(1, failures.size(), failures::toString);
+        assertTrue(failures.getFirst().contains("HTTP 404"),
+                "the failure must echo what came back, or it repeats the blindness: " + failures.getFirst());
+    }
+
+    @Test
+    void toolResultIncludesPassesWhenTheResultCarriesEverySubstring() {
+        var created = returning("task_manager",
+                "Recurring task 'weekday-deploy-queue-check' created with schedule '0 0 9 * * 1-5'.");
+
+        assertTrue(EvalScorer.failures(
+                caseWith(resultIncludes("task_manager", "created", "0 0 9 * * 1-5")), created).isEmpty());
+    }
+
+    @Test
+    void toolResultIncludesCatchesTheRightToolDoingTheWrongThing() {
+        // "task_manager called once, with wrong content" — indistinguishable from
+        // correct under tools_called_exactly and tool_args_include alike.
+        var wrongSchedule = returning("task_manager",
+                "Recurring task 'weekday-deploy-queue-check' created with schedule '0 0 9 * * 6,7'.");
+
+        var failures = EvalScorer.failures(
+                caseWith(resultIncludes("task_manager", "0 0 9 * * 1-5")), wrongSchedule);
+        assertEquals(1, failures.size(), failures::toString);
+    }
+
+    @Test
+    void toolResultIncludesMatchesCaseInsensitively() {
+        assertTrue(EvalScorer.failures(
+                caseWith(resultIncludes("task_manager", "CREATED")),
+                returning("task_manager", "Recurring task created.")).isEmpty());
+    }
+
+    @Test
+    void toolResultIncludesSaysWhenTheToolNeverRan() {
+        var failures = EvalScorer.failures(
+                caseWith(resultIncludes("task_manager", "created")),
+                new EvalScorer.Response("answer", List.of(), 1));
 
         assertEquals(1, failures.size(), failures::toString);
         assertTrue(failures.getFirst().contains("recorded no dispatched call"), failures.getFirst());

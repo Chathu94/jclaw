@@ -76,6 +76,7 @@ Every kind is decidable from the response alone — no judge model.
 | `tools_called_exactly` | `args`: every tool name allowed | the calls made equal that list as a multiset — no extras, no repeats. `[]` means no tool at all |
 | `tools_called_within` | `args`: the tools permitted | every call is in the list, but none is required — the "or" form. Extras and repeats still fail |
 | `tool_args_include` | `args`: one tool name, `schema`: expected arguments | a dispatched call to that tool carried every key in `schema` with an equal value |
+| `tool_result_includes` | `args`: a tool name, then substrings | a dispatched call to that tool returned all of them (case-insensitive) |
 | `max_llm_calls` | `limit` | the turn spent at most `limit` model calls |
 
 `json_schema` implements a subset: `type`, `properties`, `required`, `items`,
@@ -170,6 +171,37 @@ legitimately use one tool several ways.
 Only dispatched calls contribute arguments. A refused call carried its arguments
 nowhere, so asserting on them would be asserting on an intention.
 
+### Asserting what happened: `tool_result_includes`
+
+Arguments say what the agent *asked for*. Only the result says what *happened* —
+and without that, a case passes on a turn that accomplished nothing.
+
+That is not hypothetical. A live sweep scored `named-url-uses-fetch-not-search` as
+a **pass** while that same turn's log read:
+
+```
+Tool 'web_fetch' returned: Error fetching URL: HTTP 404 fetching https://example.com/pricing
+```
+
+The agent picked the right tool, passed the right arguments, and the tool failed
+outright. Every check was green, because none of them looked at what came back.
+
+```json
+{ "kind": "tool_result_includes", "args": ["task_manager", "created", "0 0 9 * * 1-5"] }
+```
+
+First arg names the tool; the rest are substrings its result must carry. It also
+closes the "right tool, wrong content" case — a `task_manager` call that creates a
+task on the wrong schedule is indistinguishable from a correct one under
+`tools_called_exactly` and `tool_args_include` alike, but its *result* says which
+schedule was written.
+
+**What it does not cover.** This asserts what the tool *said* it did. A tool that
+reports success while half-failing still passes. Catching that needs assertions
+over resulting state — a database or filesystem check — which would put a backend
+behind the scorer and cost the property that makes recordings re-scorable offline.
+Deliberately out of scope; see JCLAW-891.
+
 ### What is deliberately missing
 
 Semantic verification ("does this answer the question?") and free-form rubric
@@ -192,6 +224,7 @@ The runner scores whatever produced the responses; the file is the contract.
       "output": "The transfer lasted 209 days.",
       "toolsCalled": ["web_fetch"],
       "toolsAttempted": ["web_fetch", "httpFetch"],
+      "toolResults": { "web_fetch": ["The transfer lasted 209 days."] },
       "llmCalls": 2
     },
     "distractor-is-not-repeated": {

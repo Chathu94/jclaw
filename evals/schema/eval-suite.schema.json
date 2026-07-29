@@ -88,6 +88,7 @@
             "tools_called_exactly",
             "tools_called_within",
             "tool_args_include",
+            "tool_result_includes",
             "max_llm_calls"
           ],
           "description": "Every kind is decidable without a model call. Model-judged checks land with the critic (JCLAW-836)."
@@ -98,7 +99,7 @@
           "items": {
             "type": "string"
           },
-          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tools_called_exactly: the complete set of tool names the turn may call, compared as a multiset \u2014 an empty array asserts no tool at all. tools_called_within: the tools the turn MAY call, none of them required \u2014 the 'or' form, for when a tool is optional because the harness already supplied what it would return. Tool assertions are allowlists on purpose: a denylist only catches rogue calls someone predicted. tool_args_include: one tool name, paired with a 'schema' holding the expected arguments. Per-kind arity is enforced by EvalDatasetLoader; only tools_called_exactly permits an empty array."
+          "description": "contains_all / not_contains_any: the substrings (case-insensitive). matches: one regex. tools_called_exactly: the complete set of tool names the turn may call, compared as a multiset \u2014 an empty array asserts no tool at all. tools_called_within: the tools the turn MAY call, none of them required \u2014 the 'or' form, for when a tool is optional because the harness already supplied what it would return. Tool assertions are allowlists on purpose: a denylist only catches rogue calls someone predicted. tool_args_include: one tool name, paired with a 'schema' holding the expected arguments. tool_result_includes: a tool name followed by one or more substrings its result must contain (case-insensitive) \u2014 arguments say what the agent asked for, only the result says what happened. Per-kind arity is enforced by EvalDatasetLoader; only tools_called_exactly permits an empty array."
         },
         "schema": {
           "type": "object",

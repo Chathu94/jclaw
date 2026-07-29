@@ -79,6 +79,23 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
          * the model is free to default is not the point of the case (JCLAW-883).
          */
         TOOL_ARGS_INCLUDE,
+        /**
+         * A dispatched call to the named tool returned all the given substrings.
+         * {@code args} is the tool name followed by one or more substrings.
+         *
+         * <p>Arguments say what the agent ASKED for; only the result says what
+         * happened. Without this a case passes on a turn that accomplished nothing:
+         * a live sweep scored {@code named-url-uses-fetch-not-search} as a pass while
+         * that turn's {@code web_fetch} returned "Error fetching URL: HTTP 404". The
+         * agent picked the right tool, passed the right arguments, and the tool
+         * failed outright, with every check green.
+         *
+         * <p>Matching is case-insensitive, like the other substring kinds. It asserts
+         * what the tool SAID it did — a tool reporting success while half-failing
+         * still passes; catching that needs assertions over resulting state, which is
+         * deliberately out of scope (JCLAW-891).
+         */
+        TOOL_RESULT_INCLUDES,
         /** The turn used at most {@link #limit()} model calls (JCLAW-833's NFR). */
         MAX_LLM_CALLS;
 

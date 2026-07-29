@@ -93,6 +93,35 @@ class EvalCaptureTest extends UnitTest {
     }
 
     @Test
+    void capturedRecordCarriesTheResultOfDispatchedCalls() {
+        // JCLAW-891: arguments say what the agent asked for; only the result says what
+        // happened. appendToolResult was already being called and discarded.
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, DATETIME_CALL, null, null, false);
+            sink.appendToolResult("call_1", "Difference: 108 days", null);
+            sink.noteToolOutcome("call_1", ToolRegistry.ToolResult.Outcome.DISPATCHED);
+            return "108 days.";
+        });
+
+        assertEquals(List.of("Difference: 108 days"),
+                capture.responses().get("clock").resultsFor("datetime"));
+    }
+
+    @Test
+    void aRefusedCallContributesNoResult() {
+        // Same rule as names and arguments: a call that reached no tool produced no
+        // result, so there is nothing to assert against.
+        var capture = EvalCapture.run(suiteAsking("clock"), evalAgent(), 1, (agent, prompt, sink) -> {
+            sink.appendAssistantMessage(null, SEARCH_CALL, null, null, false);
+            sink.appendToolResult("call_2", "Error: Tool 'web_search' is not enabled for this agent.", null);
+            sink.noteToolOutcome("call_2", ToolRegistry.ToolResult.Outcome.NOT_ENABLED);
+            return "no search tool";
+        });
+
+        assertTrue(capture.responses().get("clock").resultsFor("web_search").isEmpty());
+    }
+
+    @Test
     void aRefusedCallContributesNoArguments() {
         // Symmetric with toolsCalled: a call that reached no tool carried its
         // arguments nowhere, so asserting on them would be asserting on an intent.

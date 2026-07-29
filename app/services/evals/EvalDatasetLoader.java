@@ -183,6 +183,16 @@ public final class EvalDatasetLoader {
             // "one or more": an empty allowance would mean "no tool permitted", which
             // tools_called_exactly already says more clearly.
             case TOOLS_CALLED_WITHIN -> EvalCheck.of(kind, requireArgs(ctx, obj, kind, 0));
+            // args[0] is the tool, the rest are the substrings its result must carry —
+            // so two is the minimum that asserts anything.
+            case TOOL_RESULT_INCLUDES -> {
+                var args = requireArgs(ctx, obj, kind, ANY_ARGS);
+                if (args.size() < 2) {
+                    throw new IllegalArgumentException(ctx + ": tool_result_includes: expected a tool name "
+                            + "followed by at least one substring, got " + args.size() + " arg(s)");
+                }
+                yield EvalCheck.of(kind, args);
+            }
             case TOOL_ARGS_INCLUDE -> {
                 var args = requireArgs(ctx, obj, kind, 1);
                 var expected = obj.get(SCHEMA_KEY);
