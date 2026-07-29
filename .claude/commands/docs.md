@@ -85,7 +85,7 @@ Present a table (file · drift item · `current → correct` · tier · FIX/REPO
 **Phase 6 — Commit locally & report (stop here; never push)**
 
 14. Stage only the docs you actually changed with `/usr/bin/git add <paths>`. Docs-only commits short-circuit the `pre-commit` hook (no staged `frontend/**` files), so there's zero lint cost.
-15. Create a local commit:
+15. Create a local commit. For the trailer, use the `Co-Authored-By:` line your standing instructions specify, which names the model actually authoring the commit. **Do not hardcode a model version in this file.** It goes stale at every model bump, and a wrong trailer breaks nothing — no hook, test, or push rejects it — so the drift survives indefinitely. If your instructions specify no trailer, omit it rather than guessing a model name.
     ```bash
     /usr/bin/git commit -m "$(cat <<'EOF'
     docs: realign <scope> with codebase (v<VERSION>)
@@ -93,7 +93,7 @@ Present a table (file · drift item · `current → correct` · tier · FIX/REPO
     <one short paragraph: what drifted and what was corrected — e.g. version
     bump propagation, Nuxt 3→4, play test→autotest, fixed file references.>
 
-    Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+    <Co-Authored-By trailer per step 15 — do not paste a model version from this file>
     EOF
     )"
     ```
