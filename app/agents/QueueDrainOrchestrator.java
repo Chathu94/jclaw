@@ -89,7 +89,13 @@ public final class QueueDrainOrchestrator {
         if (drained.isEmpty()) return;
 
         Thread.ofVirtual().name("agent-drain").start(() -> {
-            var combined = ConversationQueue.formatCollectedMessages(drained);
+            // JCLAW-273: a yield-resume's content is already a persisted announce row,
+            // so it must not be re-appended. Dropping it from the combined block leaves
+            // a mixed drain appending only the real inputs; when it is the whole drain
+            // there is nothing to append and the run skips the append entirely.
+            var appendable = drained.stream().filter(m -> !m.skipUserAppend()).toList();
+            boolean skipUserAppend = appendable.isEmpty();
+            var combined = skipUserAppend ? "" : ConversationQueue.formatCollectedMessages(appendable);
             var msg = drained.getFirst(); // channel info is the same for all queued messages
             boolean runStarted = false;
             try {
@@ -101,7 +107,8 @@ public final class QueueDrainOrchestrator {
                 runStarted = true;
                 // JCLAW-117: queue ownership was transferred to us by drain()
                 // above — use the owned-queue variant to avoid re-acquire.
-                var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined);
+                var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
+                        skipUserAppend);
                 AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             } catch (Exception e) {
                 EventLogger.error("queue", msg.agent().name, msg.channelType(),

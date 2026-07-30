@@ -25,7 +25,18 @@ public class ConversationQueue {
     private static final ConcurrentHashMap<Long, QueueState> queues = new ConcurrentHashMap<>();
     private static final int MAX_QUEUE_SIZE = 20;
 
-    public record QueuedMessage(String text, String channelType, String peerId, Agent agent) {}
+    /**
+     * @param skipUserAppend JCLAW-273: this message's content is already a persisted
+     *                       USER row (a yield-resume announce), so the drain must run
+     *                       it without re-appending {@code text}. Carried on the record
+     *                       because the enqueue/drain boundary drops call arguments.
+     */
+    public record QueuedMessage(String text, String channelType, String peerId, Agent agent,
+                                boolean skipUserAppend) {
+        public QueuedMessage(String text, String channelType, String peerId, Agent agent) {
+            this(text, channelType, peerId, agent, false);
+        }
+    }
 
     static class QueueState {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();

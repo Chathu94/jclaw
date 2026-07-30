@@ -18,6 +18,7 @@ import services.Tx;
 import tools.SubagentSpawnTool;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -430,6 +431,100 @@ class AgentRunnerSubagentTest extends UnitTest {
             // blocker we just created.
             services.ConversationQueue.releaseOwnership(parentConv.id);
         }
+    }
+
+    @Test
+    void queuedYieldResumeDoesNotAppendAnEmptyUserRowWhenDrained() throws Exception {
+        // JCLAW-273 regression: runYieldResume passes skipUserAppend=true on the
+        // immediate-acquire path, but a busy queue routes the resume through
+        // enqueue -> drain, and the drain re-entered the runner via the appending
+        // path carrying the resume's empty text. That persisted a blank USER row
+        // and fed the LLM an empty turn after the announce. The flag now rides on
+        // QueuedMessage so it survives the enqueue/drain boundary.
+        var replies = new AtomicInteger();
+        startLlmServer(exchange -> {
+            var body = simpleResponse(replies.getAndIncrement() == 0
+                    ? "Blocker reply." : "Resumed reply after drain.");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var parentAgent = createAgent("resume-drain-parent", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parentAgent, "web", "u-resume-drain");
+
+        // The announce SubagentSpawnTool already persisted before resuming.
+        Tx.run(() -> {
+            var conv = (Conversation) Conversation.findById(parentConv.id);
+            return ConversationService.appendMessage(conv, MessageRole.USER,
+                    "[subagent reply] child's findings", null, null, null);
+        });
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        // Another turn is mid-flight, so the resume can only be queued.
+        var blocker = new services.ConversationQueue.QueuedMessage(
+                "blocker message", "web", "u-resume-drain", parentAgent);
+        assertTrue(services.ConversationQueue.tryAcquire(parentConv.id, blocker),
+                "test precondition: queue must be available to acquire");
+
+        var queuedRef = new AtomicReference<AgentRunner.RunResult>();
+        var errorRef = new AtomicReference<Throwable>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var a = Tx.run(() -> (Agent) Agent.findById(parentAgent.id));
+                var c = Tx.run(() -> (Conversation) Conversation.findById(parentConv.id));
+                queuedRef.set(AgentRunner.runYieldResume(a, c));
+                // Finish the blocking turn we own. Its finally drains the queue
+                // and processes the resume on the agent-drain VT.
+                AgentRunner.runWithOwnedQueue(a, c, "blocker message");
+            } catch (Throwable t) {
+                errorRef.set(t);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "blocking turn must complete within 30s");
+        if (errorRef.get() != null) {
+            throw new AssertionError("blocking turn threw", errorRef.get());
+        }
+        assertNotNull(queuedRef.get());
+        assertTrue(queuedRef.get().response().toLowerCase().contains("queue"),
+                "precondition: the resume must have been queued, not run inline");
+
+        // The drain runs on its own VT and only releases ownership once the
+        // resume's own run has finished and re-drained empty.
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (services.ConversationQueue.isBusy(parentConv.id)
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertFalse(services.ConversationQueue.isBusy(parentConv.id),
+                "queue must be released once the drained resume completes");
+
+        JPA.em().clear();
+        java.util.List<Message> all = Tx.run(() -> Message.<Message>find(
+                "conversation = ?1 ORDER BY id ASC",
+                (Conversation) Conversation.findById(parentConv.id)).fetch());
+
+        // The assertion the bug trips: the drain must not persist a blank turn.
+        long blank = all.stream()
+                .filter(m -> MessageRole.USER.value.equals(m.role))
+                .filter(m -> m.content == null || m.content.isBlank())
+                .count();
+        assertEquals(0L, blank,
+                "drained yield-resume must not persist an empty user row, found " + blank);
+
+        assertEquals(4, all.size(),
+                "expected 4 rows (announce, blocker user, blocker assistant, resume "
+                        + "assistant), got " + all.stream().map(m -> m.role + "=" + m.content).toList());
+
+        long announceCount = all.stream()
+                .filter(m -> "[subagent reply] child's findings".equals(m.content))
+                .count();
+        assertEquals(1L, announceCount, "announce row must appear exactly once after drain");
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────

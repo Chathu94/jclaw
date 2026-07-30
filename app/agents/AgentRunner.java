@@ -301,6 +301,23 @@ public class AgentRunner {
     }
 
     /**
+     * Owned-queue variant that can suppress the user-message append, for a drained
+     * {@link ConversationQueue.QueuedMessage} carrying {@code skipUserAppend}
+     * (JCLAW-273). Package-private: only {@link QueueDrainOrchestrator} has a
+     * message whose intent is already known.
+     *
+     * @param agent          the executing agent
+     * @param conversation   the conversation the caller already owns
+     * @param userMessage    the user's input text; empty for a pure yield-resume
+     * @param skipUserAppend true to run without persisting {@code userMessage}
+     * @return the run outcome
+     */
+    static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
+                                        boolean skipUserAppend) {
+        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend);
+    }
+
+    /**
      * JCLAW-273: resume entrypoint used by
      * {@link tools.SubagentSpawnTool#runAsyncAndAnnounce} after a yielded
      * async child terminates. The yield-resume announce Message has already
@@ -332,7 +349,7 @@ public class AgentRunner {
         // skipUserAppend flag suppresses appendUserMessage so we don't
         // double-append.
         var queueMsg = new ConversationQueue.QueuedMessage(
-                "", conversation.channelType, conversation.peerId, agent);
+                "", conversation.channelType, conversation.peerId, agent, true);
         if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
