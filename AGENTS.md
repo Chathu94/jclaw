@@ -287,11 +287,17 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Before deciding a static-analysis finding, check how the same rule was already resolved elsewhere in this project. A verdict that contradicts an established one either needs to change both places or is wrong.
 - Match the existing construction for test fixtures and helpers (`AgentService.create`, `commitInFreshTx`, the probe `setForTest` seams) rather than building a parallel one.
 
-### 8. Comments Carry Reasoning, Not Narration
+### 8. Comments Carry Reasoning, Not Narration — Tersely
 
-**Explain why the code is the way it is; never restate what it already says.**
+**Explain why the code is the way it is; never restate what it already says. Say it in one line.**
 
 Comments earn their place with design rationale, non-obvious invariants, the failure a guard prevents, and decision provenance (the ticket, the measurement, the bug that motivated it). Everything else is noise that ages badly.
+
+**Verbosity is the default failure mode, so default to one line.** Match the comment density and length of the code around it: a new entry in a list of one-line comments gets one line, not a paragraph. Before writing a second line, check whether the first already said it. Before writing a fifth, assume it didn't need saying.
+
+Extra length is earned only by something a reader would otherwise get wrong. In `SettingsUnmanagedBanner.vue`'s prefix list, `playwright.` and `jtokkit.` run several lines because one is a deliberately-retained retired namespace and the other is written autonomously by a job — both are genuinely surprising. Every ordinary entry beside them is a single line, and a new one that isn't will be sent back.
+
+Provenance for a *change* belongs in the commit message, not the code: "why this must stay" is a comment, "why I added this" is history. If a comment needs a paragraph to justify the code beneath it, the code is wrong — fix the code (see §3).
 
 This matters most during refactors: a comment recording *why* a check exists is frequently the only surviving record of a bug that was actually hit, and deleting it as clutter is how the bug comes back. When restructuring code, the comments move with the logic they explain.
 
@@ -303,4 +309,4 @@ Write them factually: what changed, why, what was verified. That is also what ma
 
 ---
 
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, comments that stay one line, and clarifying questions come before implementation rather than after mistakes.
