@@ -29,6 +29,7 @@ const MANAGED_PREFIXES = [
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
   'chat.', // Chat settings — Settings
+  'verification.', // JCLAW-836: tool-result check toggles — seeded by DefaultConfigJob, no UI surface
   'shell.', // Shell execution defaults — Settings (allowlist + timeout)
   'playwright.', // JCLAW-172: namespace retired but kept in the prefix list
   // so leftover playwright.enabled / playwright.headless rows on upgraded

@@ -106,6 +106,9 @@ function defaultConfigEntries() {
     { key: 'pricing.refresh.enabled', value: 'false', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'chat.maxToolRounds', value: '10', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'chat.maxContextMessages', value: '50', updatedAt: '2026-04-22T10:00:00Z' },
+    // Seeded, no Settings row — keeps the banner's managed-prefix list honest.
+    { key: 'verification.enabled', value: 'true', updatedAt: '2026-04-22T10:00:00Z' },
+    { key: 'verification.skipTools', value: '', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'subagent.maxDepth', value: '1', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'subagent.maxChildrenPerParent', value: '5', updatedAt: '2026-04-22T10:00:00Z' },
     { key: 'dispatcher.llm.maxRequestsPerHost', value: '64', updatedAt: '2026-04-22T10:00:00Z' },
