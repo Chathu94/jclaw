@@ -190,4 +190,7 @@ describe('User Guide page', () => {
       component.find('[data-testid="guide-toc-item-getting-started"]').exists(),
     ).toBe(true)
   })
-})
+// Every test mounts the whole Guide page with its bundled markdown — the slowest
+// in the suite (~500ms). The pre-push hook runs them beside the backend suite,
+// where one hit 5.9s against the 5s default. Headroom for contention, not a budget.
+}, 20_000)
