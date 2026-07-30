@@ -321,7 +321,8 @@ public class ApiMetricsController extends Controller {
     private record LoadtestInput(int concurrency, int turns, int ttftMs, int tokensPerSecond,
                                  int responseTokens, int simulatedToolCalls, int toolSleepMs,
                                  boolean compress, String provider, String model, boolean real,
-                                 boolean toolAgent, String userMessage, List<String> prompts) {}
+                                 boolean toolAgent, String userMessage, List<String> prompts,
+                                 String agentName) {}
 
     /**
      * POST /api/metrics/loadtest — run a synchronous load test against
@@ -392,7 +393,8 @@ public class ApiMetricsController extends Controller {
                     input.concurrency(), input.turns(), input.compress(),
                     new LoadTestHarness.Scenario(input.ttftMs(), input.tokensPerSecond(), input.responseTokens(),
                             input.simulatedToolCalls(), input.toolSleepMs()),
-                    input.real(), input.toolAgent(), input.provider(), input.model(), input.userMessage(), input.prompts()));
+                    input.real(), input.toolAgent(), input.provider(), input.model(), input.userMessage(), input.prompts(),
+                    input.agentName()));
 
             long toolInvocations = LoadTestSleepTool.invocations() - toolInvocationsBefore;
             teardownLoadtest(input);
@@ -461,8 +463,23 @@ public class ApiMetricsController extends Controller {
         String userMessage = readString(body, "userMessage", null);
         var prompts = parsePromptsField(body, userMessage);
 
+        // Drive an existing agent instead of a benchmark twin, so the run ships
+        // a real tool array. Both twins pin their tool surface by name, which is
+        // right for model-speed benchmarks and useless for measuring anything
+        // about the tools array itself (JCLAW-840).
+        String agentName = readString(body, "agentName", null);
+        if (agentName != null && !agentName.isBlank() && !real) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "agentName requires a real provider (set provider and model)");
+        }
+        if (agentName != null && !agentName.isBlank() && toolAgent) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "agentName and toolAgent are mutually exclusive");
+        }
+
         return new LoadtestInput(concurrency, turns, ttftMs, tokensPerSecond, responseTokens,
-                simulatedToolCalls, toolSleepMs, compress, provider, model, real, toolAgent, userMessage, prompts);
+                simulatedToolCalls, toolSleepMs, compress, provider, model, real, toolAgent, userMessage, prompts,
+                agentName);
     }
 
     /**

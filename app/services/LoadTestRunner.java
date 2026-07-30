@@ -127,14 +127,41 @@ public final class LoadTestRunner {
      *                     entries; the controller validates this before
      *                     dispatch. Mutually exclusive with
      *                     {@code userMessage} on the wire.
+     * @param agentName    when set, drive an EXISTING agent by name instead of
+     *                     the synthetic benchmark agents. Both benchmark agents
+     *                     pin their tool surface by name in
+     *                     {@link agents.ToolRegistry#getToolDefsForAgent} — zero tools
+     *                     for {@code __loadtest__}, one for
+     *                     {@code __loadtest_tools__} — which is correct for
+     *                     measuring model speed but makes them useless for any
+     *                     question ABOUT the tool array. A named agent takes no
+     *                     short-circuit and ships its real tool set (JCLAW-840).
+     *                     Requires {@code realProvider}. The named agent's
+     *                     provider and model are overridden for the run and
+     *                     restored afterwards, so point it at a disposable
+     *                     agent rather than one serving live traffic.
      */
     public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
                           boolean realProvider, boolean toolAgent,
                           String provider, String model,
                           String userMessage,
-                          List<String> prompts) {
+                          List<String> prompts,
+                          String agentName) {
+
+        /** True when this run drives an existing agent rather than a benchmark twin. */
+        public boolean hasNamedAgent() {
+            return agentName != null && !agentName.isBlank();
+        }
     }
+
+    /**
+     * Agent binding for one run, plus what {@link #restoreNamedAgent} needs to
+     * undo it. Carried as a value rather than a static because a static would
+     * be process-global, and this project runs test classes concurrently.
+     */
+    public record AgentSetup(long agentId, String namedAgent,
+                             String savedProvider, String savedModel) {}
 
     /**
      * Aggregated outcome of a single load-test run, returned to the API caller.
@@ -259,8 +286,17 @@ public final class LoadTestRunner {
             throw new IllegalArgumentException("concurrency and turns must be ≥ 1");
         }
 
-        long agentId = setupLoadtestAgent(req);
+        var setup = setupLoadtestAgent(req);
+        try {
+            return runBound(req, setup.agentId());
+        } finally {
+            // A named agent is configuration the operator owns; hand it back
+            // even when the run throws (JCLAW-840).
+            restoreNamedAgent(setup);
+        }
+    }
 
+    private static Result runBound(Request req, long agentId) throws Exception {
         var sessionCookie = mintAdminSessionCookie();
         var baseUrl = "http://127.0.0.1:" + Play.configuration.getProperty("http.port", "9000");
 
@@ -331,9 +367,17 @@ public final class LoadTestRunner {
      * agent + provider config in a committed transaction so HTTP request
      * threads can read them. Returns the agent id used by all workers.
      */
-    private static long setupLoadtestAgent(Request req) throws IOException {
+    private static AgentSetup setupLoadtestAgent(Request req) throws IOException {
         if (req.toolAgent() && !req.realProvider()) {
             throw new IllegalArgumentException("toolAgent requires a real provider (provider+model)");
+        }
+        if (req.hasNamedAgent() && !req.realProvider()) {
+            throw new IllegalArgumentException("agentName requires a real provider (provider+model)");
+        }
+        if (req.hasNamedAgent() && req.toolAgent()) {
+            // toolAgent pins the surface to loadtest_sleep; agentName exists to
+            // ship a real one. Honouring both would silently drop one.
+            throw new IllegalArgumentException("agentName and toolAgent are mutually exclusive");
         }
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
         if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
@@ -341,7 +385,7 @@ public final class LoadTestRunner {
                 ? DEFAULT_REAL_PROVIDER : req.provider();
         var agentName = req.toolAgent() ? LOADTEST_TOOLS_AGENT_NAME : LOADTEST_AGENT_NAME;
         try {
-            return JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Long>) () -> {
+            return JPA.withTransaction(DEFAULT_DB, false, (F.Function0<AgentSetup>) () -> {
                 // Register loadtest_sleep for a tools run WITHOUT switching the
                 // agent off the real provider: the flag only drives tool
                 // registration (ToolRegistrationJob, re-run as a side effect);
@@ -349,9 +393,11 @@ public final class LoadTestRunner {
                 if (req.toolAgent()) {
                     ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
                 }
-                return req.realProvider()
+                if (req.hasNamedAgent()) return bindNamedAgentInner(req, realProviderName);
+                long id = req.realProvider()
                         ? ensureLoadtestAgentRealInner(realProviderName, req.model(), agentName)
                         : ensureLoadtestAgentInner(mockPort);
+                return new AgentSetup(id, null, null, null);
             });
         } catch (Throwable t) {
             // JPA.withTransaction wraps callee throws as Throwable; surface IOException
@@ -359,6 +405,67 @@ public final class LoadTestRunner {
             if (t instanceof IOException io) throw io;
             if (t instanceof RuntimeException re) throw re;
             throw new IllegalStateException("Loadtest agent setup failed", t);
+        }
+    }
+
+    /**
+     * Point the run at an existing agent, overriding its provider and model for
+     * the duration and returning what {@link #restoreNamedAgent} needs to put
+     * back. Unlike the benchmark twins this agent is not ours to keep — it takes
+     * no name short-circuit in {@link agents.ToolRegistry#getToolDefsForAgent}, which is
+     * the entire point, but it also means its configuration outlives the run.
+     */
+    private static AgentSetup bindNamedAgentInner(Request req, String providerName) {
+        var agent = Agent.findByName(req.agentName());
+        if (agent == null) {
+            throw new IllegalArgumentException("agent not found: " + req.agentName());
+        }
+        return applyBinding(agent, providerName, req.model());
+    }
+
+    /**
+     * Overwrite an agent's provider and model, returning what puts them back.
+     * Split from its transaction wrapper so the round-trip is testable without
+     * nesting a transaction inside the test's own — restoring a real agent's
+     * configuration is the destructive half of this feature and is worth
+     * covering directly.
+     *
+     * <p>Caller owns the transaction.
+     */
+    public static AgentSetup applyBinding(Agent agent, String provider, String model) {
+        var setup = new AgentSetup(agent.id, agent.name, agent.modelProvider, agent.modelId);
+        agent.modelProvider = provider;
+        agent.modelId = model;
+        agent.save();
+        return setup;
+    }
+
+    /** Put back what {@link #applyBinding} replaced. Caller owns the transaction. */
+    public static void applyRestore(Agent agent, AgentSetup setup) {
+        agent.modelProvider = setup.savedProvider();
+        agent.modelId = setup.savedModel();
+        agent.save();
+    }
+
+    /**
+     * Undo {@link #bindNamedAgentInner}. No-op for benchmark-twin runs, which own
+     * their agent outright. Swallows its own failure deliberately: this runs in a
+     * finally, and masking the run's real exception with a restore failure would
+     * hide why the run died.
+     */
+    private static void restoreNamedAgent(AgentSetup setup) {
+        if (setup == null || setup.namedAgent() == null) return;
+        try {
+            JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {
+                var agent = Agent.findByName(setup.namedAgent());
+                // Null when the agent was deleted mid-run — nothing to hand back.
+                if (agent != null) applyRestore(agent, setup);
+                return null;
+            });
+        } catch (Throwable t) {
+            Logger.error(t, "Failed to restore provider/model on agent %s — it is left on the "
+                    + "loadtest override (%s/%s)", setup.namedAgent(),
+                    setup.savedProvider(), setup.savedModel());
         }
     }
 
