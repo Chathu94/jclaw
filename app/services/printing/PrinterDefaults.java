@@ -142,6 +142,14 @@ public final class PrinterDefaults {
         set(KEY_PORT, d.port() > 0 ? String.valueOf(d.port()) : null);
         set(KEY_PROTOCOL, d.protocol());
 
+        // Sweep the three named columns this namespace used before options became
+        // a map. They are dead the moment an option row exists, and left in place
+        // they surface as unmanaged-config-key noise forever. Cheap enough to run
+        // on every save that a dedicated migration would be the heavier option.
+        for (var legacy : List.of("sides", "color", "media")) {
+            ConfigService.delete("printer.default." + legacy);
+        }
+
         // Drop every existing option row before writing the new set. Merging
         // instead would strand options from a previously-selected printer — a
         // tray setting from an office laser silently riding along to a home inkjet

@@ -42,6 +42,7 @@ const MANAGED_PREFIXES = [
   'onboarding.', // First-login guided tour flag — written by ApiOnboardingController, no UI surface
   'pricing.', // LiteLLM nightly price-refresh toggle (JCLAW-28 follow-up) — Settings (LLM Providers section)
   'subagent.', // JCLAW-266: subagent recursion caps — Settings (Subagents section)
+  'printer.', // JCLAW-911: default printer + its job options — Settings (Printers)
   'tasks.', // JCLAW-259: task retention TTL — Settings (Tasks section)
   'tailscale.', // Funnel enable/port (tailscale.funnel.*) — managed on the Channels page
   'jtokkit.', // Token-count safety multipliers — `jtokkit.safetyMultiplier.unmatched`
