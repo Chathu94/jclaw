@@ -86,11 +86,18 @@ public final class PrinterDiscovery {
                     continue;
                 }
                 for (var printer : future.resultNow()) {
-                    // Key on host:port so one physical printer — the Canon E3300
-                    // advertises on all four service types at once — renders as one
-                    // device. First wins, and PrintProtocol's order puts IPP first,
-                    // which is also the backend order we want to try.
-                    found.putIfAbsent(printer.host() + ":" + printer.port(), printer);
+                    // Key on HOST, not host:port. One physical printer advertises
+                    // several service types on different ports — the Canon E3300
+                    // answers on 631 (IPP), 9100 (RAW) and 515 (LPD) — and keying
+                    // by port made each a separate row, so the operator saw the
+                    // same device three times and had to know which to pick.
+                    //
+                    // Keep the most capable: PrintProtocol is declared in
+                    // capability order, so the lower ordinal wins. Nothing is lost
+                    // by discarding the others, because PrintDispatcher falls back
+                    // through RAW and LPD on its own using their standard ports.
+                    found.merge(printer.host(), printer,
+                            (a, b) -> a.protocol().ordinal() <= b.protocol().ordinal() ? a : b);
                 }
             }
         } catch (InterruptedException e) {

@@ -323,6 +323,41 @@ class PrintBackendTest extends UnitTest {
     }
 
     @Test
+    void oneDeviceIsOneRowAtItsMostCapableProtocol() {
+        // A printer advertises several service types on different ports — the
+        // Canon answers on 631, 9100 and 515 — and each browse returns it
+        // separately. Keying the merge by port showed the operator the same
+        // device three times, each row a different protocol, with no indication
+        // which to choose.
+        var ipp = new DiscoveredPrinter("Canon", "192.168.68.60", 631,
+                PrintProtocol.IPP, Map.of());
+        var raw = new DiscoveredPrinter("Canon", "192.168.68.60", 9100,
+                PrintProtocol.RAW, Map.of());
+        var lpd = new DiscoveredPrinter("Canon", "192.168.68.60", 515,
+                PrintProtocol.LPD, Map.of());
+
+        // PrintProtocol is declared in capability order, so the ordinal is the
+        // ranking — IPP is the only backend that can report a job id back.
+        assertTrue(ipp.protocol().ordinal() < raw.protocol().ordinal());
+        assertTrue(raw.protocol().ordinal() < lpd.protocol().ordinal());
+
+        // Whichever browse returns first, the surviving row must be the IPP one:
+        // the browses run in parallel, so arrival order is not deterministic and
+        // a first-wins merge would pick differently between scans.
+        for (var order : List.of(List.of(ipp, raw, lpd), List.of(lpd, raw, ipp),
+                List.of(raw, lpd, ipp))) {
+            var merged = new java.util.LinkedHashMap<String, DiscoveredPrinter>();
+            for (var p : order) {
+                merged.merge(p.host(), p,
+                        (a, b) -> a.protocol().ordinal() <= b.protocol().ordinal() ? a : b);
+            }
+            assertEquals(1, merged.size(), "one device is one row");
+            assertEquals(PrintProtocol.IPP, merged.values().iterator().next().protocol(),
+                    "arrival order " + order.stream().map(p -> p.protocol().name()).toList());
+        }
+    }
+
+    @Test
     void discoveryBindsToRealInterfacesNotLoopback() {
         var addresses = PrinterDiscovery.multicastAddresses();
 
