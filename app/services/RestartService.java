@@ -56,9 +56,15 @@ public final class RestartService {
      * @param command         argv handed to {@link ProcessBuilder}
      * @param mode            {@code "DEV"} or {@code "PROD"}
      * @param backendOnly     true when the Nuxt dev server is being spared
-     * @param rebuildExpected true when the restart will recompile sources
-     *                        and/or rebuild the SPA, so the UI can warn that
-     *                        this takes minutes rather than seconds
+     * @param rebuildExpected true when the restart <em>may</em> recompile
+     *                        sources and rebuild the SPA. Deliberately coarse:
+     *                        it answers "is this a source tree?", not "is
+     *                        anything stale?" — jclaw.sh gates both steps on
+     *                        staleness, so an unchanged checkout restarts about
+     *                        as fast as a packaged install. Its real job is
+     *                        sizing the UI's reconnect budget, where erring
+     *                        long costs nothing; the copy beside it is worded
+     *                        conditionally to match.
      */
     public record Plan(List<String> command, String mode, boolean backendOnly, boolean rebuildExpected) {}
 

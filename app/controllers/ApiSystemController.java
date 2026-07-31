@@ -33,9 +33,10 @@ public class ApiSystemController extends Controller {
      * @param mode               {@code "DEV"} or {@code "PROD"}
      * @param backendOnly        true when the Nuxt dev server will be spared
      *                           (dev mode); the browser keeps its connection
-     * @param rebuildExpected    true when the restart recompiles sources and/or
-     *                           rebuilds the SPA, so the UI can say "minutes"
-     *                           instead of "seconds"
+     * @param rebuildExpected    true when the restart may recompile sources and
+     *                           rebuild the SPA — a source tree rather than a
+     *                           packaged install. Coarse by design; see
+     *                           {@link RestartService.Plan}
      * @param runningTasks       task runs in RUNNING state, which a restart
      *                           interrupts
      * @param activeSubagentRuns subagent runs live in THIS JVM, which a restart

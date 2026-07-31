@@ -274,7 +274,7 @@ Before it acts, the panel shows what the reboot will interrupt: task runs and su
 The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. Two details worth knowing:
 
 - **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running — bouncing it would kill the very server that rendered the page you clicked from.
-- **In a source checkout** a production restart recompiles and may rebuild the SPA, so expect minutes rather than seconds. A packaged install boots straight from `precompiled/` and comes back in well under a minute. The panel tells you which case you're in before you confirm.
+- **In a source checkout** a production restart may recompile and rebuild the SPA. Both steps are gated on staleness, so this only costs minutes when sources actually changed — an unchanged checkout comes back about as fast as a packaged install (measured: ~25 seconds). The panel tells you which case you're in before you confirm, and errs long when sizing how long it waits for the backend to return.
 
 If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
 

@@ -67,8 +67,13 @@ function interruptionSummary(p: RestartPreflight): string {
 
 function durationHint(p: RestartPreflight): string {
   if (p.rebuildExpected) {
-    return 'This is a source checkout, so the restart recompiles and may rebuild the '
-      + 'SPA — expect several minutes, not seconds.'
+    // Deliberately conditional. jclaw.sh gates both the precompile and the SPA
+    // rebuild on staleness, so an unchanged source checkout restarts about as
+    // fast as a packaged install (measured: 24s). Stating "expect minutes"
+    // flatly was wrong in the common case.
+    return 'This is a source checkout — if sources changed, the restart recompiles and '
+      + 'rebuilds the SPA, which can take several minutes. If nothing changed, both '
+      + 'steps are skipped and it takes well under a minute.'
   }
   return p.backendOnly
     ? 'The backend will be unavailable for roughly 30–60 seconds. The dev server stays up.'
@@ -195,7 +200,7 @@ const statusLine = computed(() => {
                 — backend only; the Nuxt dev server keeps running
               </template>
               <template v-if="preflight.rebuildExpected">
-                — source checkout, so this recompiles and may take minutes
+                — source checkout, so this may recompile and take minutes
               </template>
             </template>
             <template v-else>

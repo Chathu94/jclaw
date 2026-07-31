@@ -99,12 +99,17 @@ describe('SettingsRestartPanel — availability', () => {
     expect(c.text()).toContain('backend only')
   })
 
-  it('warns that a source checkout takes minutes', async () => {
+  it('says a source checkout MAY take minutes, not that it will', async () => {
     preflight = available({ rebuildExpected: true })
     const c = await mountSuspended(Harness)
     await flushPromises()
 
-    expect(c.text()).toContain('minutes')
+    // rebuildExpected only means "this is a source tree" — jclaw.sh still gates
+    // the precompile and SPA rebuild on staleness, so an unchanged checkout
+    // came back in 24s against a panel that had promised "several minutes".
+    // Pin the conditional wording so it can't regress to a flat claim.
+    expect(c.text()).toContain('may recompile')
+    expect(c.text()).not.toContain('so this recompiles')
   })
 })
 
@@ -133,6 +138,23 @@ describe('SettingsRestartPanel — confirmation', () => {
     await flushPromises()
 
     expect(document.body.textContent ?? '').toContain('No task or subagent runs are currently active')
+  })
+
+  it('states the source-checkout duration conditionally, both ways', async () => {
+    preflight = available({ rebuildExpected: true })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    await c.find('button').trigger('click')
+    await flushPromises()
+
+    // The dialog carried the claim a live restart falsified. It has to name
+    // both outcomes now — the slow one AND the skipped-steps one — because the
+    // fast path is the common case on an unchanged tree.
+    const dialog = document.body.textContent ?? ''
+    expect(dialog).toContain('if sources changed')
+    expect(dialog).toContain('well under a minute')
+    expect(dialog).not.toContain('expect several minutes, not seconds')
   })
 
   it('issues no POST when the dialog is cancelled', async () => {
