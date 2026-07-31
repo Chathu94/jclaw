@@ -397,9 +397,12 @@ public class DefaultConfigJob extends Job<Void> {
         }
         // Non-destructive workspace fill-in: creates any missing workspace files
         // from the Java-literal defaults without touching existing content.
-        // The repo ships tracked seed files under workspace/main/, so a fresh
-        // checkout already has populated markdown; this call handles the case
-        // where a file has been deleted from disk post-boot.
+        // Since JCLAW-910 the repository ships NO workspace files — workspace/ is
+        // untracked because everything under it is operator state — so on a fresh
+        // install THIS call is what materialises main's markdown, including the
+        // default agent's shipped SOUL and IDENTITY. It also still covers a file
+        // deleted from disk post-boot. Idempotent by construction: writeFile only
+        // writes when the target is absent.
         AgentService.createWorkspace("main");
 
         // Bootstrap the skill-creator capability: the main agent must have

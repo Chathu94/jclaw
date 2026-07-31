@@ -204,15 +204,16 @@ __pycache__/
 # (radarr.json, etc.) live operator-local in workspace/main/skills/<skill>/
 # credentials/, which is gitignored via the workspace/* rule below.
 
-# Agent workspaces (only track the default main agent's core files)
-workspace/*
-!workspace/main/
-workspace/main/*
-!workspace/main/SOUL.md
-!workspace/main/IDENTITY.md
-!workspace/main/USER.md
-!workspace/main/BOOTSTRAP.md
-!workspace/main/AGENT.md
+# Agent workspaces — never tracked (JCLAW-910). Everything under here is operator
+# state: SOUL/IDENTITY/USER/BOOTSTRAP/AGENT are edited by the operator and written
+# to by agents at runtime. The default agent's SOUL and IDENTITY ship as templates
+# in WorkspaceFiles and are scaffolded at boot by DefaultConfigJob, so a fresh
+# install still gets them without the files living in git.
+#
+# main's five markdown files used to be tracked via `!` exceptions here. That made
+# every release sweep the operator's own edits into a public commit — USER.md in
+# particular carried their name, employer and location.
+workspace/
 
 # Test workspaces (ephemeral, created by integration tests)
 workspace-test/
