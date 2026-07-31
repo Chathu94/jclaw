@@ -1,0 +1,182 @@
+package services.printing;
+
+import services.EventLogger;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Picks a print backend and sends the job (JCLAW-911).
+ *
+ * <p>Order is IPP → raw socket → LPD, and it is an ordering by <em>how much the
+ * backend can tell us</em>, not by speed. IPP returns a job id and a status; raw
+ * socket returns nothing but a closed connection; LPD returns a single ack byte.
+ * Falling back therefore trades away the ability to answer "did it print?", which
+ * is why the fallbacks are last and why {@link Outcome#verified()} exists.
+ *
+ * <p>Each attempt's failure is collected rather than thrown, so a job that
+ * exhausts every backend reports all three reasons at once. One line saying
+ * "IPP refused, 9100 refused connection, LPD timed out" is diagnosable; three
+ * separate failures across three tool calls are not.
+ */
+public final class PrintDispatcher {
+
+    private static final String CATEGORY = "printer";
+    private static final int TIMEOUT_MS = 15_000;
+
+    /** Queue name used for LPD. Daemons overwhelmingly accept one of these two. */
+    private static final String LPD_QUEUE = "lp";
+
+    /**
+     * Job id → printer URI for jobs submitted this process, so {@code cancel(jobId)}
+     * works without the caller re-supplying the printer. Bounded and in-memory by
+     * design: it is a convenience index, not a record of truth, and a restart
+     * legitimately forgets it — the printer, not JClaw, owns job state.
+     */
+    private static final int RECENT_JOBS_MAX = 64;
+    private static final Map<Integer, String> RECENT_JOBS =
+            Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, false) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Integer, String> eldest) {
+                    return size() > RECENT_JOBS_MAX;
+                }
+            });
+
+    /**
+     * What happened to a print request.
+     *
+     * @param protocol the backend that accepted the job
+     * @param jobId    printer-assigned job id — IPP only; null for the blind backends
+     * @param state    printer-reported job state, or null when the backend cannot report
+     * @param verified whether the printer actually confirmed acceptance. False for
+     *                 raw socket and LPD, where a successful write proves only that
+     *                 the bytes left this machine
+     * @param detail   human-readable summary for the model and the operator
+     */
+    public record Outcome(PrintProtocol protocol, Integer jobId, String state,
+                          boolean verified, String detail) {}
+
+    private PrintDispatcher() {}
+
+    /**
+     * Send {@code document} to {@code printer}, trying each backend the printer can
+     * plausibly speak until one accepts.
+     *
+     * @throws IOException when every backend failed; the message names each failure
+     */
+    public static Outcome print(DiscoveredPrinter printer, String jobName, String user,
+                                String documentFormat, byte[] document) throws IOException {
+        var failures = new ArrayList<String>();
+
+        for (var protocol : backendOrder(printer)) {
+            try {
+                var outcome = attempt(protocol, printer, jobName, user, documentFormat, document);
+                if (outcome != null) {
+                    if (outcome.jobId() != null) {
+                        RECENT_JOBS.put(outcome.jobId(), printer.ippUri());
+                    }
+                    EventLogger.info(CATEGORY, "Printed to %s via %s: %s"
+                            .formatted(printer.name(), protocol, outcome.detail()));
+                    return outcome;
+                }
+                failures.add(protocol + ": printer rejected the job");
+            } catch (IOException e) {
+                failures.add(protocol + ": " + e.getMessage());
+            }
+        }
+        throw new IOException("No print backend accepted the job — " + String.join("; ", failures));
+    }
+
+    /**
+     * Backends to try, most-informative first.
+     *
+     * <p>The printer's advertised protocol goes first when it is known: a device
+     * that announced itself over {@code _pdl-datastream} is telling us it wants
+     * port 9100, and starting with IPP there just buys a guaranteed timeout before
+     * the fallback. Everything else follows in capability order.
+     */
+    static List<PrintProtocol> backendOrder(DiscoveredPrinter printer) {
+        var order = new ArrayList<PrintProtocol>();
+        order.add(printer.protocol());
+        for (var p : List.of(PrintProtocol.IPP, PrintProtocol.RAW, PrintProtocol.LPD)) {
+            if (!order.contains(p)) {
+                order.add(p);
+            }
+        }
+        return order;
+    }
+
+    /** One backend attempt. Returns null when the backend ran but the printer refused. */
+    private static Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
+                                   String jobName, String user, String documentFormat,
+                                   byte[] document) throws IOException {
+        switch (protocol) {
+            case IPP, IPPS -> {
+                var result = IppClient.print(printer.ippUri(), jobName, user, documentFormat, document);
+                if (!result.accepted()) {
+                    return null;
+                }
+                return new Outcome(protocol, result.jobId(), result.state(), true,
+                        "accepted as job " + result.jobId() + " (" + result.message() + ")");
+            }
+            case RAW -> {
+                var port = printer.protocol() == PrintProtocol.RAW
+                        ? printer.port() : PrintProtocol.RAW.defaultPort();
+                RawSocketClient.print(printer.host(), port, document, TIMEOUT_MS);
+                return new Outcome(protocol, null, null, false,
+                        "streamed %d bytes to %s:%d — this backend returns no confirmation, "
+                                .formatted(document.length, printer.host(), port)
+                                + "so delivery is confirmed but printing is not");
+            }
+            case LPD -> {
+                var port = printer.protocol() == PrintProtocol.LPD
+                        ? printer.port() : PrintProtocol.LPD.defaultPort();
+                LpdClient.print(printer.host(), port, LPD_QUEUE, jobName, user, document, TIMEOUT_MS);
+                return new Outcome(protocol, null, null, false,
+                        "queued on %s:%d via LPD queue '%s' — the daemon acknowledged receipt "
+                                .formatted(printer.host(), port, LPD_QUEUE)
+                                + "but reports nothing about printing");
+            }
+        }
+        return null;
+    }
+
+    /** Printer state, plus the job's own state when {@code jobId} is supplied. */
+    public static String status(DiscoveredPrinter printer, Integer jobId) throws IOException {
+        var printerState = IppClient.printerState(printer.ippUri());
+        if (jobId == null) {
+            return "printer " + printer.name() + ": " + printerState;
+        }
+        return "printer " + printer.name() + ": " + printerState
+                + "; job " + jobId + ": " + IppClient.jobState(printer.ippUri(), jobId);
+    }
+
+    /**
+     * Cancel a job. {@code printerUri} may be null for a job submitted by this
+     * process, in which case it is recovered from the recent-jobs index.
+     *
+     * @throws IOException if the job is unknown and no printer was supplied
+     */
+    public static String cancel(int jobId, String printerUri, String user) throws IOException {
+        var uri = printerUri != null && !printerUri.isBlank() ? printerUri : RECENT_JOBS.get(jobId);
+        if (uri == null) {
+            throw new IOException("Job " + jobId + " was not submitted by this instance — "
+                    + "supply the printer host so the cancel can be addressed.");
+        }
+        return IppClient.cancel(uri, jobId, user);
+    }
+
+    /** Test seam: drop the recent-jobs index so tests don't leak state into each other. */
+    static void clearRecentJobsForTest() {
+        RECENT_JOBS.clear();
+    }
+
+    /** Test seam: register a job→printer mapping without performing a print. */
+    static void rememberJobForTest(int jobId, String printerUri) {
+        RECENT_JOBS.put(jobId, printerUri);
+    }
+}

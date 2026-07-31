@@ -72,6 +72,28 @@ A few tools require extra setup (an API key, a workspace path, a shell allowlist
 Tools are a *catalog* and binding tools to agents is an *agent* concern. Keeping them on separate pages means the catalog stays clean as your roster of agents grows.
 :::
 
+### Printing
+
+The `printer` tool discovers printers on the local network and sends jobs to them, with no CUPS, no `lp`, and no OS printing subsystem — it is JVM-native end to end, so it behaves identically on macOS, Linux and Windows, and works inside a container that has no print stack at all.
+
+Four actions: `discover` (mDNS/Bonjour scan), `print` (a workspace file by path, or literal text), `status`, and `cancel`.
+
+Three backends are tried in order, and the order is about **how much each can tell you**, not speed:
+
+| Backend | Port | Reports back? |
+|---|---|---|
+| IPP | 631 | Yes — job id and printer-reported state |
+| Raw socket (JetDirect) | 9100 | No — a successful write only proves the bytes left this machine |
+| LPD (RFC 1179) | 515 | Barely — a one-byte acknowledgement of receipt |
+
+That difference is surfaced, not hidden. When a job goes out over raw socket or LPD, the tool's reply says explicitly that the backend cannot confirm the document printed. An agent reporting "printed successfully" off a blind write would be stating something it has no way to know.
+
+:::caution Printing is physical and irreversible
+Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target — `print` requires a printer you named — and it is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
+:::
+
+If `discover` returns nothing, that is often the network rather than the printer: mDNS is link-local, so it is routinely blocked on VPNs and in containers without a multicast route. Pass the printer's address as `host` to bypass discovery.
+
 ---
 
 ## MCP Servers

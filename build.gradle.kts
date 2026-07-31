@@ -255,6 +255,19 @@ dependencies {
     // test class references it), so its presence in the dist is inert.
     implementation("com.tngtech.archunit:archunit:1.4.2")
 
+    // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
+    // native deps — which is the whole point of the printer tool: it works on a
+    // box with no CUPS and no OS print subsystem. 3.6.3 rather than the 3.5.9 the
+    // ticket named; 3.5.9 is two minors stale and Renovate would bump it on sight.
+    implementation("org.jmdns:jmdns:3.6.3")
+
+    // JCLAW-911: HP JIPP — pure-Java IPP codec for the primary print backend
+    // (RFC 8010/8011 over HTTP to port 631). MIT. JIPP is written in Kotlin and
+    // asks for kotlin-stdlib 1.9.10, but readability4j already puts Kotlin on the
+    // classpath, so this resolves UP to the existing 2.2.21 rather than adding a
+    // runtime — verified via `gradlew dependencies --configuration runtimeClasspath`.
+    implementation("com.hp.jipp:jipp-core:0.7.18")
+
     // jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.22.2")

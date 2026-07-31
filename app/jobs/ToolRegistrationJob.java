@@ -23,6 +23,7 @@ import tools.JClawApiTool;
 import tools.LoadTestSleepTool;
 import tools.MessageTool;
 import tools.PlaywrightBrowserTool;
+import tools.PrinterTool;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
@@ -73,6 +74,11 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new AppInstallTool()); // JCLAW-768: sandbox-safe hosted-app stage/validate/install
         toolList.add(new WebFetchTool());
         toolList.add(new WebSearchTool());
+        // JCLAW-911: printer — mDNS discovery + JVM-native printing (IPP, raw
+        // socket, LPD). Registered unconditionally so it appears on the Tools
+        // page; per-agent disable still applies, and printing is physical and
+        // irreversible, so most agents should leave it off.
+        toolList.add(new PrinterTool());
         // JCLAW-172: PlaywrightBrowserTool and ShellExecTool used to be gated
         // on global `playwright.enabled` / `shell.enabled` config keys, but
         // that duplicated the per-agent enable that already lives on the

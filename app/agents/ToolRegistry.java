@@ -667,6 +667,11 @@ public class ToolRegistry {
     /** JCLAW-876: {@code generate_audio} is default-OFF for every agent (opt-in) — speaking a
      *  reply costs seconds of synthesis and can trigger a sidecar model load. */
     private static final String GENERATE_AUDIO_TOOL = "generate_audio";
+    /** JCLAW-911: {@code printer} is default-OFF for every agent (opt-in). The others on this
+     *  list are gated on cost or latency; this one is gated on being irreversible in the
+     *  physical world — paper leaves a device in someone's room and no undo exists. If
+     *  spending a few cents on an image warrants opt-in, so does that. */
+    private static final String PRINTER_TOOL = "printer";
 
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
@@ -704,6 +709,10 @@ public class ToolRegistry {
         // load) and changes the shape of an answer, so an agent opts in to it.
         if (!Boolean.TRUE.equals(explicitState.get(GENERATE_AUDIO_TOOL))) {
             disabled.add(GENERATE_AUDIO_TOOL);
+        }
+        // JCLAW-911: printing is physical and cannot be undone, so an agent opts in.
+        if (!Boolean.TRUE.equals(explicitState.get(PRINTER_TOOL))) {
+            disabled.add(PRINTER_TOOL);
         }
         if (!agent.isMain()) {
             addMcpDefaultDisabled(disabled, explicitState);
