@@ -99,17 +99,16 @@ describe('SettingsRestartPanel — availability', () => {
     expect(c.text()).toContain('backend only')
   })
 
-  it('says a source checkout MAY take minutes, not that it will', async () => {
+  it('flags a source checkout as maybe-recompiling, with no duration claim', async () => {
     preflight = available({ rebuildExpected: true })
     const c = await mountSuspended(Harness)
     await flushPromises()
 
     // rebuildExpected only means "this is a source tree" — jclaw.sh still gates
-    // the precompile and SPA rebuild on staleness, so an unchanged checkout
-    // came back in 24s against a panel that had promised "several minutes".
-    // Pin the conditional wording so it can't regress to a flat claim.
+    // the precompile and SPA rebuild on staleness. The one-line summary states
+    // the possibility and leaves duration to the dialog.
     expect(c.text()).toContain('may recompile')
-    expect(c.text()).not.toContain('so this recompiles')
+    expect(c.text()).not.toMatch(/minutes|seconds/)
   })
 })
 
@@ -140,7 +139,7 @@ describe('SettingsRestartPanel — confirmation', () => {
     expect(document.body.textContent ?? '').toContain('No task or subagent runs are currently active')
   })
 
-  it('states the source-checkout duration conditionally, both ways', async () => {
+  it('names what makes a source-checkout restart slow without inventing a duration', async () => {
     preflight = available({ rebuildExpected: true })
     const c = await mountSuspended(Harness)
     await flushPromises()
@@ -148,13 +147,16 @@ describe('SettingsRestartPanel — confirmation', () => {
     await c.find('button').trigger('click')
     await flushPromises()
 
-    // The dialog carried the claim a live restart falsified. It has to name
-    // both outcomes now — the slow one AND the skipped-steps one — because the
-    // fast path is the common case on an unchanged tree.
     const dialog = document.body.textContent ?? ''
-    expect(dialog).toContain('if sources changed')
+    expect(dialog).toContain('may recompile Java sources')
+    expect(dialog).toContain('skips both when nothing changed')
     expect(dialog).toContain('well under a minute')
-    expect(dialog).not.toContain('expect several minutes, not seconds')
+
+    // The real guard. Two prior versions of this copy asserted a slow-case
+    // duration nobody had measured — "expect several minutes, not seconds",
+    // then "can take several minutes" — and timed restarts came in at 48s and
+    // 58s. Fail if a confident number reappears without one.
+    expect(dialog).not.toMatch(/several minutes|take minutes|minutes, not seconds/)
   })
 
   it('issues no POST when the dialog is cancelled', async () => {

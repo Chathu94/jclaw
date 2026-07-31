@@ -67,13 +67,15 @@ function interruptionSummary(p: RestartPreflight): string {
 
 function durationHint(p: RestartPreflight): string {
   if (p.rebuildExpected) {
-    // Deliberately conditional. jclaw.sh gates both the precompile and the SPA
-    // rebuild on staleness, so an unchanged source checkout restarts about as
-    // fast as a packaged install (measured: 24s). Stating "expect minutes"
-    // flatly was wrong in the common case.
-    return 'This is a source checkout — if sources changed, the restart recompiles and '
-      + 'rebuilds the SPA, which can take several minutes. If nothing changed, both '
-      + 'steps are skipped and it takes well under a minute.'
+    // Names the driver rather than asserting a duration, because the slow case
+    // has never been measured. Two timed restarts on a developer clone: 48s
+    // with both steps skipped, 58s with a full SPA rebuild — so the SPA is
+    // worth ~10s, not minutes. Both logged compileJava UP-TO-DATE, leaving a
+    // cold Java recompile the one step that could plausibly take much longer
+    // and the one step still unmeasured. Don't put a number here until it is.
+    return 'This is a source checkout — the restart may recompile Java sources and '
+      + 'rebuild the SPA, and skips both when nothing changed. Usually well under a '
+      + 'minute; a cold Java recompile takes longer.'
   }
   return p.backendOnly
     ? 'The backend will be unavailable for roughly 30–60 seconds. The dev server stays up.'
@@ -200,7 +202,7 @@ const statusLine = computed(() => {
                 — backend only; the Nuxt dev server keeps running
               </template>
               <template v-if="preflight.rebuildExpected">
-                — source checkout, so this may recompile and take minutes
+                — source checkout, so this may recompile first
               </template>
             </template>
             <template v-else>
