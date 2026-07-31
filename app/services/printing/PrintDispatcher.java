@@ -60,10 +60,21 @@ public final class PrintDispatcher {
      *                 express them. Null when nothing was lost. Only raw socket and
      *                 LPD produce this — both take an undifferentiated byte stream,
      *                 so a duplex request that falls back to them prints one-sided
+     * @param skipped  why each earlier backend did not take the job, in the order
+     *                 they were tried. Empty when the first choice worked. Reported
+     *                 even on success: a job that silently "worked" via the third
+     *                 backend hides that the first two are broken, and the operator
+     *                 only finds out when the fallback stops working too
      * @param detail   human-readable summary for the model and the operator
      */
     public record Outcome(PrintProtocol protocol, Integer jobId, String state,
-                          boolean verified, String droppedAttributes, String detail) {}
+                          boolean verified, String droppedAttributes,
+                          List<String> skipped, String detail) {
+
+        public Outcome {
+            skipped = skipped == null ? List.of() : List.copyOf(skipped);
+        }
+    }
 
     private PrintDispatcher() {}
 
@@ -84,6 +95,10 @@ public final class PrintDispatcher {
                 var outcome = attempt(protocol, printer, jobName, user, documentFormat,
                         document, requested);
                 if (outcome != null) {
+                    // Carry why the earlier backends declined, so a fallback
+                    // success does not read as a clean first-choice success.
+                    outcome = new Outcome(outcome.protocol(), outcome.jobId(), outcome.state(),
+                            outcome.verified(), outcome.droppedAttributes(), failures, outcome.detail());
                     if (outcome.jobId() != null) {
                         RECENT_JOBS.put(outcome.jobId(), printer.ippUri());
                     }
@@ -132,10 +147,16 @@ public final class PrintDispatcher {
                 var result = IppClient.print(printer.ippUri(), jobName, user,
                         documentFormat, document, job);
                 if (!result.accepted()) {
-                    return null;
+                    // Carry the IPP status name, which is the whole point of IPP
+                    // being tried first. "client-error-document-format-not-supported"
+                    // tells an operator to convert the file;
+                    // "printer-stopped" tells them to go look at the device. Collapsing
+                    // both to "rejected" throws away the only actionable part.
+                    throw new IOException("printer rejected the job — " + result.message()
+                            + " (sent as " + (documentFormat == null ? "no format" : documentFormat) + ")");
                 }
                 var applied = job.isEmpty() ? "" : " with " + job.describe();
-                return new Outcome(protocol, result.jobId(), result.state(), true, null,
+                return new Outcome(protocol, result.jobId(), result.state(), true, null, List.of(),
                         "accepted as job " + result.jobId() + applied
                                 + " (" + result.message() + ")");
             }
@@ -143,7 +164,7 @@ public final class PrintDispatcher {
                 var port = printer.protocol() == PrintProtocol.RAW
                         ? printer.port() : PrintProtocol.RAW.defaultPort();
                 RawSocketClient.print(printer.host(), port, document, TIMEOUT_MS);
-                return new Outcome(protocol, null, null, false, dropped,
+                return new Outcome(protocol, null, null, false, dropped, List.of(),
                         "streamed %d bytes to %s:%d — this backend returns no confirmation, "
                                 .formatted(document.length, printer.host(), port)
                                 + "so delivery is confirmed but printing is not");
@@ -152,7 +173,7 @@ public final class PrintDispatcher {
                 var port = printer.protocol() == PrintProtocol.LPD
                         ? printer.port() : PrintProtocol.LPD.defaultPort();
                 LpdClient.print(printer.host(), port, LPD_QUEUE, jobName, user, document, TIMEOUT_MS);
-                return new Outcome(protocol, null, null, false, dropped,
+                return new Outcome(protocol, null, null, false, dropped, List.of(),
                         "queued on %s:%d via LPD queue '%s' — the daemon acknowledged receipt "
                                 .formatted(printer.host(), port, LPD_QUEUE)
                                 + "but reports nothing about printing");

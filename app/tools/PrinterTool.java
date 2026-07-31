@@ -274,6 +274,14 @@ public class PrinterTool implements ToolRegistry.Tool {
                 : "Sent via " + outcome.protocol() + " — " + outcome.detail()
                         + ". NOTE: this backend cannot confirm the document printed; "
                         + "check the printer if confirmation matters.");
+        if (!outcome.skipped().isEmpty()) {
+            // The job worked, but not the way it was asked to. Without this the
+            // operator sees a clean success and never learns their preferred
+            // backend is broken — until the fallback breaks too and printing stops
+            // with no history of the first failure.
+            verdict.append(" (Tried first, without success: ")
+                    .append(String.join("; ", outcome.skipped())).append(".)");
+        }
         if (outcome.droppedAttributes() != null) {
             // The job printed, but not the way it was asked for. Silence here means
             // the operator finds out from the paper.
