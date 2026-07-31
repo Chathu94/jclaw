@@ -107,17 +107,50 @@ public final class EvalCapture {
         var main = Agent.findByName(Agent.MAIN_AGENT_NAME);
         if (main == null) return null;
 
-        var agent = new Agent();
-        agent.name = Agent.EVALTEST_AGENT_NAME;
-        agent.modelProvider = main.modelProvider;
-        agent.modelId = main.modelId;
-        agent.enabled = true;
-        agent.description = "Eval sweeps (JCLAW-883). Tools are opt-in — grant only what a suite needs.";
-        agent.save();
+        // JCLAW-906: the agent must be COMMITTED before it is returned, not merely
+        // saved into the caller's transaction. calibrate() writes the tool grants on
+        // its own committed transaction (see commitInFreshTx), and that thread cannot
+        // see an uncommitted row — the AgentToolConfig insert then violates its
+        // foreign key, the whole request rolls back, and the agent this method
+        // claimed to provision does not exist. Which made "auto-provisioned on first
+        // capture" false in every doc that promised it, and made the failure
+        // self-perpetuating: every retry took the same path.
+        //
+        // Read main's fields on this thread; it belongs to the caller's persistence
+        // context and must not be touched from the provisioning thread.
+        return provision(main.modelProvider, main.modelId);
+    }
 
-        EventLogger.info(EVENT_CATEGORY, "Provisioned %s with no tools enabled; provider/model copied from '%s'"
-                .formatted(Agent.EVALTEST_AGENT_NAME, Agent.MAIN_AGENT_NAME));
-        return agent;
+    /**
+     * Create and COMMIT the eval agent with the given provider and model, returning a
+     * managed instance. Split from {@link #ensureEvalAgent} so the commit behaviour is
+     * testable without a {@code main} agent: several test classes create one under
+     * that exact name and this suite runs classes concurrently, so a test that seeded
+     * or deleted {@code main} would be racing them.
+     *
+     * <p>Public for the same reason {@link #calibrate} is — Play's tests live in the
+     * default package.
+     */
+    public static Agent provision(String provider, String modelId) {
+        commitInFreshTx("provision", () -> {
+            // Re-check inside the committed transaction: a second concurrent first
+            // capture would otherwise have seen null too and inserted a duplicate.
+            if (Agent.findByName(Agent.EVALTEST_AGENT_NAME) != null) return;
+            var agent = new Agent();
+            agent.name = Agent.EVALTEST_AGENT_NAME;
+            agent.modelProvider = provider;
+            agent.modelId = modelId;
+            agent.enabled = true;
+            agent.description = "Eval sweeps (JCLAW-883). Tools are opt-in — grant only what a suite needs.";
+            agent.save();
+        });
+
+        EventLogger.info(EVENT_CATEGORY, "Provisioned %s with no tools enabled, on %s/%s"
+                .formatted(Agent.EVALTEST_AGENT_NAME, provider, modelId));
+        // Re-read in the caller's context. The row was written by another thread's
+        // persistence context, so returning that instance would hand back a detached
+        // entity from a closed EntityManager.
+        return Agent.findByName(Agent.EVALTEST_AGENT_NAME);
     }
 
     /**
@@ -170,7 +203,7 @@ public final class EvalCapture {
     public static void calibrate(EvalSuite suite, Agent agent) {
         if (agent == null || !agent.isEvalTest()) return;
 
-        commitInFreshTx(() -> {
+        commitInFreshTx("calibrate", () -> {
             AgentToolConfig.delete("agent = ?1", agent);
             for (var tool : suite.requiredTools()) {
                 var config = new AgentToolConfig();
@@ -258,9 +291,9 @@ public final class EvalCapture {
      * {@code JPA.withTransaction} branch and commits. Same shape as the
      * {@code commitInFreshTx} helper the tests use for HTTP-visible seeding.
      */
-    private static void commitInFreshTx(Runnable block) {
+    private static void commitInFreshTx(String what, Runnable block) {
         var error = new AtomicReference<Throwable>();
-        var thread = Thread.ofPlatform().name("eval-calibrate").start(() -> {
+        var thread = Thread.ofPlatform().name("eval-" + what).start(() -> {
             try {
                 Tx.run(block);
             } catch (Throwable t) {
@@ -271,10 +304,13 @@ public final class EvalCapture {
             thread.join();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while calibrating the eval agent", e);
+            throw new IllegalStateException("Interrupted while trying to %s the eval agent".formatted(what), e);
         }
         if (error.get() != null) {
-            throw new IllegalStateException("Could not calibrate the eval agent", error.get());
+            // Name which step failed: provisioning and calibration fail on the same
+            // seam for related reasons, and "could not calibrate" sent the first
+            // diagnosis of JCLAW-906 to the wrong half of the code.
+            throw new IllegalStateException("Could not %s the eval agent".formatted(what), error.get());
         }
     }
 

@@ -185,6 +185,37 @@ class EvalCalibrationTest extends UnitTest {
     }
 
     @Test
+    void aProvisionedAgentIsVisibleToTheTransactionThatCalibratesIt() {
+        // JCLAW-906: ensureEvalAgent saved the new agent into the CALLER's transaction,
+        // so calibrate's committed transaction could not see it and the AgentToolConfig
+        // insert violated its foreign key. That rolled back the agent too, so the
+        // failure was self-perpetuating — every retry took the same path, and
+        // "auto-provisioned on first capture" was false in every doc promising it.
+        //
+        // Driven through provision() rather than ensureEvalAgent() on purpose: the
+        // latter needs a 'main' agent to copy from, and several test classes create one
+        // under that exact name while this suite runs classes concurrently.
+        var agent = EvalCapture.provision("openrouter", "gpt-4.1");
+        try {
+            assertNotNull(agent, "provisioning must return a managed instance");
+
+            // The property that was actually missing. Present-in-this-transaction was
+            // always true; visible-from-another was not, and that is what calibrate
+            // and every sweep thread need.
+            var visibleElsewhere = commitInFreshTx(
+                    () -> Agent.findByName(Agent.EVALTEST_AGENT_NAME) != null);
+            assertTrue(visibleElsewhere,
+                    "a provisioned agent must be committed, not merely saved");
+
+            // And the very next thing capture does must now succeed.
+            calibrate(suiteNeeding("datetime"), agent.id);
+            assertEquals(List.of("datetime"), grantedTo(agent.id));
+        } finally {
+            drop(agent.id);
+        }
+    }
+
+    @Test
     void calibrationClearsTasksLeftByAPreviousSweep() {
         // JCLAW-907: calibration reset the tool surface but not what the tools DID, so
         // consecutive sweeps of a suite whose cases create tasks each started from a
