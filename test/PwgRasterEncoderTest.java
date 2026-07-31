@@ -104,6 +104,17 @@ class PwgRasterEncoderTest extends UnitTest {
         assertEquals(16 * 3, header.getInt(392), "cupsBytesPerLine");
         assertEquals(19, header.getInt(400), "cupsColorSpace = sRGB");
         assertEquals(3, header.getInt(420), "cupsNumColors");
+
+        // cupsInteger[] starts at 452. The two transforms must be 1, not 0 — a
+        // zero transform is a scale-by-zero, and the Canon answered such a job
+        // with successful-ok then stopped without printing. A 53 KB raster is not
+        // a full spool; the printer had derived nonsense geometry.
+        assertEquals(1, header.getInt(452 + 4), "cupsInteger[1] CrossFeedTransform must be 1");
+        assertEquals(1, header.getInt(452 + 8), "cupsInteger[2] FeedTransform must be 1");
+        assertEquals(16, header.getInt(452 + 20), "cupsInteger[5] ImageBoxRight = width");
+        assertEquals(9, header.getInt(452 + 24), "cupsInteger[6] ImageBoxBottom = height");
+        assertEquals(0xFFFFFF, header.getInt(452 + 28),
+                "cupsInteger[7] AlternatePrimary must be white, or blank area may print black");
     }
 
     @Test

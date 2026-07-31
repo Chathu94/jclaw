@@ -149,10 +149,28 @@ public final class PwgRasterEncoder {
         f32(out, pointsWide); f32(out, pointsHigh); // cupsPageSize
         f32(out, 0); f32(out, 0); f32(out, pointsWide); f32(out, pointsHigh); // cupsImagingBBox
 
-        // cupsInteger[16]. Index 0 is PwgRasterDocumentPage (page number, 1-based)
-        // and index 2 is total pages; both are advisory and left at zero, which
-        // conforming consumers accept.
-        for (int i = 0; i < 16; i++) {
+        // cupsInteger[16] — PWG 5102.4 gives these slots specific meanings, and
+        // two of them are NOT optional.
+        //
+        // CrossFeedTransform and FeedTransform (1 and 2) must be 1 or -1. Leaving
+        // them at zero is a scale-by-zero: the Canon accepted such a job with
+        // successful-ok, then stopped with printer-state-reasons=spool-area-full
+        // and printed nothing. The raster was 53 KB, so the spool was never
+        // actually full — the printer had derived nonsense geometry from a zero
+        // transform and reported the nearest error it had. CUPS's own rastertopwg
+        // writes 1 for both.
+        u32(out, 0);                        // [0]  reserved
+        u32(out, 1);                        // [1]  CrossFeedTransform
+        u32(out, 1);                        // [2]  FeedTransform
+        u32(out, 0);                        // [3]  ImageBoxLeft
+        u32(out, 0);                        // [4]  ImageBoxTop
+        u32(out, width);                    // [5]  ImageBoxRight
+        u32(out, height);                   // [6]  ImageBoxBottom
+        // AlternatePrimary is the colour used where the page is "blank"; white,
+        // as 0xFFFFFF, or the printer may treat unwritten area as black.
+        u32(out, 0xFFFFFF);                 // [7]  AlternatePrimary
+        u32(out, 0);                        // [8]  PrintQuality (0 = printer default)
+        for (int i = 9; i < 16; i++) {      // [9..15] reserved / vendor
             u32(out, 0);
         }
         for (int i = 0; i < 16; i++) {                // cupsReal[16]
