@@ -88,8 +88,25 @@ const manualPort = ref('')
 const manualProtocol = ref('')
 
 watch(saved, (s) => {
-  draft.value = { ...(s?.options ?? {}) }
   loadOptions(s?.host, s?.port, s?.protocol)
+}, { immediate: true })
+
+/**
+ * Rebuild the draft whenever either the saved values or the printer's option
+ * list changes, seeding every offered option with '' when it has no saved value.
+ *
+ * The empty string matters: it is the value of the "Printer default" <option>.
+ * Leaving a key undefined matches no option at all — not even the placeholder —
+ * so the browser renders a blank select, which reads as the control being broken
+ * rather than as "not set". Both sources are watched because they arrive
+ * independently: options come from the printer, values from the Config DB.
+ */
+watch([saved, options], ([s, o]) => {
+  const next: Record<string, string> = {}
+  for (const opt of o?.options ?? []) {
+    next[opt.name] = s?.options?.[opt.name] ?? ''
+  }
+  draft.value = next
 }, { immediate: true })
 
 /** Only the options this printer actually offers, dropping any stale leftovers. */
