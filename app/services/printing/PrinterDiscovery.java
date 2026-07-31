@@ -6,12 +6,20 @@ import javax.jmdns.JmDNS;
 import javax.jmdns.ServiceInfo;
 
 import java.io.IOException;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Finds printers on the local link via mDNS/DNS-SD (JCLAW-911).
@@ -52,27 +60,97 @@ public final class PrinterDiscovery {
      * is what the tool surfaces; a stack trace would suggest a bug that isn't one.
      */
     public static List<DiscoveredPrinter> discover(Duration timeout) {
-        var found = new LinkedHashMap<String, DiscoveredPrinter>();
-        try (var jmdns = JmDNS.create(InetAddress.getLocalHost())) {
+        var addresses = multicastAddresses();
+        if (addresses.isEmpty()) {
+            EventLogger.warn(CATEGORY, "No multicast-capable network interface — mDNS discovery skipped");
+            return List.of();
+        }
+
+        // One browse per (interface, service type). JmDNS has no multi-type list(),
+        // and calling list() concurrently on a shared instance is not a contract it
+        // documents — so each browse gets its own short-lived instance and they run
+        // in parallel. That keeps the wall clock at roughly one timeout instead of
+        // interfaces × types × timeout.
+        var tasks = new ArrayList<Callable<List<DiscoveredPrinter>>>();
+        for (var address : addresses) {
             for (var protocol : PrintProtocol.values()) {
-                // list() blocks for the given window and returns what responded. It
-                // is called per service type because JmDNS has no multi-type browse.
-                var services = jmdns.list(protocol.serviceType(), timeout.toMillis());
-                for (var info : services) {
-                    var printer = toPrinter(info, protocol);
-                    if (printer != null) {
-                        // Key on host:port so one physical printer advertising both
-                        // _ipp and _ipps doesn't render as two devices. First wins,
-                        // and PrintProtocol's declaration order puts IPP first.
-                        found.putIfAbsent(printer.host() + ":" + printer.port(), printer);
-                    }
+                tasks.add(() -> browse(address, protocol, timeout));
+            }
+        }
+
+        var found = new LinkedHashMap<String, DiscoveredPrinter>();
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            var results = pool.invokeAll(tasks, timeout.toSeconds() + 10, TimeUnit.SECONDS);
+            for (var future : results) {
+                if (future.state() != Future.State.SUCCESS) {
+                    continue;
+                }
+                for (var printer : future.resultNow()) {
+                    // Key on host:port so one physical printer — the Canon E3300
+                    // advertises on all four service types at once — renders as one
+                    // device. First wins, and PrintProtocol's order puts IPP first,
+                    // which is also the backend order we want to try.
+                    found.putIfAbsent(printer.host() + ":" + printer.port(), printer);
                 }
             }
-        } catch (IOException e) {
-            EventLogger.warn(CATEGORY, "mDNS discovery unavailable: " + e.getMessage());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             return List.of();
         }
         return List.copyOf(found.values());
+    }
+
+    /** Browse one service type on one interface. Never throws; a dead interface is empty. */
+    private static List<DiscoveredPrinter> browse(InetAddress address, PrintProtocol protocol,
+                                                  Duration timeout) {
+        var hits = new ArrayList<DiscoveredPrinter>();
+        try (var jmdns = JmDNS.create(address)) {
+            for (var info : jmdns.list(protocol.serviceType(), timeout.toMillis())) {
+                var printer = toPrinter(info, protocol);
+                if (printer != null) {
+                    hits.add(printer);
+                }
+            }
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "mDNS browse failed on %s for %s: %s"
+                    .formatted(address.getHostAddress(), protocol.serviceType(), e.getMessage()));
+        }
+        return hits;
+    }
+
+    /**
+     * Every IPv4 address that could actually carry mDNS.
+     *
+     * <p>Emphatically not {@link InetAddress#getLocalHost()}, which is what this
+     * used to do. That resolves the machine's hostname, and on macOS the hostname
+     * commonly maps to 127.0.0.1 — so JmDNS bound to loopback and heard nothing,
+     * while the OS's own {@code dns-sd} found the printer on every service type.
+     * Discovery silently returned empty on a network with a printer sitting on it.
+     *
+     * <p>Enumerating also handles the multi-homed case honestly: a host can have
+     * several usable interfaces (this one has Wi-Fi plus a virtual bridge) and the
+     * printer is only reachable from one of them. Browsing all of them costs a
+     * socket each and removes the guess.
+     */
+    public static List<InetAddress> multicastAddresses() {
+        var addresses = new ArrayList<InetAddress>();
+        try {
+            for (var ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                if (!ni.isUp() || ni.isLoopback() || !ni.supportsMulticast()) {
+                    continue;
+                }
+                for (var ia : ni.getInterfaceAddresses()) {
+                    // IPv4 only: JmDNS binds one family per instance, and printers
+                    // that publish AAAA also publish A.
+                    if (ia.getAddress() instanceof Inet4Address v4) {
+                        addresses.add(v4);
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            EventLogger.warn(CATEGORY, "Could not enumerate network interfaces: " + e.getMessage());
+        }
+        return addresses;
     }
 
     /** Map one JmDNS record to a printer, or null when it carries no usable address. */

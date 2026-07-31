@@ -323,6 +323,26 @@ class PrintBackendTest extends UnitTest {
     }
 
     @Test
+    void discoveryBindsToRealInterfacesNotLoopback() {
+        var addresses = PrinterDiscovery.multicastAddresses();
+
+        // The bug this pins, found only against real hardware: discovery used
+        // InetAddress.getLocalHost(), which on macOS resolves the hostname to
+        // 127.0.0.1. JmDNS bound to loopback and heard nothing, while the OS's own
+        // dns-sd saw the printer on all four service types. Discovery returned an
+        // empty list on a network with a printer sitting on it — indistinguishable
+        // from "no printers", which is why no test caught it.
+        for (var a : addresses) {
+            assertFalse(a.isLoopbackAddress(),
+                    "loopback can never carry mDNS to a printer: " + a);
+            assertFalse(a.isAnyLocalAddress(), "wildcard is not a browsable interface: " + a);
+        }
+        // CI may legitimately have none; what must not happen is loopback being
+        // offered as though it were usable.
+        assertNotNull(addresses);
+    }
+
+    @Test
     void discoveryDegradesToEmptyRatherThanThrowing() {
         // CI and containers routinely have no multicast route. "No printers found"
         // is the honest answer there; a stack trace would suggest a bug.
