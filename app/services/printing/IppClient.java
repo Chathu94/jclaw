@@ -132,6 +132,57 @@ public final class IppClient {
                 .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
+    /**
+     * How this printer wants PWG raster: resolution and colour space.
+     *
+     * @param dpi       the resolution it declares, or 0 when it does not say
+     * @param grayscale true when {@code sgray_8} is offered — a third the bytes
+     *                  of sRGB, and this class of printer has a small spool
+     * @param types     the raw {@code pwg-raster-document-type-supported} keywords
+     */
+    public record RasterCapabilities(int dpi, boolean grayscale, java.util.Set<String> types) {
+        /** What to assume when the printer will not say. */
+        public static final RasterCapabilities UNKNOWN =
+                new RasterCapabilities(0, false, java.util.Set.of());
+    }
+
+    /**
+     * Read the printer's PWG raster preferences.
+     *
+     * <p>Not optional detail. Guessing 300 DPI sRGB against a device that
+     * declares 600 DPI and offers sgray_8 got the job accepted and then filled
+     * the printer's spool — it stopped with an alarm and emitted nothing.
+     */
+    public static RasterCapabilities rasterCapabilities(String printerUri) throws IOException {
+        var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
+                AttributeGroup.groupOf(Tag.operationAttributes,
+                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesNaturalLanguage.of("en"),
+                        Types.printerUri.of(URI.create(printerUri))));
+        var response = exchange(printerUri, packet, null);
+
+        var types = response.getStrings(Tag.printerAttributes,
+                Types.pwgRasterDocumentTypeSupported);
+        var typeSet = types == null ? java.util.Set.<String>of()
+                : types.stream().map(t -> t.toLowerCase().trim())
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
+        var resolutions = response.getStrings(Tag.printerAttributes,
+                Types.pwgRasterDocumentResolutionSupported);
+        var dpi = 0;
+        if (resolutions != null) {
+            for (var r : resolutions) {
+                // Rendered as e.g. "600dpi" or "600x600dpi"; take the first number.
+                var digits = r.replaceAll("[^0-9x].*$", "").split("x")[0];
+                if (!digits.isEmpty()) {
+                    dpi = Integer.parseInt(digits);
+                    break;
+                }
+            }
+        }
+        return new RasterCapabilities(dpi, typeSet.contains("sgray_8"), typeSet);
+    }
+
     /** Query a printer's own state (Get-Printer-Attributes). */
     public static String printerState(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),

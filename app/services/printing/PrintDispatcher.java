@@ -155,6 +155,17 @@ public final class PrintDispatcher {
         return PrintFormatNegotiator.advertisedFormats(printer);
     }
 
+    /** The printer's PWG raster preferences, or UNKNOWN when it will not say. */
+    private static IppClient.RasterCapabilities rasterCapabilities(DiscoveredPrinter printer) {
+        try {
+            return IppClient.rasterCapabilities(printer.ippUri());
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "Could not read raster capabilities from %s: %s"
+                    .formatted(printer.name(), e.getMessage()));
+            return IppClient.RasterCapabilities.UNKNOWN;
+        }
+    }
+
     /** One backend attempt. Returns null when the backend ran but the printer refused. */
     private static Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
                                    String jobName, String user, String documentFormat,
@@ -171,7 +182,7 @@ public final class PrintDispatcher {
                 // client-error-document-format-not-supported on a printer whose
                 // list is octet-stream / jpeg / urf / pwg-raster.
                 var prepared = PrintFormatNegotiator.prepare(document, documentFormat,
-                        supportedFormats(printer), job);
+                        supportedFormats(printer), job, rasterCapabilities(printer));
                 var result = IppClient.print(printer.ippUri(), jobName, user,
                         prepared.format(), prepared.document(), job);
                 if (!result.accepted()) {

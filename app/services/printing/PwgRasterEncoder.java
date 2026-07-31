@@ -28,9 +28,13 @@ import java.util.List;
  * pins the byte order, and a printer that trusts the sync word will read a
  * little-endian header as garbage dimensions.
  *
- * <p>Output is sRGB, 8 bits per colour, 3 colours. Greyscale would halve the
- * bytes, but colour space negotiation is another round trip and every PWG
- * consumer must accept sRGB — the printer converts if it only has black ink.
+ * <p>Colour space and resolution are the caller's to choose, from what the
+ * printer advertises in {@code pwg-raster-document-type-supported} and
+ * {@code pwg-raster-document-resolution-supported}. Both matter more than they
+ * look: sending 300 DPI sRGB to a device that declares 600 DPI produced
+ * {@code printer-state-reasons=spool-area-full} and a stopped printer, not a
+ * page. Greyscale ({@code sgray_8}) is a third the bytes of {@code srgb_8},
+ * which is the difference between fitting a small printer's spool and not.
  */
 public final class PwgRasterEncoder {
 
@@ -40,8 +44,18 @@ public final class PwgRasterEncoder {
     /** Fixed page-header size in bytes. Not negotiable; readers seek by it. */
     static final int HEADER_BYTES = 1796;
 
-    /** cupsColorSpace value 19 = sRGB. */
+    /** cupsColorSpace 19 = sRGB, 8 bits x 3. */
     private static final int COLORSPACE_SRGB = 19;
+
+    /**
+     * cupsColorSpace 18 = sGray, 8 bits x 1.
+     *
+     * <p>Worth having rather than always sending colour: a page is a third the
+     * size, and this class of printer has a small spool. A 600 DPI A4 page is
+     * 104 MB as sRGB and 35 MB as sGray before compression — the Canon answered
+     * a colour job with printer-state-reasons=spool-area-full and stopped.
+     */
+    private static final int COLORSPACE_SGRAY = 18;
 
     /** cupsColorOrder 0 = chunky (RGBRGB…), the only order PWG requires support for. */
     private static final int COLOR_ORDER_CHUNKED = 0;
@@ -50,8 +64,6 @@ public final class PwgRasterEncoder {
     private static final int COMPRESSION_NONE = 0;
 
     private static final int BITS_PER_COLOR = 8;
-    private static final int COLORS = 3;
-    private static final int BYTES_PER_PIXEL = COLORS * BITS_PER_COLOR / 8;
 
     private PwgRasterEncoder() {}
 
@@ -65,12 +77,15 @@ public final class PwgRasterEncoder {
      * @param tumble     short-edge binding when {@code duplex}
      */
     public static byte[] encode(List<BufferedImage> pages, int dpi, String mediaName,
-                                boolean duplex, boolean tumble) throws IOException {
+                                boolean duplex, boolean tumble, boolean grayscale)
+            throws IOException {
+        var colors = grayscale ? 1 : 3;
         var out = new ByteArrayOutputStream();
         out.write(SYNC_WORD);
         for (var page : pages) {
-            writePageHeader(out, page.getWidth(), page.getHeight(), dpi, mediaName, duplex, tumble);
-            writePageData(out, page);
+            writePageHeader(out, page.getWidth(), page.getHeight(), dpi, mediaName,
+                    duplex, tumble, colors);
+            writePageData(out, page, colors);
         }
         return out.toByteArray();
     }
@@ -81,9 +96,9 @@ public final class PwgRasterEncoder {
      * printer reads the page dimensions out of the wrong offset.
      */
     private static void writePageHeader(OutputStream out, int width, int height, int dpi,
-                                        String mediaName, boolean duplex, boolean tumble)
-            throws IOException {
-        var bytesPerLine = width * BYTES_PER_PIXEL;
+                                        String mediaName, boolean duplex, boolean tumble,
+                                        int colors) throws IOException {
+        var bytesPerLine = width * colors;
         // Page size in PWG units (1/72 inch points), derived from pixels and DPI.
         var pointsWide = (int) Math.round(width * 72.0 / dpi);
         var pointsHigh = (int) Math.round(height * 72.0 / dpi);
@@ -121,15 +136,15 @@ public final class PwgRasterEncoder {
         u32(out, height);                           // cupsHeight
         u32(out, 0);                                // cupsMediaType
         u32(out, BITS_PER_COLOR);                   // cupsBitsPerColor
-        u32(out, BITS_PER_COLOR * COLORS);          // cupsBitsPerPixel
+        u32(out, BITS_PER_COLOR * colors);          // cupsBitsPerPixel
         u32(out, bytesPerLine);                     // cupsBytesPerLine
         u32(out, COLOR_ORDER_CHUNKED);              // cupsColorOrder
-        u32(out, COLORSPACE_SRGB);                  // cupsColorSpace
+        u32(out, colors == 1 ? COLORSPACE_SGRAY : COLORSPACE_SRGB);   // cupsColorSpace
         u32(out, COMPRESSION_NONE);                 // cupsCompression
         u32(out, 0);                                // cupsRowCount
         u32(out, 0);                                // cupsRowFeed
         u32(out, 0);                                // cupsRowStep
-        u32(out, COLORS);                           // cupsNumColors
+        u32(out, colors);                           // cupsNumColors
         f32(out, 1.0f);                             // cupsBorderlessScalingFactor
         f32(out, pointsWide); f32(out, pointsHigh); // cupsPageSize
         f32(out, 0); f32(out, 0); f32(out, pointsWide); f32(out, pointsHigh); // cupsImagingBBox
@@ -158,17 +173,18 @@ public final class PwgRasterEncoder {
      * count, which is why a mostly-white page costs almost nothing: a blank A4 at
      * 300 DPI is 26 MB raw and a few kilobytes encoded.
      */
-    private static void writePageData(OutputStream out, BufferedImage page) throws IOException {
+    private static void writePageData(OutputStream out, BufferedImage page, int colors)
+            throws IOException {
         var width = page.getWidth();
         var height = page.getHeight();
-        var line = new byte[width * BYTES_PER_PIXEL];
+        var line = new byte[width * colors];
         var previous = new byte[line.length];
         var haveePrevious = false;
         var repeats = 0;
         var encoded = new ByteArrayOutputStream();
 
         for (int y = 0; y < height; y++) {
-            readLine(page, y, width, line);
+            readLine(page, y, width, line, colors);
             if (haveePrevious && java.util.Arrays.equals(line, previous) && repeats < 255) {
                 // Same as the line before: bump the repeat count rather than
                 // re-encoding it. The count is one byte, so runs cap at 256 lines.
@@ -180,7 +196,7 @@ public final class PwgRasterEncoder {
                 encoded.writeTo(out);
             }
             encoded.reset();
-            encodeLine(encoded, line, width);
+            encodeLine(encoded, line, width, colors);
             System.arraycopy(line, 0, previous, 0, line.length);
             haveePrevious = true;
             repeats = 0;
@@ -192,13 +208,20 @@ public final class PwgRasterEncoder {
     }
 
     /** Extract one row as chunky RGB, without allocating per pixel. */
-    private static void readLine(BufferedImage page, int y, int width, byte[] into) {
+    private static void readLine(BufferedImage page, int y, int width, byte[] into, int colors) {
         for (int x = 0; x < width; x++) {
             var rgb = page.getRGB(x, y);
-            var i = x * BYTES_PER_PIXEL;
-            into[i] = (byte) (rgb >> 16);
-            into[i + 1] = (byte) (rgb >> 8);
-            into[i + 2] = (byte) rgb;
+            var i = x * colors;
+            if (colors == 1) {
+                // Rec. 601 luma. Averaging the channels instead would render red
+                // text near-white on a greyscale printer.
+                into[i] = (byte) ((299 * ((rgb >> 16) & 0xFF)
+                        + 587 * ((rgb >> 8) & 0xFF) + 114 * (rgb & 0xFF)) / 1000);
+            } else {
+                into[i] = (byte) (rgb >> 16);
+                into[i + 1] = (byte) (rgb >> 8);
+                into[i + 2] = (byte) rgb;
+            }
         }
     }
 
@@ -213,18 +236,18 @@ public final class PwgRasterEncoder {
      * Runs are counted in <em>pixels</em>, not bytes — encoding by byte would
      * split an RGB triple across a run boundary and shear the colour channels.
      */
-    static void encodeLine(OutputStream out, byte[] line, int width) throws IOException {
+    static void encodeLine(OutputStream out, byte[] line, int width, int colors) throws IOException {
         int x = 0;
         while (x < width) {
             var runLength = 1;
             while (x + runLength < width && runLength < 128
-                    && samePixel(line, x, x + runLength)) {
+                    && samePixel(line, x, x + runLength, colors)) {
                 runLength++;
             }
 
             if (runLength > 1) {
                 out.write(runLength - 1);
-                out.write(line, x * BYTES_PER_PIXEL, BYTES_PER_PIXEL);
+                out.write(line, x * colors, colors);
                 x += runLength;
                 continue;
             }
@@ -233,19 +256,24 @@ public final class PwgRasterEncoder {
             var literalStart = x;
             var literals = 0;
             while (x < width && literals < 128
-                    && (x + 1 >= width || !samePixel(line, x, x + 1))) {
+                    && (x + 1 >= width || !samePixel(line, x, x + 1, colors))) {
                 literals++;
                 x++;
             }
             out.write(257 - literals);
-            out.write(line, literalStart * BYTES_PER_PIXEL, literals * BYTES_PER_PIXEL);
+            out.write(line, literalStart * colors, literals * colors);
         }
     }
 
-    private static boolean samePixel(byte[] line, int a, int b) {
-        var i = a * BYTES_PER_PIXEL;
-        var j = b * BYTES_PER_PIXEL;
-        return line[i] == line[j] && line[i + 1] == line[j + 1] && line[i + 2] == line[j + 2];
+    private static boolean samePixel(byte[] line, int a, int b, int colors) {
+        var i = a * colors;
+        var j = b * colors;
+        for (int c = 0; c < colors; c++) {
+            if (line[i + c] != line[j + c]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** Fixed-width NUL-padded ASCII, truncated rather than overflowing its slot. */

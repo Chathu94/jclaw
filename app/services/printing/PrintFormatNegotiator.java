@@ -57,6 +57,20 @@ public final class PrintFormatNegotiator {
      */
     public static Prepared prepare(byte[] document, String sourceFormat,
                                    Set<String> supported, JobAttributes job) throws IOException {
+        return prepare(document, sourceFormat, supported, job, IppClient.RasterCapabilities.UNKNOWN);
+    }
+
+    /**
+     * Choose an encoding, using the printer's declared raster preferences.
+     *
+     * <p>{@code raster} is not a nicety. Rendering at our own choice of 300 DPI
+     * sRGB and sending it to a Canon that declares 600 DPI and offers sgray_8
+     * produced printer-state-reasons=spool-area-full: the job was accepted, the
+     * printer stopped, and no page came out.
+     */
+    public static Prepared prepare(byte[] document, String sourceFormat, Set<String> supported,
+                                   JobAttributes job, IppClient.RasterCapabilities raster)
+            throws IOException {
         // Unknown capabilities: send as-is. Converting on a guess is worse than
         // letting a printer that would have coped decide for itself, and IPP will
         // say document-format-not-supported if it cannot.
@@ -69,18 +83,28 @@ public final class PrintFormatNegotiator {
             return new Prepared(document, sourceFormat, false, null);
         }
 
-        var page = PrintRenderer.PageSize.fromMedia(job == null ? null : job.media());
-        var pages = PrintRenderer.render(document, sourceFormat, page);
+        var media = job == null ? null : job.media();
 
         if (supported.contains(PWG_RASTER)) {
+            // Colour only when the printer has no greyscale mode or the operator
+            // explicitly asked for colour. Grey is a third the bytes and a quarter
+            // of the heap, and this class of printer has very little spool.
+            var wantsColor = job != null && "color".equals(job.colorMode());
+            var gray = raster.grayscale() && !wantsColor;
+            var page = PrintRenderer.PageSize.fromMedia(media, raster.dpi());
+            var pages = PrintRenderer.render(document, sourceFormat, page, gray);
+
             var duplex = job != null && job.sides() != null && job.sides().startsWith("two-sided");
             var tumble = job != null && "two-sided-short-edge".equals(job.sides());
-            var raster = PwgRasterEncoder.encode(pages, PrintRenderer.DPI,
-                    job == null ? null : job.media(), duplex, tumble);
-            return new Prepared(raster, PWG_RASTER, true,
-                    "rendered %d page(s) to PWG raster because the printer does not accept %s"
-                            .formatted(pages.size(), describe(sourceFormat)));
+            var encoded = PwgRasterEncoder.encode(pages, page.dpi(), media, duplex, tumble, gray);
+            return new Prepared(encoded, PWG_RASTER, true,
+                    "rendered %d page(s) to PWG raster at %d DPI %s because the printer does not accept %s"
+                            .formatted(pages.size(), page.dpi(), gray ? "greyscale" : "colour",
+                                    describe(sourceFormat)));
         }
+
+        var page = PrintRenderer.PageSize.fromMedia(media, PrintRenderer.DEFAULT_DPI);
+        var pages = PrintRenderer.render(document, sourceFormat, page);
 
         if (supported.contains(JPEG)) {
             // One page only: JPEG has no multi-page container, so a longer document

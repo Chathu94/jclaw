@@ -75,7 +75,7 @@ class PwgRasterEncoderTest extends UnitTest {
     @Test
     void beginsWithTheBigEndianSyncWordAndAFixedHeader() throws Exception {
         var page = image(8, 4, (x, y) -> Color.WHITE);
-        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false);
+        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false, false);
 
         // "RaS2" declares big-endian. The little-endian variant is legal CUPS
         // raster but PWG pins the order, and a printer trusting the sync word
@@ -88,7 +88,7 @@ class PwgRasterEncoderTest extends UnitTest {
     @Test
     void headerCarriesTheDimensionsThePrinterReadsPositionally() throws Exception {
         var page = image(16, 9, (x, y) -> Color.WHITE);
-        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false);
+        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false, false);
         // slice(), not wrap(array, offset, len): the latter sets position/limit but
         // leaves absolute getInt(i) indexing, so every offset below would have been
         // read four bytes early — from inside the sync word.
@@ -113,7 +113,7 @@ class PwgRasterEncoderTest extends UnitTest {
         var w = 40;
         var h = 6;
         var page = image(w, h, (x, y) -> new Color((x * 6) % 256, (y * 40) % 256, (x + y) % 256));
-        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false);
+        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false, false);
 
         var rows = decodePage(out, SYNC_BYTES + HEADER_BYTES, w, h);
         for (int y = 0; y < h; y++) {
@@ -133,7 +133,7 @@ class PwgRasterEncoderTest extends UnitTest {
         // failing loudly, which is why this decodes rather than eyeballs sizes.
         var w = 300;
         var page = image(w, 2, (x, y) -> x < 200 ? Color.BLACK : (x % 2 == 0 ? Color.RED : Color.BLUE));
-        var out = PwgRasterEncoder.encode(List.of(page), 300, null, false, false);
+        var out = PwgRasterEncoder.encode(List.of(page), 300, null, false, false, false);
 
         var rows = decodePage(out, SYNC_BYTES + HEADER_BYTES, w, 2);
         for (int x = 0; x < w; x++) {
@@ -149,10 +149,10 @@ class PwgRasterEncoderTest extends UnitTest {
         // A blank A4 at 300 DPI is ~26 MB of raw pixels. If line-repeat collapsing
         // is broken the job still prints, but every page costs megabytes over the
         // wire — a failure that only shows up as mysterious slowness.
-        var page = PrintRenderer.blankPage(PrintRenderer.PageSize.A4);
-        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false);
+        var page = PrintRenderer.blankPage(PrintRenderer.PageSize.a4());
+        var out = PwgRasterEncoder.encode(List.of(page), 300, "iso_a4_210x297mm", false, false, false);
 
-        var raw = (long) PrintRenderer.A4_WIDTH * PrintRenderer.A4_HEIGHT * 3;
+        var raw = (long) page.getWidth() * page.getHeight() * 3;
         assertTrue(out.length < raw / 1000,
                 "blank page should compress ~1000x, got %d bytes vs %d raw".formatted(out.length, raw));
     }
@@ -161,8 +161,8 @@ class PwgRasterEncoderTest extends UnitTest {
     void multiplePagesEachGetTheirOwnHeader() throws Exception {
         var a = image(8, 4, (x, y) -> Color.WHITE);
         var b = image(8, 4, (x, y) -> Color.BLACK);
-        var one = PwgRasterEncoder.encode(List.of(a), 300, null, false, false);
-        var two = PwgRasterEncoder.encode(List.of(a, b), 300, null, false, false);
+        var one = PwgRasterEncoder.encode(List.of(a), 300, null, false, false, false);
+        var two = PwgRasterEncoder.encode(List.of(a, b), 300, null, false, false, false);
 
         // Readers seek page-to-page by the fixed header size, so a second page
         // must add a full header, not just more line data.

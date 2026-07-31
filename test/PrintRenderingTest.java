@@ -38,12 +38,12 @@ class PrintRenderingTest extends UnitTest {
     @Test
     void textPaginatesRatherThanTruncating() {
         var many = "line\n".repeat(400);
-        var pages = PrintRenderer.renderText(many, PrintRenderer.PageSize.A4);
+        var pages = PrintRenderer.renderText(many, PrintRenderer.PageSize.a4());
         // 400 lines cannot fit one A4 page at 11pt. Silently dropping the
         // remainder would print a document that looks complete.
         assertTrue(pages.size() > 1, "expected pagination, got " + pages.size() + " page(s)");
-        assertEquals(PrintRenderer.A4_WIDTH, pages.getFirst().getWidth());
-        assertEquals(PrintRenderer.A4_HEIGHT, pages.getFirst().getHeight());
+        assertEquals(PrintRenderer.PageSize.a4().width(), pages.getFirst().getWidth());
+        assertEquals(PrintRenderer.PageSize.a4().height(), pages.getFirst().getHeight());
     }
 
     @Test
@@ -58,33 +58,77 @@ class PrintRenderingTest extends UnitTest {
         // A wide image on a portrait page gets bars, not a trimmed subject —
         // cropping a photo to fit is a silent content change.
         var wide = ImageIO.read(new java.io.ByteArrayInputStream(png(400, 100)));
-        var fitted = PrintRenderer.fitToPage(wide, PrintRenderer.PageSize.A4);
+        var fitted = PrintRenderer.fitToPage(wide, PrintRenderer.PageSize.a4());
 
-        assertEquals(PrintRenderer.A4_WIDTH, fitted.getWidth());
-        assertEquals(PrintRenderer.A4_HEIGHT, fitted.getHeight());
+        assertEquals(PrintRenderer.PageSize.a4().width(), fitted.getWidth());
+        assertEquals(PrintRenderer.PageSize.a4().height(), fitted.getHeight());
         // Corners stay white (the letterbox), centre carries the image.
         assertEquals(Color.WHITE.getRGB(), fitted.getRGB(5, 5));
         assertEquals(Color.RED.getRGB(),
-                fitted.getRGB(PrintRenderer.A4_WIDTH / 2, PrintRenderer.A4_HEIGHT / 2));
+                fitted.getRGB(PrintRenderer.PageSize.a4().width() / 2, PrintRenderer.PageSize.a4().height() / 2));
     }
 
     @Test
     void aCorruptImageFailsWithSomethingActionable() {
         var boom = assertThrows(java.io.IOException.class,
                 () -> PrintRenderer.render("not an image".getBytes(StandardCharsets.UTF_8),
-                        "image/png", PrintRenderer.PageSize.A4));
+                        "image/png", PrintRenderer.PageSize.a4()));
         assertTrue(boom.getMessage().contains("image"), boom.getMessage());
     }
 
     @Test
     void mediaNameSelectsThePageGeometry() {
-        assertEquals(PrintRenderer.PageSize.LETTER,
-                PrintRenderer.PageSize.fromMedia("na_letter_8.5x11in"));
+        var letter = PrintRenderer.PageSize.fromMedia("na_letter_8.5x11in", 300);
+        assertEquals(2550, letter.width());
+        assertEquals(3300, letter.height());
+
         // Anything unrecognised is A4 rather than a guessed size — a subtly wrong
         // page wastes paper more quietly than an obvious failure.
-        assertEquals(PrintRenderer.PageSize.A4, PrintRenderer.PageSize.fromMedia("iso_a4_210x297mm"));
-        assertEquals(PrintRenderer.PageSize.A4, PrintRenderer.PageSize.fromMedia(null));
-        assertEquals(PrintRenderer.PageSize.A4, PrintRenderer.PageSize.fromMedia("vendor-tray-7"));
+        var a4 = PrintRenderer.PageSize.a4();
+        assertEquals(a4, PrintRenderer.PageSize.fromMedia("iso_a4_210x297mm", 300));
+        assertEquals(a4, PrintRenderer.PageSize.fromMedia(null, 300));
+        assertEquals(a4, PrintRenderer.PageSize.fromMedia("vendor-tray-7", 300));
+    }
+
+    @Test
+    void pageGeometryScalesWithThePrintersDeclaredResolution() {
+        // The bug this pins: 300 DPI was hardcoded and sent to a Canon that
+        // declares 600dpi only. The job was accepted, then the printer stopped
+        // with printer-state-reasons=spool-area-full and emitted nothing.
+        var at300 = PrintRenderer.PageSize.fromMedia("iso_a4_210x297mm", 300);
+        var at600 = PrintRenderer.PageSize.fromMedia("iso_a4_210x297mm", 600);
+
+        assertEquals(600, at600.dpi(), "the page must carry the resolution it was built for");
+        // Twice the DPI is twice the pixels on each axis, within rounding.
+        assertTrue(Math.abs(at600.width() - at300.width() * 2) <= 2,
+                "%d vs %d".formatted(at600.width(), at300.width()));
+        assertTrue(Math.abs(at600.height() - at300.height() * 2) <= 2,
+                "%d vs %d".formatted(at600.height(), at300.height()));
+
+        // Zero means "the printer would not say" — fall back, never render 0x0.
+        assertEquals(PrintRenderer.DEFAULT_DPI,
+                PrintRenderer.PageSize.fromMedia(null, 0).dpi());
+    }
+
+    @Test
+    void greyscaleRenderingIsAQuarterOfTheHeapAndAThirdOfTheWire() throws Exception {
+        var canon = Set.of("image/pwg-raster");
+        var caps = new services.printing.IppClient.RasterCapabilities(600, true, Set.of("sgray_8"));
+        var text = "hello printer".getBytes(StandardCharsets.UTF_8);
+
+        var grey = PrintFormatNegotiator.prepare(text, "text/plain", canon,
+                JobAttributes.DEFAULTS, caps);
+        var colour = PrintFormatNegotiator.prepare(text, "text/plain", canon,
+                new JobAttributes(null, "color", null), caps);
+
+        assertEquals("image/pwg-raster", grey.format());
+        assertTrue(grey.explanation().contains("600 DPI"), grey.explanation());
+        assertTrue(grey.explanation().contains("greyscale"), grey.explanation());
+        // Asking for colour must actually get colour, not be silently overridden.
+        assertTrue(colour.explanation().contains("colour"), colour.explanation());
+        assertTrue(grey.document().length < colour.document().length,
+                "greyscale should be smaller: %d vs %d"
+                        .formatted(grey.document().length, colour.document().length));
     }
 
     // ─── Negotiation ───

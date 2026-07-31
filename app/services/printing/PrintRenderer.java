@@ -31,45 +31,64 @@ import java.util.List;
  */
 public final class PrintRenderer {
 
-    /** Render resolution. 300 DPI is the floor for legible text on paper. */
-    public static final int DPI = 300;
+    /**
+     * Fallback resolution when the printer will not say what it wants. 300 DPI is
+     * the floor for legible text; the real value comes from
+     * {@code pwg-raster-document-resolution-supported}, and using it matters —
+     * a 300 DPI raster sent to a 600-DPI-only Canon filled its spool and stopped it.
+     */
+    public static final int DEFAULT_DPI = 300;
 
-    /** A4 at {@link #DPI}, in pixels. The most common size outside North America. */
-    public static final int A4_WIDTH = 2480;
-    public static final int A4_HEIGHT = 3508;
+    /** A4 in inches. */
+    private static final double A4_IN_W = 8.268;
+    private static final double A4_IN_H = 11.693;
 
-    /** US Letter at {@link #DPI}, in pixels. */
-    public static final int LETTER_WIDTH = 2550;
-    public static final int LETTER_HEIGHT = 3300;
+    /** US Letter in inches. */
+    private static final double LETTER_IN_W = 8.5;
+    private static final double LETTER_IN_H = 11.0;
 
-    /** Printable margin. Most inkjets cannot reach closer than ~5mm to the edge. */
-    private static final int MARGIN = 150;
+    /** Printable margin, in inches. Most inkjets cannot reach closer than ~5mm. */
+    private static final double MARGIN_IN = 0.5;
 
-    /** Point size for rendered text. 11pt at 300 DPI ≈ 46px. */
-    private static final int TEXT_POINT_SIZE = 46;
+    /** Text size in points; 11pt is comfortable for logs and code. */
+    private static final int TEXT_POINTS = 11;
 
     /** Refuse absurd page counts rather than filling a tray. */
     private static final int MAX_PAGES = 100;
 
     private PrintRenderer() {}
 
-    /** Page geometry for a job. */
-    public record PageSize(int width, int height) {
-        public static final PageSize A4 = new PageSize(A4_WIDTH, A4_HEIGHT);
-        public static final PageSize LETTER = new PageSize(LETTER_WIDTH, LETTER_HEIGHT);
+    /**
+     * Page geometry for a job, in pixels at a given resolution.
+     *
+     * @param dpi carried alongside so the raster header can declare the same
+     *            resolution the pixels were produced at; a mismatch there is what
+     *            a printer reads as a wrongly-sized page
+     */
+    public record PageSize(int width, int height, int dpi) {
 
         /**
-         * Page size from a PWG media name, defaulting to A4.
+         * Page size from a PWG media name at {@code dpi}, defaulting to A4.
          *
          * <p>Only the two common sizes are recognised. Guessing dimensions from an
          * arbitrary PWG name would produce a page that is subtly the wrong size,
          * which wastes paper more quietly than an obvious failure.
          */
-        public static PageSize fromMedia(String media) {
-            if (media != null && media.toLowerCase().contains("letter")) {
-                return LETTER;
-            }
-            return A4;
+        public static PageSize fromMedia(String media, int dpi) {
+            var resolved = dpi > 0 ? dpi : DEFAULT_DPI;
+            var letter = media != null && media.toLowerCase().contains("letter");
+            var w = letter ? LETTER_IN_W : A4_IN_W;
+            var h = letter ? LETTER_IN_H : A4_IN_H;
+            return new PageSize((int) Math.round(w * resolved), (int) Math.round(h * resolved), resolved);
+        }
+
+        /** A4 at the default resolution, for callers with no printer to ask. */
+        public static PageSize a4() {
+            return fromMedia(null, DEFAULT_DPI);
+        }
+
+        int marginPx() {
+            return (int) Math.round(MARGIN_IN * dpi);
         }
     }
 
@@ -83,6 +102,31 @@ public final class PrintRenderer {
      */
     public static List<BufferedImage> render(byte[] document, String sourceFormat, PageSize page)
             throws IOException {
+        return render(document, sourceFormat, page, false);
+    }
+
+    /**
+     * Rasterise, optionally straight to 8-bit greyscale.
+     *
+     * <p>The grey path is not just smaller on the wire — it is a quarter of the
+     * heap. An A4 page at 600 DPI is 4961x7016; as {@code TYPE_INT_RGB} that is
+     * 139 MB of {@code int[]} per page, which a multi-page job turns into an OOM.
+     */
+    public static List<BufferedImage> render(byte[] document, String sourceFormat, PageSize page,
+                                             boolean grayscale) throws IOException {
+        RENDER_GRAY.set(grayscale);
+        try {
+            return renderInternal(document, sourceFormat, page);
+        } finally {
+            RENDER_GRAY.remove();
+        }
+    }
+
+    /** Per-call greyscale flag; avoids threading a parameter through every helper. */
+    private static final ThreadLocal<Boolean> RENDER_GRAY = ThreadLocal.withInitial(() -> false);
+
+    private static List<BufferedImage> renderInternal(byte[] document, String sourceFormat,
+                                                      PageSize page) throws IOException {
         var format = sourceFormat == null ? "" : sourceFormat.toLowerCase();
         if (format.startsWith("image/")) {
             return List.of(fitToPage(readImage(document), page));
@@ -118,8 +162,9 @@ public final class PrintRenderer {
         try {
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                     RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            var maxWidth = page.width() - 2 * MARGIN;
-            var maxHeight = page.height() - 2 * MARGIN;
+            var margin = page.marginPx();
+            var maxWidth = page.width() - 2 * margin;
+            var maxHeight = page.height() - 2 * margin;
             var scale = Math.min((double) maxWidth / source.getWidth(),
                     (double) maxHeight / source.getHeight());
             var w = (int) Math.round(source.getWidth() * scale);
@@ -141,7 +186,7 @@ public final class PrintRenderer {
                 // Rendered at DPI then fitted, rather than rendered straight to the
                 // page box: PDF pages carry their own size, and scaling after the
                 // fact keeps a Letter-sized PDF from being stretched onto A4.
-                pages.add(fitToPage(renderer.renderImageWithDPI(i, DPI, ImageType.RGB), page));
+                pages.add(fitToPage(renderer.renderImageWithDPI(i, page.dpi(), ImageType.RGB), page));
             }
         }
         return pages;
@@ -156,16 +201,20 @@ public final class PrintRenderer {
      * silently destroys that.
      */
     public static List<BufferedImage> renderText(String text, PageSize page) {
-        var font = new Font(Font.MONOSPACED, Font.PLAIN, TEXT_POINT_SIZE);
-        var probe = blankPage(new PageSize(1, 1)).createGraphics();
+        // Point size scaled to the render resolution: 11pt is 11/72 inch, so it
+        // must grow with DPI or 600 DPI output comes out half-size.
+        var font = new Font(Font.MONOSPACED, Font.PLAIN,
+                (int) Math.round(TEXT_POINTS * page.dpi() / 72.0));
+        var probe = blankPage(new PageSize(1, 1, page.dpi())).createGraphics();
         probe.setFont(font);
         var metrics = probe.getFontMetrics();
         var charWidth = Math.max(1, metrics.charWidth('M'));
         var lineHeight = metrics.getHeight();
         probe.dispose();
 
-        var usableWidth = page.width() - 2 * MARGIN;
-        var usableHeight = page.height() - 2 * MARGIN;
+        var margin = page.marginPx();
+        var usableWidth = page.width() - 2 * margin;
+        var usableHeight = page.height() - 2 * margin;
         var columns = Math.max(1, usableWidth / charWidth);
         var rows = Math.max(1, usableHeight / lineHeight);
 
@@ -179,9 +228,9 @@ public final class PrintRenderer {
                         RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
                 g.setColor(Color.BLACK);
                 g.setFont(font);
-                var y = MARGIN + metrics.getAscent();
+                var y = margin + metrics.getAscent();
                 for (int i = start; i < Math.min(start + rows, lines.size()); i++) {
-                    g.drawString(lines.get(i), MARGIN, y);
+                    g.drawString(lines.get(i), margin, y);
                     y += lineHeight;
                 }
             } finally {
@@ -211,7 +260,9 @@ public final class PrintRenderer {
 
     /** A white page. White, not transparent — a printer renders alpha as black. */
     public static BufferedImage blankPage(PageSize page) {
-        var image = new BufferedImage(page.width(), page.height(), BufferedImage.TYPE_INT_RGB);
+        var type = Boolean.TRUE.equals(RENDER_GRAY.get())
+                ? BufferedImage.TYPE_BYTE_GRAY : BufferedImage.TYPE_INT_RGB;
+        var image = new BufferedImage(page.width(), page.height(), type);
         var g = image.createGraphics();
         try {
             g.setColor(Color.WHITE);
