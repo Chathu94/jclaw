@@ -48,6 +48,14 @@ const sides = ref('')
 const color = ref('')
 const media = ref('')
 
+// Manual entry. Not a convenience: mDNS is link-local, so it is blocked on most
+// VPNs and in any container without a multicast route — the exact networks where
+// an operator is most likely to know the address and least likely to discover it.
+// Without this the panel is unusable there, which UAT caught the hard way.
+const manualHost = ref('')
+const manualPort = ref('')
+const manualProtocol = ref('')
+
 watch(saved, (s) => {
   sides.value = s?.sides ?? ''
   color.value = s?.color ?? ''
@@ -55,6 +63,17 @@ watch(saved, (s) => {
 }, { immediate: true })
 
 const hasDefault = computed(() => !!saved.value?.host)
+
+/** "Office LaserJet — 10.0.0.5:631 (IPP)", collapsing the name when it IS the host. */
+const defaultLabel = computed(() => {
+  const s = saved.value
+  if (!s?.host) return ''
+  const address = s.port ? `${s.host}:${s.port}` : s.host
+  const suffix = s.protocol ? ` (${s.protocol})` : ''
+  return s.name && s.name !== s.host
+    ? `${s.name} — ${address}${suffix}`
+    : `${address}${suffix}`
+})
 
 async function scan() {
   scanning.value = true
@@ -80,6 +99,21 @@ async function chooseDefault(p: PrinterEntry) {
     name: p.name, host: p.host, port: p.port, protocol: p.protocol,
     sides: sides.value || null, color: color.value || null, media: media.value || null,
   })
+}
+
+/** Save a hand-entered address as the default. */
+async function useManual() {
+  const host = manualHost.value.trim()
+  if (!host) return
+  const port = Number.parseInt(manualPort.value, 10)
+  await persist({
+    name: host, host,
+    port: Number.isFinite(port) && port > 0 ? port : 0,
+    protocol: manualProtocol.value || null,
+    sides: sides.value || null, color: color.value || null, media: media.value || null,
+  })
+  manualHost.value = ''
+  manualPort.value = ''
 }
 
 /** Save job-option changes against the printer already chosen. */
@@ -130,13 +164,11 @@ async function persist(body: Record<string, unknown>) {
         <div class="min-w-0">
           <span class="text-sm font-medium text-fg-strong">Default printer</span>
           <div class="text-xs text-fg-muted mt-0.5">
+            <!-- One string, built in script: interpolating the parts inline put a
+                 stray space before ":9100" and printed the name twice when it is
+                 just the host (which manual entry makes it). -->
             <template v-if="hasDefault">
-              {{ saved?.name || saved?.host }} — {{ saved?.host }}<template v-if="saved?.port">
-                :{{ saved.port }}
-              </template>
-              <template v-if="saved?.protocol">
-                ({{ saved.protocol }})
-              </template>
+              {{ defaultLabel }}
             </template>
             <template v-else>
               None set. Agents must name a printer on every call.
@@ -207,6 +239,68 @@ async function persist(body: Record<string, unknown>) {
           </button>
         </li>
       </ul>
+
+      <!-- Manual entry. The only route to a default on a network that blocks
+           mDNS, which is most VPNs and any container without a multicast route. -->
+      <div class="border-t border-border px-4 py-3">
+        <div class="text-xs text-fg-muted mb-2">
+          Or enter an address directly — needed when the network blocks mDNS.
+        </div>
+        <div class="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-end">
+          <label
+            for="printer-manual-host"
+            class="block"
+          >
+            <span class="block text-[11px] text-fg-muted mb-1">Host or IP</span>
+            <input
+              id="printer-manual-host"
+              v-model="manualHost"
+              type="text"
+              placeholder="10.0.0.5"
+              class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
+            >
+          </label>
+          <label
+            for="printer-manual-port"
+            class="block"
+          >
+            <span class="block text-[11px] text-fg-muted mb-1">Port</span>
+            <input
+              id="printer-manual-port"
+              v-model="manualPort"
+              type="number"
+              placeholder="auto"
+              class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
+            >
+          </label>
+          <label
+            for="printer-manual-protocol"
+            class="block"
+          >
+            <span class="block text-[11px] text-fg-muted mb-1">Protocol</span>
+            <select
+              id="printer-manual-protocol"
+              v-model="manualProtocol"
+              class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
+            >
+              <option value="">Auto</option>
+              <option
+                v-for="v in options?.protocols ?? []"
+                :key="v"
+                :value="v"
+              >{{ v }}</option>
+            </select>
+          </label>
+          <button
+            :disabled="savingState || !manualHost.trim()"
+            class="px-3 py-1.5 text-xs font-medium border border-border rounded-full
+                   transition-colors disabled:opacity-40 hover:text-fg-strong text-fg-muted"
+            @click="useManual"
+          >
+            Set default
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Job options -->
