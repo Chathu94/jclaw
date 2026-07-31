@@ -19,7 +19,7 @@ import java.nio.file.Path;
  * <p>Scaffolding runs against {@code workspace-test} in test mode
  * ({@code %test.jclaw.workspace.path}), never the operator's real workspace.
  */
-public class WorkspaceScaffoldTest extends UnitTest {
+class WorkspaceScaffoldTest extends UnitTest {
 
     private static String read(String agentName, String filename) throws Exception {
         Path file = WorkspaceFiles.workspacePath(agentName).resolve(filename);

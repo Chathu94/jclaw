@@ -5,9 +5,6 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.LoadTestRunner;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-
 /**
  * JCLAW-840: the loadtest harness can drive an existing agent by name so a run
  * ships a real tool array, which the two benchmark twins cannot — they pin their
@@ -21,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * covered because their failure mode is a confusing 400, which is loud and
  * self-correcting.
  */
-public class LoadTestAgentBindingTest extends UnitTest {
+class LoadTestAgentBindingTest extends UnitTest {
 
     private Agent newAgent(String name) {
         return AgentService.create(name, "ollama-cloud", "kimi-k2.6");

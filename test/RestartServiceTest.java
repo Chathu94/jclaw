@@ -6,12 +6,6 @@ import services.RestartService;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * Covers what a restart WOULD run. The spawn itself is never exercised — this
  * test JVM is the one it would reboot — so {@code spawnerForTest} intercepts
