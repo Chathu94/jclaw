@@ -62,6 +62,20 @@ public final class IppClient {
     public static PrintResult print(String printerUri, String jobName, String user,
                                     String documentFormat, byte[] document,
                                     JobAttributes job) throws IOException {
+        return print(printerUri, jobName, user, documentFormat, document, job, java.util.Map.of());
+    }
+
+    /**
+     * Submit a Print-Job carrying arbitrary job-template attributes.
+     *
+     * @param options IPP attribute → value for everything the printer announced;
+     *                the three in {@code job} are folded in and take precedence,
+     *                since they are what the raster was actually rendered for
+     */
+    public static PrintResult print(String printerUri, String jobName, String user,
+                                    String documentFormat, byte[] document,
+                                    JobAttributes job,
+                                    java.util.Map<String, String> options) throws IOException {
         var operation = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
         operation.add(Types.attributesCharset.of("utf-8"));
         operation.add(Types.attributesNaturalLanguage.of("en"));
@@ -78,17 +92,16 @@ public final class IppClient {
         // in the operation group is entitled to reject the whole request.
         var groups = new java.util.ArrayList<AttributeGroup>();
         groups.add(AttributeGroup.groupOf(Tag.operationAttributes, operation));
-        if (job != null && !job.isEmpty()) {
-            var template = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
-            if (job.sides() != null) {
-                template.add(Types.sides.of(job.sides()));
-            }
-            if (job.colorMode() != null) {
-                template.add(Types.printColorMode.of(job.colorMode()));
-            }
-            if (job.media() != null) {
-                template.add(Types.media.of(job.media()));
-            }
+
+        // Every option the operator chose, by IPP attribute name. Built generically
+        // rather than from a fixed list of three: the options came from the
+        // printer, so anything it announced must be sendable — otherwise choosing
+        // a tray in Settings changes nothing, which is worse than not offering it.
+        var template = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
+        for (var option : effectiveOptions(job, options).entrySet()) {
+            template.add(toJobAttribute(option.getKey(), option.getValue()));
+        }
+        if (!template.isEmpty()) {
             groups.add(AttributeGroup.groupOf(Tag.jobAttributes, template));
         }
 
@@ -106,6 +119,60 @@ public final class IppClient {
         return new PrintResult(accepted, jobId,
                 jobState == null ? null : jobState.getName(),
                 status == null ? "no status returned" : status.getName());
+    }
+
+    /**
+     * The operator's options, with the three the print path itself resolved
+     * layered on top — those match the rendered raster and must win over a stale
+     * saved value.
+     */
+    private static java.util.Map<String, String> effectiveOptions(
+            JobAttributes job, java.util.Map<String, String> options) {
+        var merged = new java.util.LinkedHashMap<String, String>(
+                options == null ? java.util.Map.of() : options);
+        if (job != null) {
+            if (job.sides() != null) merged.put("sides", job.sides());
+            if (job.colorMode() != null) merged.put("print-color-mode", job.colorMode());
+            if (job.media() != null) merged.put("media", job.media());
+        }
+        return merged;
+    }
+
+    /**
+     * Job-template attributes IPP carries with the <em>enum</em> tag (0x23) rather
+     * than integer (0x21).
+     *
+     * <p>The distinction is invisible in the value — {@code print-quality=5} looks
+     * like an integer — and it is not cosmetic. Sending print-quality as an integer
+     * got job 11 accepted with
+     * {@code successful-ok-ignored-or-substituted-attributes}: the printer parsed
+     * the request, did not recognise the attribute as its enum, and quietly
+     * dropped it. A silently ignored option is worse than a rejected one.
+     *
+     * <p>Identified from the printer's own {@code -supported} types, which report
+     * {@code (1setOf enum)} for these and {@code (1setOf keyword)} or
+     * {@code rangeOfInteger} for the rest.
+     */
+    private static final java.util.Set<String> ENUM_ATTRIBUTES = java.util.Set.of(
+            "print-quality", "orientation-requested", "finishings", "printer-resolution");
+
+    /**
+     * Build one job-template attribute by name, with the tag IPP expects.
+     *
+     * <p>Three shapes: enum-tagged codes, plain integers (copies), and keywords.
+     * Getting the tag wrong does not fail loudly — the printer accepts the job and
+     * ignores the attribute, which is exactly how a setting appears to do nothing.
+     */
+    private static com.hp.jipp.encoding.Attribute<?> toJobAttribute(String name, String value) {
+        var numeric = value.matches("\\d+");
+        if (numeric && ENUM_ATTRIBUTES.contains(name)) {
+            return new com.hp.jipp.encoding.EnumType<>(name, com.hp.jipp.encoding.UntypedEnum::new)
+                    .of(new com.hp.jipp.encoding.UntypedEnum(Integer.parseInt(value)));
+        }
+        if (numeric) {
+            return new com.hp.jipp.encoding.IntType(name).of(Integer.parseInt(value));
+        }
+        return new com.hp.jipp.encoding.KeywordType(name).of(value);
     }
 
     /**
@@ -199,8 +266,20 @@ public final class IppClient {
      * @param values       the values this printer accepts, from {@code <name>-supported}
      * @param defaultValue what it uses when a job omits the attribute, or null
      */
+    /**
+     * @param values       selectable values; empty for a numeric range
+     * @param min          lower bound when this is a range, else null
+     * @param max          upper bound when this is a range, else null
+     * @param defaultValue what the printer uses when a job omits it, or null
+     */
     public record JobOption(String name, String label, java.util.List<OptionValue> values,
-                            String defaultValue) {}
+                            Integer min, Integer max, String defaultValue) {
+
+        /** True when this is a number input rather than a select. */
+        public boolean isRange() {
+            return min != null && max != null;
+        }
+    }
 
     /**
      * One selectable value: what to show, and what to actually send.
@@ -259,6 +338,16 @@ public final class IppClient {
         JOB_TEMPLATE_LABELS.put("finishings", "Finishing");
     }
 
+    /**
+     * Job-template attributes IPP expresses as an integer range rather than a list.
+     *
+     * <p>Separate because they cannot be a select: {@code copies-supported} is
+     * "1-99", not a set of values, and enumerating it would be a ninety-nine item
+     * dropdown. The printer still decides the bounds.
+     */
+    private static final java.util.Map<String, String> RANGE_LABELS =
+            java.util.Map.of("copies", "Copies", "job-priority", "Priority");
+
     private static final String SUPPORTED = "-supported";
 
     /**
@@ -309,7 +398,23 @@ public final class IppClient {
             var defaultValue = defaults == null || defaults.strings().isEmpty()
                     ? null : toOptionValue(defaults.strings().getFirst()).label();
             options.add(new JobOption(entry.getKey(), entry.getValue(),
-                    values.stream().map(IppClient::toOptionValue).toList(), defaultValue));
+                    values.stream().map(IppClient::toOptionValue).toList(),
+                    null, null, defaultValue));
+        }
+
+        // Ranges last: they render as number inputs and read as a different kind
+        // of control, so grouping them keeps the form scannable.
+        for (var entry : RANGE_LABELS.entrySet()) {
+            var range = group.getValue(new com.hp.jipp.encoding.IntRangeType(
+                    entry.getKey() + SUPPORTED));
+            if (range == null) {
+                continue;
+            }
+            var defaults = byName.get(entry.getKey() + "-default");
+            var defaultValue = defaults == null || defaults.strings().isEmpty()
+                    ? null : defaults.strings().getFirst();
+            options.add(new JobOption(entry.getKey(), entry.getValue(), java.util.List.of(),
+                    range.getFirst(), range.getLast(), defaultValue));
         }
         return java.util.List.copyOf(options);
     }

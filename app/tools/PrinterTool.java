@@ -266,7 +266,8 @@ public class PrinterTool implements ToolRegistry.Tool {
             return "Error: " + invalid;
         }
 
-        var outcome = PrintDispatcher.print(target, jobName, agent.name, documentFormat, document, job);
+        var outcome = PrintDispatcher.print(target, jobName, agent.name, documentFormat,
+                document, job, saved.options());
         var verdict = new StringBuilder(outcome.verified()
                 ? "Printed via " + outcome.protocol() + " — " + outcome.detail()
                 // Said plainly because the model will otherwise report this as a

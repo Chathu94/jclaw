@@ -147,6 +147,22 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
+    void rangeOptionsAreDistinguishableFromSelects() {
+        var copies = new services.printing.IppClient.JobOption(
+                "copies", "Copies", java.util.List.of(), 1, 99, "1");
+        var sides = new services.printing.IppClient.JobOption(
+                "sides", "Sides",
+                java.util.List.of(new services.printing.IppClient.OptionValue("one-sided", "one-sided")),
+                null, null, "one-sided");
+
+        // The UI branches on this: a range is a number input, because enumerating
+        // copies-supported would be a ninety-nine item dropdown.
+        assertTrue(copies.isRange());
+        assertFalse(sides.isRange());
+        assertTrue(copies.values().isEmpty(), "a range carries bounds, not values");
+    }
+
+    @Test
     void legalPaperGetsLegalGeometry() {
         var legal = PrintRenderer.PageSize.fromMedia("na_legal_8.5x14in", 300);
         // 8.5 x 14in. Falling through to A4 here is what put A4-shaped pixels in a

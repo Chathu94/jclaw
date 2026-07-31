@@ -88,13 +88,28 @@ public final class PrintDispatcher {
     public static Outcome print(DiscoveredPrinter printer, String jobName, String user,
                                 String documentFormat, byte[] document,
                                 JobAttributes job) throws IOException {
+        return print(printer, jobName, user, documentFormat, document, job, Map.of());
+    }
+
+    /**
+     * Send with the operator's full option set.
+     *
+     * @param options every IPP job attribute the operator chose, by name. Carried
+     *                whole rather than as three named fields, because the options
+     *                were discovered from the printer — a tray the device
+     *                announced has to be sendable or choosing it does nothing
+     */
+    public static Outcome print(DiscoveredPrinter printer, String jobName, String user,
+                                String documentFormat, byte[] document,
+                                JobAttributes job, Map<String, String> options)
+            throws IOException {
         var failures = new ArrayList<String>();
         var requested = job == null ? JobAttributes.DEFAULTS : job;
 
         for (var protocol : backendOrder(printer)) {
             try {
                 var outcome = attempt(protocol, printer, jobName, user, documentFormat,
-                        document, requested);
+                        document, requested, options == null ? Map.of() : options);
                 if (outcome != null) {
                     // Carry why the earlier backends declined, so a fallback
                     // success does not read as a clean first-choice success.
@@ -155,6 +170,23 @@ public final class PrintDispatcher {
         return PrintFormatNegotiator.advertisedFormats(printer);
     }
 
+    /** Everything a byte-stream backend cannot carry, for the warning. */
+    private static String describeDropped(JobAttributes job, Map<String, String> options) {
+        var parts = new ArrayList<String>();
+        if (!job.isEmpty()) {
+            parts.add(job.describe());
+        }
+        // Options beyond the three JClaw interprets are equally lost on raw/LPD;
+        // reporting only sides and colour would understate what was dropped.
+        for (var e : options.entrySet()) {
+            if (!e.getKey().equals("sides") && !e.getKey().equals("print-color-mode")
+                    && !e.getKey().equals("media")) {
+                parts.add(e.getKey() + "=" + e.getValue());
+            }
+        }
+        return parts.isEmpty() ? null : String.join(", ", parts);
+    }
+
     /** The printer's PWG raster preferences, or UNKNOWN when it will not say. */
     private static IppClient.RasterCapabilities rasterCapabilities(DiscoveredPrinter printer) {
         try {
@@ -169,11 +201,12 @@ public final class PrintDispatcher {
     /** One backend attempt. Returns null when the backend ran but the printer refused. */
     private static Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
                                    String jobName, String user, String documentFormat,
-                                   byte[] document, JobAttributes job) throws IOException {
+                                   byte[] document, JobAttributes job,
+                                   Map<String, String> options) throws IOException {
         // Only IPP carries job-template attributes; the byte-stream backends drop
         // whatever was asked for. Recorded so the caller can say so out loud.
-        var dropped = job.isEmpty() || protocol == PrintProtocol.IPP || protocol == PrintProtocol.IPPS
-                ? null : job.describe();
+        var dropped = protocol == PrintProtocol.IPP || protocol == PrintProtocol.IPPS
+                ? null : describeDropped(job, options);
 
         switch (protocol) {
             case IPP, IPPS -> {
@@ -189,7 +222,7 @@ public final class PrintDispatcher {
                 var effective = prepared.media() == null ? job
                         : new JobAttributes(job.sides(), job.colorMode(), prepared.media());
                 var result = IppClient.print(printer.ippUri(), jobName, user,
-                        prepared.format(), prepared.document(), effective);
+                        prepared.format(), prepared.document(), effective, options);
                 if (!result.accepted()) {
                     // Carry the IPP status name, which is the whole point of IPP
                     // being tried first. "client-error-document-format-not-supported"

@@ -37,7 +37,11 @@ interface JobOption {
   /** IPP attribute name, e.g. 'sides' or 'media-source'. */
   name: string
   label: string
+  /** Selectable values; empty when this is a numeric range. */
   values: OptionValue[]
+  /** Set together for range attributes — copies is "1-99", not a list. */
+  min: number | null
+  max: number | null
   defaultValue: string | null
 }
 
@@ -363,7 +367,20 @@ async function persist(body: Record<string, unknown>) {
           class="block"
         >
           <span class="block text-[11px] text-fg-muted mb-1">{{ opt.label }}</span>
+          <!-- Ranges are number inputs: copies-supported is 1-99, and a
+               ninety-nine item dropdown is not a control. -->
+          <input
+            v-if="opt.min !== null && opt.max !== null"
+            :id="`printer-opt-${opt.name}`"
+            v-model="draft[opt.name]"
+            type="number"
+            :min="opt.min"
+            :max="opt.max"
+            :placeholder="opt.defaultValue ?? `${opt.min}–${opt.max}`"
+            class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
+          >
           <select
+            v-else
             :id="`printer-opt-${opt.name}`"
             v-model="draft[opt.name]"
             class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
