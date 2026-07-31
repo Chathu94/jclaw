@@ -33,7 +33,8 @@ class PrinterDefaultsTest extends UnitTest {
     void roundTripsThePrinterAndItsJobOptions() {
         PrinterDefaults.save(new PrinterDefaults.Defaults(
                 "Office LaserJet", "10.0.0.5", 631, "IPP",
-                "two-sided-long-edge", "monochrome", "iso_a4_210x297mm"));
+                java.util.Map.of("sides", "two-sided-long-edge",
+                        "print-color-mode", "monochrome", "media", "iso_a4_210x297mm")));
 
         var d = PrinterDefaults.load();
         assertFalse(d.isUnset());
@@ -51,8 +52,9 @@ class PrinterDefaultsTest extends UnitTest {
 
     @Test
     void clearingLeavesNothingBehind() {
-        PrinterDefaults.save(new PrinterDefaults.Defaults(
-                "P", "10.0.0.5", 631, "IPP", "two-sided-long-edge", "color", "a4"));
+        PrinterDefaults.save(new PrinterDefaults.Defaults("P", "10.0.0.5", 631, "IPP",
+                java.util.Map.of("sides", "two-sided-long-edge", "print-color-mode", "color",
+                        "media", "a4")));
         PrinterDefaults.clear();
 
         var d = PrinterDefaults.load();
@@ -67,14 +69,14 @@ class PrinterDefaultsTest extends UnitTest {
 
     @Test
     void matchesTheDiscoveredPrinterItWasChosenFrom() {
-        var withPort = new PrinterDefaults.Defaults("P", "10.0.0.5", 631, "IPP", null, null, null);
+        var withPort = new PrinterDefaults.Defaults("P", "10.0.0.5", 631, "IPP", java.util.Map.of());
         assertTrue(withPort.matches("10.0.0.5", 631));
         assertFalse(withPort.matches("10.0.0.6", 631));
         assertFalse(withPort.matches("10.0.0.5", 9100));
 
         // Port 0 means "the protocol's standard port", so it must still match the
         // printer it was chosen from — otherwise the UI never shows the badge.
-        var noPort = new PrinterDefaults.Defaults("P", "10.0.0.5", 0, null, null, null, null);
+        var noPort = new PrinterDefaults.Defaults("P", "10.0.0.5", 0, null, java.util.Map.of());
         assertTrue(noPort.matches("10.0.0.5", 631));
         assertTrue(noPort.matches("10.0.0.5", 9100));
 
@@ -99,17 +101,47 @@ class PrinterDefaultsTest extends UnitTest {
         // it back into null. It did not, and the empty string reached
         // JobAttributes.validationError as an invalid keyword — every print then
         // failed with "invalid 'sides' value ''" until the default was re-saved.
-        PrinterDefaults.save(new PrinterDefaults.Defaults(
-                "P", "10.0.0.5", 631, "IPP", "two-sided-long-edge", "color", "a4"));
+        PrinterDefaults.save(new PrinterDefaults.Defaults("P", "10.0.0.5", 631, "IPP",
+                java.util.Map.of("sides", "two-sided-long-edge", "print-color-mode", "color",
+                        "media", "a4")));
         // Operator switches duplex back to "Printer default", keeping everything else.
-        PrinterDefaults.save(new PrinterDefaults.Defaults(
-                "P", "10.0.0.5", 631, "IPP", null, "color", "a4"));
+        PrinterDefaults.save(new PrinterDefaults.Defaults("P", "10.0.0.5", 631, "IPP",
+                java.util.Map.of("print-color-mode", "color", "media", "a4")));
 
         var d = PrinterDefaults.load();
         assertNull(d.sides(), "a cleared option must read back as null, not \"\"");
         assertEquals("color", d.color(), "clearing one option must not disturb the others");
         assertNull(d.jobAttributes().validationError(),
                 "the resulting job options must still be printable");
+    }
+
+    @Test
+    void arbitraryPrinterOptionsRoundTrip() {
+        // The set of options is the printer's to decide, so storage must hold
+        // whatever it announced — a tray or output bin needs no schema change.
+        PrinterDefaults.save(new PrinterDefaults.Defaults("P", "10.0.0.5", 631, "IPP",
+                java.util.Map.of("media-source", "tray-2", "output-bin", "face-down",
+                        "print-quality", "5")));
+
+        var d = PrinterDefaults.load();
+        assertEquals("tray-2", d.options().get("media-source"));
+        assertEquals("face-down", d.options().get("output-bin"));
+        assertEquals("5", d.options().get("print-quality"));
+    }
+
+    @Test
+    void switchingPrintersDoesNotStrandTheOldOnesOptions() {
+        // An office laser's tray-2 must not ride along to a home inkjet that has
+        // no second tray — the printer would reject a job it never offered.
+        PrinterDefaults.save(new PrinterDefaults.Defaults("Laser", "10.0.0.5", 631, "IPP",
+                java.util.Map.of("media-source", "tray-2", "sides", "two-sided-long-edge")));
+        PrinterDefaults.save(new PrinterDefaults.Defaults("Inkjet", "10.0.0.9", 631, "IPP",
+                java.util.Map.of("sides", "one-sided")));
+
+        var d = PrinterDefaults.load();
+        assertNull(d.options().get("media-source"), "the old printer's tray must not survive");
+        assertEquals("one-sided", d.sides());
+        assertEquals(1, d.options().size(), "only the new printer's options: " + d.options());
     }
 
     @Test

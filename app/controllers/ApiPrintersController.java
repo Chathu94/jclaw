@@ -6,7 +6,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.EventLogger;
+import services.printing.IppClient;
 import services.printing.JobAttributes;
+import services.printing.PrintProtocol;
 import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
 import utils.ApiResponses;
@@ -24,6 +27,8 @@ import static utils.GsonHolder.GSON;
  */
 @With(AuthCheck.class)
 public class ApiPrintersController extends Controller {
+
+    private static final String CATEGORY = "printer";
 
     /**
      * @param name         advertised printer name
@@ -73,11 +78,27 @@ public class ApiPrintersController extends Controller {
             return;
         }
 
-        var attributes = new JobAttributes(str(body, "sides"), str(body, "color"), str(body, "media"));
-        var invalid = attributes.validationError();
+        // Options arrive as an IPP attribute → value map, whatever the printer
+        // offered. Named fields here would mean a code change every time a vendor
+        // exposes something new, which is the opposite of reading capabilities.
+        var options = new java.util.LinkedHashMap<String, String>();
+        if (body.has("options") && body.get("options").isJsonObject()) {
+            for (var entry : body.getAsJsonObject("options").entrySet()) {
+                var value = entry.getValue().isJsonNull() ? null : entry.getValue().getAsString().trim();
+                if (value != null && !value.isEmpty()) {
+                    options.put(entry.getKey(), value);
+                }
+            }
+        }
+
+        // Validate only the attributes JClaw itself interprets. The rest are the
+        // printer's vocabulary — it announced them, and it is the authority on
+        // whether they are valid, so second-guessing here would reject values a
+        // device legitimately offers.
+        var interpreted = new JobAttributes(options.get(PrinterDefaults.OPT_SIDES),
+                options.get(PrinterDefaults.OPT_COLOR), options.get(PrinterDefaults.OPT_MEDIA));
+        var invalid = interpreted.validationError();
         if (invalid != null) {
-            // Rejected on save rather than at print time, so a bad default cannot
-            // sit in config waiting to fail the first real job.
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, invalid);
             return;
         }
@@ -85,18 +106,56 @@ public class ApiPrintersController extends Controller {
         var saved = new PrinterDefaults.Defaults(
                 str(body, "name"), host,
                 body.has("port") && !body.get("port").isJsonNull() ? body.get("port").getAsInt() : 0,
-                str(body, "protocol"),
-                attributes.sides(), attributes.colorMode(), attributes.media());
+                str(body, "protocol"), options);
         PrinterDefaults.save(saved);
         renderJSON(GSON.toJson(saved));
     }
 
-    /** Valid values for the job-option selects, so the panel doesn't hardcode them. */
-    public static void options() {
-        renderJSON(GSON.toJson(java.util.Map.of(
-                "sides", JobAttributes.SIDES_VALUES,
-                "color", JobAttributes.COLOR_MODE_VALUES,
-                "protocols", List.of("IPP", "IPPS", "RAW", "LPD"))));
+    /**
+     * @param options     one entry per job option the printer announced, in a
+     *                    stable order; empty when it would not say
+     * @param protocols   the transports the tool speaks — never printer-specific
+     * @param mediaReady  the paper physically loaded, so the UI can mark it
+     * @param fromPrinter true when {@code options} came from the device
+     */
+    public record JobOptionsResponse(List<IppClient.JobOption> options, List<String> protocols,
+                                     String mediaReady, boolean fromPrinter) {}
+
+    /**
+     * GET /api/printers/options — the job options this printer offers.
+     *
+     * <p>Discovered from the device, not declared here: whatever it announces as
+     * {@code <x>-supported} becomes a select. A printer with trays and output bins
+     * surfaces those; one that only does {@code sides=one-sided} offers exactly
+     * that and nothing an operator could save and have rejected.
+     *
+     * <p>Without a reachable {@code host} the response carries no options and
+     * {@code fromPrinter=false}, which the UI renders as "pick a printer first"
+     * rather than as an empty form.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobOptionsResponse.class)))
+    public static void options(String host, Integer port, String protocol) {
+        var protocols = List.of("IPP", "IPPS", "RAW", "LPD");
+        if (host == null || host.isBlank()) {
+            renderJSON(GSON.toJson(new JobOptionsResponse(List.of(), protocols, null, false)));
+        }
+
+        var printer = PrinterDiscovery.direct(host, port, PrintProtocol.parse(protocol));
+        List<IppClient.JobOption> discovered;
+        String mediaReady = null;
+        try {
+            discovered = IppClient.jobOptions(printer.ippUri());
+            mediaReady = IppClient.rasterCapabilities(printer.ippUri()).mediaReady();
+        } catch (Exception e) {
+            // Unreachable, or not an IPP printer. An empty list with
+            // fromPrinter=false is honest; inventing options would offer settings
+            // this device may reject.
+            EventLogger.warn(CATEGORY, "Could not read job options from %s: %s"
+                    .formatted(host, e.getMessage()));
+            discovered = List.of();
+        }
+        renderJSON(GSON.toJson(new JobOptionsResponse(discovered, protocols, mediaReady,
+                !discovered.isEmpty())));
     }
 
     private static String str(com.google.gson.JsonObject body, String key) {

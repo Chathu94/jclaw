@@ -111,6 +111,42 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
+    void aColourModeThePrinterOffersIsAcceptedEvenIfItIsNotInTheShortList() {
+        // Settings now lists what the device reports. The Canon advertises
+        // auto-monochrome, which is outside the friendly three shown when there is
+        // no printer to ask — validating against that short list would reject a
+        // value the printer itself had just offered.
+        assertFalse(JobAttributes.COLOR_MODE_VALUES.contains("auto-monochrome"),
+                "sanity: auto-monochrome is not in the short UI list");
+        assertNull(new JobAttributes(null, "auto-monochrome", null).validationError(),
+                "a printer-advertised mode must validate");
+
+        // Still a typo catcher, which is the whole point of validating at all.
+        assertNotNull(new JobAttributes(null, "monochromatic", null).validationError());
+    }
+
+    @Test
+    void enumOptionValuesCarryTheCodeNotTheDisplayString() {
+        // JIPP renders enum attributes for humans: print-quality comes back as
+        // "normal(4)" and orientation as "portrait(3)". IPP carries the integer,
+        // so offering the rendered string as the value would have an operator save
+        // print-quality=normal(4), which no printer accepts.
+        var quality = services.printing.IppClient.toOptionValue("normal(4)");
+        assertEquals("4", quality.value(), "the wire value is the enum code");
+        assertEquals("normal", quality.label());
+
+        var resolution = services.printing.IppClient.toOptionValue("600x600 dpi(3)");
+        assertEquals("3", resolution.value());
+        assertEquals("600x600 dpi", resolution.label());
+
+        // Keyword attributes are already wire-ready and must pass through intact —
+        // 'one-sided' is literally what IPP carries.
+        var sides = services.printing.IppClient.toOptionValue("one-sided");
+        assertEquals("one-sided", sides.value());
+        assertEquals("one-sided", sides.label());
+    }
+
+    @Test
     void legalPaperGetsLegalGeometry() {
         var legal = PrintRenderer.PageSize.fromMedia("na_legal_8.5x14in", 300);
         // 8.5 x 14in. Falling through to A4 here is what put A4-shaped pixels in a

@@ -191,6 +191,129 @@ public final class IppClient {
         return new RasterCapabilities(dpi, typeSet.contains("sgray_8"), typeSet, mediaReady);
     }
 
+    /**
+     * One job option this printer announced, ready to render as a select.
+     *
+     * @param name         the IPP job-template attribute name, e.g. {@code sides}
+     * @param label        a human label for the UI
+     * @param values       the values this printer accepts, from {@code <name>-supported}
+     * @param defaultValue what it uses when a job omits the attribute, or null
+     */
+    public record JobOption(String name, String label, java.util.List<OptionValue> values,
+                            String defaultValue) {}
+
+    /**
+     * One selectable value: what to show, and what to actually send.
+     *
+     * <p>They differ for enum-typed attributes. JIPP renders those for humans —
+     * {@code print-quality} comes back as {@code "normal(4)"} and
+     * {@code orientation-requested} as {@code "portrait(3)"} — but IPP carries the
+     * integer. Offering the display string as the value would have the operator
+     * save {@code print-quality=normal(4)}, which no printer accepts.
+     *
+     * @param value what goes on the wire
+     * @param label what the operator reads
+     */
+    public record OptionValue(String value, String label) {}
+
+    /** {@code name(code)} → the code; anything else is its own value. */
+    private static final java.util.regex.Pattern ENUM_DISPLAY =
+            java.util.regex.Pattern.compile("^(.*)\\((\\d+)\\)$");
+
+    public static OptionValue toOptionValue(String rendered) {
+        var m = ENUM_DISPLAY.matcher(rendered);
+        if (m.matches()) {
+            return new OptionValue(m.group(2), m.group(1).trim());
+        }
+        return new OptionValue(rendered, rendered);
+    }
+
+    /**
+     * IPP job-template attributes worth offering an operator, mapped to labels.
+     *
+     * <p>An allow-list rather than "everything ending in -supported", because that
+     * suffix is also used for things no one sets per job — {@code operations-supported},
+     * {@code ipp-versions-supported}, {@code charset-supported}. Those are protocol
+     * facts, not print options, and a form full of them would be worse than the
+     * three hardcoded selects this replaced.
+     *
+     * <p>Which of these actually appear is entirely the printer's choice: it is
+     * asked what it announces, not told what to have. A device offering
+     * {@code output-bin} gets an output-bin select without anything here changing.
+     */
+    private static final java.util.Map<String, String> JOB_TEMPLATE_LABELS =
+            java.util.LinkedHashMap.newLinkedHashMap(12);
+
+    static {
+        JOB_TEMPLATE_LABELS.put("media", "Paper");
+        JOB_TEMPLATE_LABELS.put("media-type", "Paper type");
+        JOB_TEMPLATE_LABELS.put("media-source", "Tray");
+        JOB_TEMPLATE_LABELS.put("sides", "Sides");
+        JOB_TEMPLATE_LABELS.put("print-color-mode", "Colour");
+        JOB_TEMPLATE_LABELS.put("print-quality", "Quality");
+        JOB_TEMPLATE_LABELS.put("printer-resolution", "Resolution");
+        JOB_TEMPLATE_LABELS.put("orientation-requested", "Orientation");
+        JOB_TEMPLATE_LABELS.put("output-bin", "Output bin");
+        JOB_TEMPLATE_LABELS.put("print-scaling", "Scaling");
+        JOB_TEMPLATE_LABELS.put("number-up", "Pages per sheet");
+        JOB_TEMPLATE_LABELS.put("finishings", "Finishing");
+    }
+
+    private static final String SUPPORTED = "-supported";
+
+    /**
+     * Every job option this printer announces, discovered rather than assumed.
+     *
+     * <p>Walks the printer-attributes group looking for {@code <x>-supported},
+     * which is IPP's own convention for "here are the values I accept for job
+     * attribute {@code <x>}". The printer decides what appears; JClaw only decides
+     * which attribute names are meaningful to an operator.
+     *
+     * <p>The alternative — a fixed set of selects with dynamic values — cannot
+     * represent a printer that offers trays, output bins or quality levels, and
+     * silently hides them.
+     */
+    public static java.util.List<JobOption> jobOptions(String printerUri) throws IOException {
+        var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
+                AttributeGroup.groupOf(Tag.operationAttributes,
+                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesNaturalLanguage.of("en"),
+                        Types.printerUri.of(URI.create(printerUri))));
+        var response = exchange(printerUri, packet, null);
+        var group = response.get(Tag.printerAttributes);
+        if (group == null) {
+            return java.util.List.of();
+        }
+
+        // Index by name once: the group is a flat list and defaults are looked up
+        // per option, so scanning it repeatedly would be quadratic on a printer
+        // that returns a couple of hundred attributes.
+        var byName = new java.util.HashMap<String, com.hp.jipp.encoding.Attribute<?>>();
+        for (var attribute : group) {
+            byName.put(attribute.getName(), attribute);
+        }
+
+        var options = new java.util.ArrayList<JobOption>();
+        // JOB_TEMPLATE_LABELS order, not the printer's, so the form is stable
+        // across devices instead of reshuffling with each vendor's attribute order.
+        for (var entry : JOB_TEMPLATE_LABELS.entrySet()) {
+            var supported = byName.get(entry.getKey() + SUPPORTED);
+            if (supported == null) {
+                continue;
+            }
+            var values = supported.strings();
+            if (values == null || values.isEmpty()) {
+                continue;
+            }
+            var defaults = byName.get(entry.getKey() + "-default");
+            var defaultValue = defaults == null || defaults.strings().isEmpty()
+                    ? null : toOptionValue(defaults.strings().getFirst()).label();
+            options.add(new JobOption(entry.getKey(), entry.getValue(),
+                    values.stream().map(IppClient::toOptionValue).toList(), defaultValue));
+        }
+        return java.util.List.copyOf(options);
+    }
+
     /** Query a printer's own state (Get-Printer-Attributes). */
     public static String printerState(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),

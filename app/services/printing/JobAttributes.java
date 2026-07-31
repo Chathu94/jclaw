@@ -32,13 +32,29 @@ public record JobAttributes(String sides, String colorMode, String media) {
             List.of(Sides.oneSided, Sides.twoSidedLongEdge, Sides.twoSidedShortEdge);
 
     /**
-     * The {@code print-color-mode} keywords offered. JIPP knows several more
-     * (bi-level, highlight, process-monochrome); these three are the ones with
-     * broad printer support and unambiguous meaning to a model choosing between
-     * "colour" and "black and white".
+     * The {@code print-color-mode} keywords offered when we have no printer to
+     * ask. Three, because they are unambiguous to a model choosing between
+     * "colour" and "black and white" — a menu of eight is not more useful here.
+     *
+     * <p>This is a UI default, NOT the validation vocabulary. See
+     * {@link #ALL_COLOR_MODES}.
      */
     public static final List<String> COLOR_MODE_VALUES =
             List.of(PrintColorMode.color, PrintColorMode.monochrome, PrintColorMode.auto);
+
+    /**
+     * Every {@code print-color-mode} keyword RFC 8011 defines, used for validation.
+     *
+     * <p>Distinct from {@link #COLOR_MODE_VALUES} because a printer may legitimately
+     * offer modes outside the friendly three: the Canon advertises
+     * {@code auto-monochrome}. Once Settings lists what the device reports, an
+     * operator can pick one of those — and validating against the short list would
+     * reject a value the printer itself just offered.
+     */
+    public static final List<String> ALL_COLOR_MODES = List.of(
+            PrintColorMode.auto, PrintColorMode.autoMonochrome, PrintColorMode.biLevel,
+            PrintColorMode.color, PrintColorMode.highlight, PrintColorMode.monochrome,
+            PrintColorMode.processBiLevel, PrintColorMode.processMonochrome);
 
     /** True when nothing was requested, so no job-attributes group is emitted at all. */
     public boolean isEmpty() {
@@ -69,8 +85,8 @@ public record JobAttributes(String sides, String colorMode, String media) {
         if (sides != null && !SIDES_VALUES.contains(sides)) {
             return "invalid 'sides' value '" + sides + "'; expected one of " + SIDES_VALUES;
         }
-        if (colorMode != null && !COLOR_MODE_VALUES.contains(colorMode)) {
-            return "invalid 'color' value '" + colorMode + "'; expected one of " + COLOR_MODE_VALUES;
+        if (colorMode != null && !ALL_COLOR_MODES.contains(colorMode)) {
+            return "invalid 'color' value '" + colorMode + "'; expected one of " + ALL_COLOR_MODES;
         }
         return null;
     }

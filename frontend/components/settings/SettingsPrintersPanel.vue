@@ -21,21 +21,48 @@ interface PrinterDefaults {
   host: string | null
   port: number
   protocol: string | null
-  sides: string | null
-  color: string | null
-  media: string | null
+  /** IPP attribute → chosen value, for whatever this printer offers. */
+  options: Record<string, string>
+}
+
+/** One job option the printer announced — the UI has no list of its own. */
+/** A selectable value: what to send, and what to show. They differ for enums —
+ *  print-quality is carried as '4' but reads as 'normal'. */
+interface OptionValue {
+  value: string
+  label: string
+}
+
+interface JobOption {
+  /** IPP attribute name, e.g. 'sides' or 'media-source'. */
+  name: string
+  label: string
+  values: OptionValue[]
+  defaultValue: string | null
 }
 
 interface PrinterOptions {
-  sides: string[]
-  color: string[]
+  options: JobOption[]
   protocols: string[]
+  mediaReady: string | null
+  /** True when options came from the device rather than there being none. */
+  fromPrinter: boolean
 }
 
 const { mutate } = useApiMutation()
 
 const { data: saved, refresh: refreshSaved } = useLazyFetch<PrinterDefaults>('/api/printers/default')
-const { data: options } = useLazyFetch<PrinterOptions>('/api/printers/options')
+// Options are per-printer, not global: this Canon reports sides-supported =
+// one-sided only, so offering duplex would let an operator save a default the
+// printer must reject. Re-queried whenever the selected printer changes.
+const options = ref<PrinterOptions | null>(null)
+
+async function loadOptions(host?: string | null, port?: number | null, protocol?: string | null) {
+  const query = host
+    ? `?host=${encodeURIComponent(host)}&port=${port || 0}&protocol=${protocol || ''}`
+    : ''
+  options.value = await $fetch<PrinterOptions>(`/api/printers/options${query}`).catch(() => null)
+}
 
 const found = ref<PrinterEntry[] | null>(null)
 const scanning = ref(false)
@@ -43,10 +70,10 @@ const savingState = ref(false)
 const notice = ref<string | null>(null)
 const problem = ref<string | null>(null)
 
-// Draft job options, seeded from whatever is saved. '' means "printer's default".
-const sides = ref('')
-const color = ref('')
-const media = ref('')
+// Draft option values keyed by IPP attribute name. '' means "printer's default".
+// A map rather than named refs: the set of controls is the printer's to decide,
+// so the component cannot know them ahead of time.
+const draft = ref<Record<string, string>>({})
 
 // Manual entry. Not a convenience: mDNS is link-local, so it is blocked on most
 // VPNs and in any container without a multicast route — the exact networks where
@@ -57,10 +84,19 @@ const manualPort = ref('')
 const manualProtocol = ref('')
 
 watch(saved, (s) => {
-  sides.value = s?.sides ?? ''
-  color.value = s?.color ?? ''
-  media.value = s?.media ?? ''
+  draft.value = { ...(s?.options ?? {}) }
+  loadOptions(s?.host, s?.port, s?.protocol)
 }, { immediate: true })
+
+/** Only the options this printer actually offers, dropping any stale leftovers. */
+function draftForPrinter(): Record<string, string> {
+  const offered = new Set((options.value?.options ?? []).map(o => o.name))
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(draft.value)) {
+    if (v && offered.has(k)) out[k] = v
+  }
+  return out
+}
 
 const hasDefault = computed(() => !!saved.value?.host)
 
@@ -97,7 +133,7 @@ async function scan() {
 async function chooseDefault(p: PrinterEntry) {
   await persist({
     name: p.name, host: p.host, port: p.port, protocol: p.protocol,
-    sides: sides.value || null, color: color.value || null, media: media.value || null,
+    options: draftForPrinter(),
   })
 }
 
@@ -110,7 +146,7 @@ async function useManual() {
     name: host, host,
     port: Number.isFinite(port) && port > 0 ? port : 0,
     protocol: manualProtocol.value || null,
-    sides: sides.value || null, color: color.value || null, media: media.value || null,
+    options: draftForPrinter(),
   })
   manualHost.value = ''
   manualPort.value = ''
@@ -122,7 +158,7 @@ async function saveOptions() {
   await persist({
     name: saved.value.name, host: saved.value.host, port: saved.value.port,
     protocol: saved.value.protocol,
-    sides: sides.value || null, color: color.value || null, media: media.value || null,
+    options: draftForPrinter(),
   })
 }
 
@@ -303,69 +339,64 @@ async function persist(body: Record<string, unknown>) {
       </div>
     </div>
 
-    <!-- Job options -->
+    <!-- Job options. One select per attribute the printer announced; the panel
+         has no list of its own, so a device offering trays or output bins gets
+         those controls without a frontend change. -->
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5">
         <span class="text-sm font-medium text-fg-strong">Job options</span>
         <div class="text-xs text-fg-muted mt-0.5">
-          Applied to jobs that don't specify their own. Leave any of them on
-          <em>Printer default</em> to let the printer decide. These travel over IPP only — a job
-          that falls back to a raw socket or LPD prints with the printer's own settings, and the
-          tool says so when that happens.
+          Applied to jobs that don't specify their own. Leave any on <em>Printer default</em> to
+          let the printer decide. These travel over IPP only — a job that falls back to a raw
+          socket or LPD prints with the printer's own settings, and the tool says so.
         </div>
       </div>
-      <div class="px-4 pb-3 grid gap-3 sm:grid-cols-3">
+
+      <div
+        v-if="options?.fromPrinter"
+        class="px-4 pb-3 grid gap-3 sm:grid-cols-3"
+      >
         <label
-          for="printer-default-sides"
+          v-for="opt in options.options"
+          :key="opt.name"
+          :for="`printer-opt-${opt.name}`"
           class="block"
         >
-          <span class="block text-[11px] text-fg-muted mb-1">Sides</span>
+          <span class="block text-[11px] text-fg-muted mb-1">{{ opt.label }}</span>
           <select
-            id="printer-default-sides"
-            v-model="sides"
+            :id="`printer-opt-${opt.name}`"
+            v-model="draft[opt.name]"
             class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
           >
-            <option value="">Printer default</option>
+            <option value="">
+              Printer default<template v-if="opt.defaultValue"> ({{ opt.defaultValue }})</template>
+            </option>
             <option
-              v-for="v in options?.sides ?? []"
-              :key="v"
-              :value="v"
-            >{{ v }}</option>
+              v-for="v in opt.values"
+              :key="v.value"
+              :value="v.value"
+            >{{ v.label }}{{ opt.name === 'media' && v.value === options.mediaReady ? ' — loaded' : '' }}</option>
           </select>
-        </label>
-        <label
-          for="printer-default-color"
-          class="block"
-        >
-          <span class="block text-[11px] text-fg-muted mb-1">Colour</span>
-          <select
-            id="printer-default-color"
-            v-model="color"
-            class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
-          >
-            <option value="">Printer default</option>
-            <option
-              v-for="v in options?.color ?? []"
-              :key="v"
-              :value="v"
-            >{{ v }}</option>
-          </select>
-        </label>
-        <label
-          for="printer-default-media"
-          class="block"
-        >
-          <span class="block text-[11px] text-fg-muted mb-1">Paper / tray</span>
-          <input
-            id="printer-default-media"
-            v-model="media"
-            type="text"
-            placeholder="iso_a4_210x297mm"
-            class="w-full px-2 py-1.5 text-xs bg-surface border border-border"
-          >
         </label>
       </div>
-      <div class="px-4 pb-3 flex justify-end">
+
+      <div
+        v-else
+        class="px-4 pb-3 text-xs text-fg-muted"
+      >
+        <template v-if="hasDefault">
+          This printer reported no job options — it may not speak IPP, or may be unreachable.
+          Jobs will use its own settings.
+        </template>
+        <template v-else>
+          Set a default printer above and its options appear here, read from the device.
+        </template>
+      </div>
+
+      <div
+        v-if="options?.fromPrinter"
+        class="px-4 pb-3 flex justify-end"
+      >
         <button
           :disabled="savingState || !hasDefault"
           class="px-3 py-1.5 text-xs font-medium text-white bg-accent hover:opacity-90
