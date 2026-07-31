@@ -265,6 +265,19 @@ The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Res
 
 When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
+## Restart
+
+Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart` — the same command you'd run by hand — so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.
+
+Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running — the moment you most want to reboot is usually the moment something is stuck — so the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
+
+The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. Two details worth knowing:
+
+- **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running — bouncing it would kill the very server that rendered the page you clicked from.
+- **In a source checkout** a production restart recompiles and may rebuild the SPA, so expect minutes rather than seconds. A packaged install boots straight from `precompiled/` and comes back in well under a minute. The panel tells you which case you're in before you confirm.
+
+If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
+
 ## Unmanaged keys
 
 A read-only diagnostic list that appears only when the Config DB contains keys not owned by any section above. Usually stale rows from a prior schema or mid-migration state — a signal that something needs cleanup, not a place to add new config.

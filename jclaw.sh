@@ -596,6 +596,9 @@ Stop and start as one operation. Accepts the same flags as 'start'.
 
 Options:
   --dev                   Restart in dev mode
+  --backend-only          Restart the Play backend only, leaving the Nuxt
+                          dev server running (dev mode only; ignored in
+                          prod, where one JVM serves both)
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
@@ -605,6 +608,7 @@ Environment:
 Examples:
   ${INVOKE} restart
   ${INVOKE} --dev restart
+  ${INVOKE} --dev restart --backend-only
 EOF
     else
         cat <<EOF
@@ -1006,6 +1010,12 @@ EOF
 
 # Parse arguments
 DEV_MODE=false
+# Restart/start/stop the Play backend only, leaving the Nuxt dev server up
+# (dev mode only — prod serves the SPA as static files from the same JVM, so
+# there is no second process to spare). Exists for the in-app restart button:
+# bouncing Nuxt would tear down the very dev server that served the page
+# issuing the request, so the browser could never observe the result.
+BACKEND_ONLY=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
@@ -1052,6 +1062,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --dev)
             DEV_MODE=true
+            shift
+            ;;
+        --backend-only)
+            BACKEND_ONLY=true
             shift
             ;;
         --backend-port)
@@ -2777,13 +2791,17 @@ do_start_dev() {
     load_env_file
     require_application_secret
 
-    # Ensure dependencies are installed
-    validate_corepack_pnpm
+    # Ensure dependencies are installed. Skipped under --backend-only: the
+    # Nuxt dev server is staying up on the deps it already resolved, so this
+    # is pure added latency on the in-app restart path.
+    if [[ "$BACKEND_ONLY" != true ]]; then
+        validate_corepack_pnpm
 
-    echo "==> Checking frontend dependencies..."
-    cd "$SCRIPT_DIR/frontend"
-    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-    cd "$SCRIPT_DIR"
+        echo "==> Checking frontend dependencies..."
+        cd "$SCRIPT_DIR/frontend"
+        pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+        cd "$SCRIPT_DIR"
+    fi
 
     # Backend dep resolution is implicit — Gradle runs it as a transitive
     # step of `play run` below (1.13.x; PF-90). No more `play deps --sync`.
@@ -2840,6 +2858,15 @@ do_start_dev() {
         fi
     done
 
+    if [[ "$BACKEND_ONLY" == true ]]; then
+        echo ""
+        echo "JClaw backend restarted (dev):"
+        echo "  Backend:  http://localhost:$BACKEND_PORT  (pid: $play_pid)"
+        echo "  Frontend: untouched (--backend-only)"
+        echo "  Logs:     logs/backend-dev.out"
+        return
+    fi
+
     echo "==> Starting Nuxt dev server on port $FRONTEND_PORT..."
     cd "$SCRIPT_DIR/frontend"
     PORT="$FRONTEND_PORT" JCLAW_BACKEND_PORT="$BACKEND_PORT" nohup pnpm dev > "$SCRIPT_DIR/logs/frontend-dev.out" 2>&1 &
@@ -2888,7 +2915,9 @@ do_stop_dev() {
     local stopped=0
 
     # Stop frontend (pnpm dev)
-    if [[ -f "$FRONTEND_PID_FILE" ]]; then
+    if [[ "$BACKEND_ONLY" == true ]]; then
+        echo "    Leaving Nuxt dev server running (--backend-only)"
+    elif [[ -f "$FRONTEND_PID_FILE" ]]; then
         local fpid
         fpid=$(cat "$FRONTEND_PID_FILE")
         if kill -0 "$fpid" 2>/dev/null; then
@@ -2904,12 +2933,17 @@ do_stop_dev() {
         echo "    No frontend pid file found"
     fi
 
-    # Clean up any orphan still holding the frontend port
-    local orphan
-    orphan=$(lsof -ti :"$FRONTEND_PORT" 2>/dev/null) || true
-    if [[ -n "$orphan" ]]; then
-        echo "    Cleaning up orphan process on port $FRONTEND_PORT (pid: $orphan)..."
-        kill $orphan 2>/dev/null || true
+    # Clean up any orphan still holding the frontend port. Skipped under
+    # --backend-only, where the live Nuxt we are deliberately sparing is
+    # itself the process holding that port — sweeping it here would kill
+    # exactly what the flag exists to preserve.
+    if [[ "$BACKEND_ONLY" != true ]]; then
+        local orphan
+        orphan=$(lsof -ti :"$FRONTEND_PORT" 2>/dev/null) || true
+        if [[ -n "$orphan" ]]; then
+            echo "    Cleaning up orphan process on port $FRONTEND_PORT (pid: $orphan)..."
+            kill $orphan 2>/dev/null || true
+        fi
     fi
 
     # Stop backend (play run — we manage the pid file, not Play). The

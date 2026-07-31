@@ -15,6 +15,7 @@
  */
 import type { Component } from 'vue'
 import {
+  ArrowPathIcon,
   ArrowUpTrayIcon,
   BoltIcon,
   ChatBubbleBottomCenterTextIcon,
@@ -47,6 +48,7 @@ import SettingsOcrPanel from './SettingsOcrPanel.vue'
 import SettingsPasswordPanel from './SettingsPasswordPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
 import SettingsProvidersPanel from './SettingsProvidersPanel.vue'
+import SettingsRestartPanel from './SettingsRestartPanel.vue'
 import SettingsSearchPanel from './SettingsSearchPanel.vue'
 import SettingsShellPanel from './SettingsShellPanel.vue'
 import SettingsSkillsPanel from './SettingsSkillsPanel.vue'
@@ -90,6 +92,10 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
+      // Last in the group deliberately: it's the one section whose primary
+      // control takes the instance down, so it shouldn't sit next to the
+      // section the rail opens on by default.
+      { id: 'restart', title: 'Restart', icon: ArrowPathIcon, component: SettingsRestartPanel },
     ],
   },
   {

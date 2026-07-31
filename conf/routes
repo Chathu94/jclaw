@@ -242,6 +242,11 @@ PUT     /api/channels/{channelType}             ApiChannelsController.save
 GET     /api/tailscale                          ApiTailscaleController.status
 POST    /api/tailscale                          ApiTailscaleController.toggle
 
+# Instance maintenance. GET is the preflight (what a restart interrupts);
+# POST hands off to jclaw.sh and acks 202 — the JVM it reboots is this one.
+GET     /api/system/restart                     ApiSystemController.restartPreflight
+POST    /api/system/restart                     ApiSystemController.restart
+
 # Webhooks (no auth — verified by their own mechanisms)
 POST    /api/webhooks/telegram/{bindingId}      WebhookTelegramController.webhook
 POST    /api/webhooks/slack/{bindingId}         WebhookSlackController.webhook
