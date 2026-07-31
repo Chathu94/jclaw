@@ -63,6 +63,13 @@ class McpConnectionManagerTest extends UnitTest {
             function send(obj) { process.stdout.write(JSON.stringify(obj) + '\\n'); }
             """;
 
+    /** Handshakes normally, then exits — a server that dies after connecting,
+     *  which is what drives the watchdog's teardown-and-reconnect path. The
+     *  300 ms is measured from spawn and the handshake takes tens of ms, so
+     *  tools/list always lands first. */
+    private static final String DIES_AFTER_HANDSHAKE_SCRIPT =
+            FIXTURE_SCRIPT + "setTimeout(() => process.exit(0), 300);\n";
+
     private Path fixturePath;
 
     @BeforeEach
@@ -168,6 +175,51 @@ class McpConnectionManagerTest extends UnitTest {
         assertFalse(toolRegistered("mcp_fixture_echo"),
                 "stop() must unregister the server's tools");
         assertEquals(McpServer.Status.DISCONNECTED, McpConnectionManager.status("fixture"));
+    }
+
+    @Test
+    void toolListNeverOutlivesConnectedStatus() throws Exception {
+        // The watchdog teardown leaves entry.client attached while it drops the
+        // entry out of CONNECTED, so a tool read that only null-checked the
+        // client kept reporting the dead client's cached list for the whole
+        // reconnect. That surfaced in Settings as a row reading CONNECTING
+        // beside its full tool count.
+        McpConnectionManager.setBackoff(400, 800);  // widen the window setUp shrinks
+        var server = seedStdioServer("flaps", DIES_AFTER_HANDSHAKE_SCRIPT);
+        McpConnectionManager.connect(server);
+        awaitState("flaps", McpServer.Status.CONNECTED, 10);
+        assertFalse(McpConnectionManager.tools("flaps").isEmpty(),
+                "a CONNECTED server must advertise its tools");
+
+        // Sample across several death/reconnect cycles. Asserts no timing of
+        // its own — only that the two reads never disagree, whenever we look.
+        var deadline = System.currentTimeMillis() + 3_000;
+        var sawNotConnected = false;
+        while (System.currentTimeMillis() < deadline) {
+            if (McpConnectionManager.status("flaps") != McpServer.Status.CONNECTED) {
+                sawNotConnected = true;
+                assertFalse(sustainedDisagreement(),
+                        "tools() must report nothing while the entry is not CONNECTED");
+            }
+            Thread.sleep(10);
+        }
+        // Known-zero guard: without a single non-CONNECTED sample the loop above
+        // asserted nothing, and a vacuous pass would read as coverage.
+        assertTrue(sawNotConnected, "fixture should have died at least once");
+    }
+
+    /** Status and tools are two reads, so one disagreeing sample can be an
+     *  artifact of a legitimate transition landing between them. Require it to
+     *  persist — under the bug it lasts the whole reconnect, not 30 ms. */
+    private static boolean sustainedDisagreement() throws InterruptedException {
+        for (var i = 0; i < 3; i++) {
+            if (McpConnectionManager.status("flaps") == McpServer.Status.CONNECTED
+                    || McpConnectionManager.tools("flaps").isEmpty()) {
+                return false;
+            }
+            Thread.sleep(10);
+        }
+        return true;
     }
 
     // ==================== JCLAW-32: allowlist + MCP_TOOL_UNREGISTER ====================

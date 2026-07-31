@@ -255,9 +255,20 @@ public final class McpConnectionManager {
         return e != null && e.requiresApproval;
     }
 
+    /**
+     * Advertised tools, but only while the entry is actually CONNECTED.
+     *
+     * <p>The status gate is load-bearing: {@code entry.client} is attached
+     * before {@link #doConnect} flips the status, and the watchdog leaves it
+     * attached while tearing a dead connection down — so a bare null check
+     * reports a full tool list both during a connect and during the whole
+     * reconnect after one. That surfaced as a Settings row reading CONNECTING
+     * beside its complete 72-tool count for the ~90s a docker-backed server
+     * takes to come up. Callers already treat empty as "not connected".
+     */
     public static List<McpToolDef> tools(String serverName) {
         var e = connections.get(serverName);
-        if (e == null || e.client == null) return List.of();
+        if (e == null || e.client == null || e.status != McpServer.Status.CONNECTED) return List.of();
         return e.client.tools();
     }
 

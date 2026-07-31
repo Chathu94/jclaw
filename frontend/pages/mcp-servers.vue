@@ -177,10 +177,9 @@ async function saveForm() {
   await refresh()
   editing.value = null
   expandedRowId.value = null
-  // A newly-created or edited server may be in CONNECTING for a few
-  // seconds while the connector handshakes. Poll so the badge ticks
-  // over to CONNECTED/ERROR without requiring a manual refresh.
-  await pollUntilStable()
+  // A newly-created or edited server enters CONNECTING immediately; drop the
+  // watcher out of its idle wait so the badge tracks from the first tick.
+  kick()
 }
 
 async function toggleEnabled(s: McpServer) {
@@ -189,25 +188,67 @@ async function toggleEnabled(s: McpServer) {
     body: { enabled: !s.enabled },
   })
   await refresh()
-  await pollUntilStable()
+  kick()
+}
+
+/** Cadence while a row is mid-handshake — fast enough to read as live. */
+const FAST_POLL_MS = 600
+/**
+ * Idle heartbeat. Connections change without the operator touching anything:
+ * the backend's watchdog tears down and reconnects a server whose transport
+ * dies, so a burst armed only at mount would miss every transition that
+ * starts while the page sits open.
+ */
+const SLOW_POLL_MS = 10_000
+
+let watching = false
+/** Resolver for the in-flight sleep, so a mutation can cut it short. */
+let wake: (() => void) | null = null
+
+/** Sleep that {@link kick} can end early. */
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(done, ms)
+    wake = done
+    function done() {
+      clearTimeout(timer)
+      wake = null
+      resolve()
+    }
+  })
+}
+
+/** Collapse the current wait so a just-mutated row updates at once. */
+function kick() {
+  wake?.()
 }
 
 /**
- * Poll the list while any row is in CONNECTING state. The connect handshake
- * takes a few seconds (Docker spawn for STDIO, network handshake for HTTP),
- * during which the row would otherwise display "CONNECTING" indefinitely
- * because the page only re-fetches on user actions. Bounded by maxAttempts
- * to avoid an infinite loop on a server stuck in CONNECTING.
+ * Track connection state for as long as the page is open, polling fast while
+ * anything is CONNECTING and idling otherwise.
+ *
+ * <p>Deliberately unbounded rather than capped at an attempt count: a
+ * docker-backed STDIO server takes ~90s to spawn, handshake and sync its
+ * allowlist, so any ceiling short enough to be tidy gives up while the
+ * slowest server is still legitimately connecting. The page lifetime is the
+ * bound.
  */
-async function pollUntilStable() {
-  const intervalMs = 600
-  const maxAttempts = 60 // ~36s ceiling, well past the 30s request timeout
-  for (let i = 0; i < maxAttempts; i++) {
-    if (!servers.value?.some(row => row.status === 'CONNECTING')) return
-    await new Promise(r => setTimeout(r, intervalMs))
+async function watchStatuses() {
+  if (watching) return
+  watching = true
+  while (watching) {
+    const connecting = servers.value?.some(row => row.status === 'CONNECTING') ?? false
+    await sleep(connecting ? FAST_POLL_MS : SLOW_POLL_MS)
+    if (!watching) return
     await refresh()
   }
 }
+
+onMounted(watchStatuses)
+onBeforeUnmount(() => {
+  watching = false
+  kick()
+})
 
 async function deleteServer(s: McpServer) {
   const ok = await confirm({
