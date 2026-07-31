@@ -108,6 +108,30 @@ public final class IppClient {
                 status == null ? "no status returned" : status.getName());
     }
 
+    /**
+     * The document formats this printer says it accepts, lowercased.
+     *
+     * <p>Asked over IPP rather than read from the mDNS {@code pdl} TXT record
+     * because the two disagree: the Canon's TXT record and its
+     * {@code document-format-supported} attribute list different sets, and the
+     * IPP attribute is the one the Print-Job operation is actually validated
+     * against. Empty when the printer will not say.
+     */
+    public static java.util.Set<String> supportedFormats(String printerUri) throws IOException {
+        var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
+                AttributeGroup.groupOf(Tag.operationAttributes,
+                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesNaturalLanguage.of("en"),
+                        Types.printerUri.of(URI.create(printerUri))));
+        var response = exchange(printerUri, packet, null);
+        var formats = response.getStrings(Tag.printerAttributes, Types.documentFormatSupported);
+        if (formats == null || formats.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return formats.stream().map(f -> f.toLowerCase().trim())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
     /** Query a printer's own state (Get-Printer-Attributes). */
     public static String printerState(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),

@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Picks a print backend and sends the job (JCLAW-911).
@@ -133,6 +134,27 @@ public final class PrintDispatcher {
         return order;
     }
 
+    /**
+     * Formats the printer admits to, or empty when it will not say.
+     *
+     * <p>A failure here is not a print failure: an unreachable Get-Printer-Attributes
+     * just means we negotiate blind and send the source as-is, which is exactly the
+     * behaviour from before negotiation existed.
+     */
+    private static Set<String> supportedFormats(DiscoveredPrinter printer) {
+        try {
+            var formats = IppClient.supportedFormats(printer.ippUri());
+            if (!formats.isEmpty()) {
+                return formats;
+            }
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "Could not read supported formats from %s: %s"
+                    .formatted(printer.name(), e.getMessage()));
+        }
+        // Fall back to what mDNS advertised, which needs no round trip.
+        return PrintFormatNegotiator.advertisedFormats(printer);
+    }
+
     /** One backend attempt. Returns null when the backend ran but the printer refused. */
     private static Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
                                    String jobName, String user, String documentFormat,
@@ -144,8 +166,14 @@ public final class PrintDispatcher {
 
         switch (protocol) {
             case IPP, IPPS -> {
+                // Ask what this printer takes, then send something it takes.
+                // Sending the source with its own MIME type is what produced
+                // client-error-document-format-not-supported on a printer whose
+                // list is octet-stream / jpeg / urf / pwg-raster.
+                var prepared = PrintFormatNegotiator.prepare(document, documentFormat,
+                        supportedFormats(printer), job);
                 var result = IppClient.print(printer.ippUri(), jobName, user,
-                        documentFormat, document, job);
+                        prepared.format(), prepared.document(), job);
                 if (!result.accepted()) {
                     // Carry the IPP status name, which is the whole point of IPP
                     // being tried first. "client-error-document-format-not-supported"
@@ -153,12 +181,14 @@ public final class PrintDispatcher {
                     // "printer-stopped" tells them to go look at the device. Collapsing
                     // both to "rejected" throws away the only actionable part.
                     throw new IOException("printer rejected the job — " + result.message()
-                            + " (sent as " + (documentFormat == null ? "no format" : documentFormat) + ")");
+                            + " (sent as " + prepared.format() + ")");
                 }
                 var applied = job.isEmpty() ? "" : " with " + job.describe();
+                var conversion = prepared.explanation() == null
+                        ? "" : " — " + prepared.explanation();
                 return new Outcome(protocol, result.jobId(), result.state(), true, null, List.of(),
                         "accepted as job " + result.jobId() + applied
-                                + " (" + result.message() + ")");
+                                + " (" + result.message() + ")" + conversion);
             }
             case RAW -> {
                 var port = printer.protocol() == PrintProtocol.RAW
