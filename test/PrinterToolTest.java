@@ -130,6 +130,40 @@ class PrinterToolTest extends UnitTest {
     }
 
     @Test
+    void schemaOffersTheJobTemplateAttributes() {
+        @SuppressWarnings("unchecked")
+        var properties = (Map<String, Object>) new PrinterTool().parameters().get("properties");
+
+        // Map.of caps at ten pairs and this set is eleven — a regression to Map.of
+        // would not compile, but a dropped property would compile fine.
+        assertTrue(properties.containsKey("sides"), "duplex control missing");
+        assertTrue(properties.containsKey("color"), "colour control missing");
+        assertTrue(properties.containsKey("media"), "tray/paper control missing");
+
+        @SuppressWarnings("unchecked")
+        var sides = (Map<String, Object>) properties.get("sides");
+        @SuppressWarnings("unchecked")
+        var sidesEnum = (List<String>) sides.get("enum");
+        // The RFC 8011 keywords exactly — a printer rejects anything else.
+        assertEquals(List.of("one-sided", "two-sided-long-edge", "two-sided-short-edge"), sidesEnum);
+    }
+
+    @Test
+    void invalidJobAttributesAreRejectedBeforeAnyNetworkCall() {
+        // Caught here rather than at the printer, which answers with an IPP status
+        // that names no offending value.
+        var out = run("{\"action\":\"print\",\"host\":\"127.0.0.1\","
+                + "\"text\":\"hi\",\"sides\":\"both\"}");
+        assertTrue(out.startsWith("Error:"), out);
+        assertTrue(out.contains("sides") && out.contains("both"), out);
+
+        var color = run("{\"action\":\"print\",\"host\":\"127.0.0.1\","
+                + "\"text\":\"hi\",\"color\":\"rainbow\"}");
+        assertTrue(color.startsWith("Error:"), color);
+        assertTrue(color.contains("rainbow"), color);
+    }
+
+    @Test
     void documentFormatIsInferredFromTheExtension() {
         assertEquals("application/pdf", PrinterTool.formatFor("report.PDF"));
         assertEquals("application/postscript", PrinterTool.formatFor("a.ps"));

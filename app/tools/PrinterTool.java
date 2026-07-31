@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import services.WorkspaceFiles;
 import services.printing.DiscoveredPrinter;
+import services.printing.JobAttributes;
 import services.printing.PrintDispatcher;
 import services.printing.PrintProtocol;
 import services.printing.PrinterDiscovery;
@@ -40,6 +41,9 @@ public class PrinterTool implements ToolRegistry.Tool {
     private static final String ARG_JOB_ID = "jobId";
     private static final String ARG_PATH = "path";
     private static final String ARG_TEXT = "text";
+    private static final String ARG_SIDES = "sides";
+    private static final String ARG_COLOR = "color";
+    private static final String ARG_MEDIA = "media";
 
     /** Upper bound on a job we will read into memory and push to a printer. */
     private static final long MAX_DOCUMENT_BYTES = 64L * 1024 * 1024;
@@ -92,48 +96,56 @@ public class PrinterTool implements ToolRegistry.Tool {
 
     @Override
     public Map<String, Object> parameters() {
+        // Map.ofEntries, not Map.of: the property set passed ten entries when the
+        // job-template attributes landed, and Map.of has no eleven-pair overload.
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
-                SchemaKeys.PROPERTIES, Map.of(
-                        ARG_ACTION, Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of("discover", "print", "status", "cancel"),
-                                SchemaKeys.DESCRIPTION, "Which operation to perform."),
-                        ARG_PRINTER, Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION,
+                SchemaKeys.PROPERTIES, Map.<String, Object>ofEntries(
+                        Map.entry(ARG_ACTION, prop(SchemaKeys.STRING,
+                                List.of("discover", "print", "status", "cancel"),
+                                "Which operation to perform.")),
+                        Map.entry(ARG_PRINTER, prop(SchemaKeys.STRING, null,
                                 "Printer name or host, as reported by 'discover'. Required for "
-                                        + "'print'. A bare hostname or IP is also accepted when mDNS "
-                                        + "is unavailable."),
-                        "host", Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION,
+                                        + "'print'. A bare hostname or IP is also accepted when "
+                                        + "mDNS is unavailable.")),
+                        Map.entry("host", prop(SchemaKeys.STRING, null,
                                 "Explicit printer host, bypassing discovery. Use when the network "
-                                        + "blocks mDNS but the address is known."),
-                        "port", Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                                SchemaKeys.DESCRIPTION,
+                                        + "blocks mDNS but the address is known.")),
+                        Map.entry("port", prop(SchemaKeys.INTEGER, null,
                                 "Explicit port. Defaults to the protocol's standard port "
-                                        + "(631 IPP, 9100 raw, 515 LPD)."),
-                        "protocol", Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of("IPP", "IPPS", "RAW", "LPD"),
-                                SchemaKeys.DESCRIPTION,
-                                "Force a protocol instead of auto-selecting. Rarely needed."),
-                        ARG_PATH, Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION,
+                                        + "(631 IPP, 9100 raw, 515 LPD).")),
+                        Map.entry("protocol", prop(SchemaKeys.STRING,
+                                List.of("IPP", "IPPS", "RAW", "LPD"),
+                                "Force a protocol instead of auto-selecting. Rarely needed.")),
+                        Map.entry(ARG_PATH, prop(SchemaKeys.STRING, null,
                                 "Workspace-relative path of the document to print (PDF, PostScript "
-                                        + "or plain text). Mutually exclusive with 'text'."),
-                        ARG_TEXT, Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION,
-                                "Literal text to print. Mutually exclusive with 'path'."),
-                        ARG_JOB_ID, Map.of(
-                                SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                                SchemaKeys.DESCRIPTION,
+                                        + "or plain text). Mutually exclusive with 'text'.")),
+                        Map.entry(ARG_TEXT, prop(SchemaKeys.STRING, null,
+                                "Literal text to print. Mutually exclusive with 'path'.")),
+                        Map.entry(ARG_JOB_ID, prop(SchemaKeys.INTEGER, null,
                                 "Job id, as returned by 'print'. Required for 'cancel'.")),
+                        Map.entry(ARG_SIDES, prop(SchemaKeys.STRING, JobAttributes.SIDES_VALUES,
+                                "Duplex mode. 'two-sided-long-edge' is normal double-sided for "
+                                        + "portrait pages; 'two-sided-short-edge' flips on the short "
+                                        + "edge (calendar style). Omit for the printer's default. "
+                                        + "IPP printers only — other backends cannot carry it.")),
+                        Map.entry(ARG_COLOR, prop(SchemaKeys.STRING, JobAttributes.COLOR_MODE_VALUES,
+                                "Colour mode: 'monochrome' for black and white. Omit for the "
+                                        + "printer's default. IPP printers only.")),
+                        Map.entry(ARG_MEDIA, prop(SchemaKeys.STRING, null,
+                                "Paper or input tray, e.g. 'iso_a4_210x297mm', 'na_letter_8.5x11in', "
+                                        + "or a tray name the printer advertises. Omit for the "
+                                        + "printer's default. IPP printers only."))),
                 SchemaKeys.REQUIRED, List.of(ARG_ACTION));
+    }
+
+    /** One JSON-Schema property. {@code enumValues} null when the value is free-form. */
+    private static Map<String, Object> prop(String type, List<String> enumValues, String description) {
+        if (enumValues == null) {
+            return Map.of(SchemaKeys.TYPE, type, SchemaKeys.DESCRIPTION, description);
+        }
+        return Map.of(SchemaKeys.TYPE, type, SchemaKeys.ENUM, enumValues,
+                SchemaKeys.DESCRIPTION, description);
     }
 
     @Override
@@ -230,15 +242,31 @@ public class PrinterTool implements ToolRegistry.Tool {
             return "Error: refusing to print an empty document.";
         }
 
-        var outcome = PrintDispatcher.print(target, jobName, agent.name, documentFormat, document);
-        var verdict = outcome.verified()
+        var job = new JobAttributes(str(args, ARG_SIDES), str(args, ARG_COLOR), str(args, ARG_MEDIA));
+        var invalid = job.validationError();
+        if (invalid != null) {
+            // Rejected here rather than at the printer, which would answer with an
+            // IPP status that names no offending value.
+            return "Error: " + invalid;
+        }
+
+        var outcome = PrintDispatcher.print(target, jobName, agent.name, documentFormat, document, job);
+        var verdict = new StringBuilder(outcome.verified()
                 ? "Printed via " + outcome.protocol() + " — " + outcome.detail()
                 // Said plainly because the model will otherwise report this as a
                 // confirmed print, which it is not.
                 : "Sent via " + outcome.protocol() + " — " + outcome.detail()
                         + ". NOTE: this backend cannot confirm the document printed; "
-                        + "check the printer if confirmation matters.";
-        return verdict;
+                        + "check the printer if confirmation matters.");
+        if (outcome.droppedAttributes() != null) {
+            // The job printed, but not the way it was asked for. Silence here means
+            // the operator finds out from the paper.
+            verdict.append(" WARNING: ").append(outcome.droppedAttributes())
+                    .append(" could NOT be applied — ").append(outcome.protocol())
+                    .append(" carries no job attributes, so the printer used its own defaults. ")
+                    .append("Use an IPP-capable printer if these matter.");
+        }
+        return verdict.toString();
     }
 
     private static String status(JsonObject args) throws IOException {

@@ -55,10 +55,15 @@ public final class PrintDispatcher {
      * @param verified whether the printer actually confirmed acceptance. False for
      *                 raw socket and LPD, where a successful write proves only that
      *                 the bytes left this machine
+     * @param droppedAttributes job attributes that were requested but could not be
+     *                 applied, because the backend that accepted the job cannot
+     *                 express them. Null when nothing was lost. Only raw socket and
+     *                 LPD produce this — both take an undifferentiated byte stream,
+     *                 so a duplex request that falls back to them prints one-sided
      * @param detail   human-readable summary for the model and the operator
      */
     public record Outcome(PrintProtocol protocol, Integer jobId, String state,
-                          boolean verified, String detail) {}
+                          boolean verified, String droppedAttributes, String detail) {}
 
     private PrintDispatcher() {}
 
@@ -69,12 +74,15 @@ public final class PrintDispatcher {
      * @throws IOException when every backend failed; the message names each failure
      */
     public static Outcome print(DiscoveredPrinter printer, String jobName, String user,
-                                String documentFormat, byte[] document) throws IOException {
+                                String documentFormat, byte[] document,
+                                JobAttributes job) throws IOException {
         var failures = new ArrayList<String>();
+        var requested = job == null ? JobAttributes.DEFAULTS : job;
 
         for (var protocol : backendOrder(printer)) {
             try {
-                var outcome = attempt(protocol, printer, jobName, user, documentFormat, document);
+                var outcome = attempt(protocol, printer, jobName, user, documentFormat,
+                        document, requested);
                 if (outcome != null) {
                     if (outcome.jobId() != null) {
                         RECENT_JOBS.put(outcome.jobId(), printer.ippUri());
@@ -113,21 +121,29 @@ public final class PrintDispatcher {
     /** One backend attempt. Returns null when the backend ran but the printer refused. */
     private static Outcome attempt(PrintProtocol protocol, DiscoveredPrinter printer,
                                    String jobName, String user, String documentFormat,
-                                   byte[] document) throws IOException {
+                                   byte[] document, JobAttributes job) throws IOException {
+        // Only IPP carries job-template attributes; the byte-stream backends drop
+        // whatever was asked for. Recorded so the caller can say so out loud.
+        var dropped = job.isEmpty() || protocol == PrintProtocol.IPP || protocol == PrintProtocol.IPPS
+                ? null : job.describe();
+
         switch (protocol) {
             case IPP, IPPS -> {
-                var result = IppClient.print(printer.ippUri(), jobName, user, documentFormat, document);
+                var result = IppClient.print(printer.ippUri(), jobName, user,
+                        documentFormat, document, job);
                 if (!result.accepted()) {
                     return null;
                 }
-                return new Outcome(protocol, result.jobId(), result.state(), true,
-                        "accepted as job " + result.jobId() + " (" + result.message() + ")");
+                var applied = job.isEmpty() ? "" : " with " + job.describe();
+                return new Outcome(protocol, result.jobId(), result.state(), true, null,
+                        "accepted as job " + result.jobId() + applied
+                                + " (" + result.message() + ")");
             }
             case RAW -> {
                 var port = printer.protocol() == PrintProtocol.RAW
                         ? printer.port() : PrintProtocol.RAW.defaultPort();
                 RawSocketClient.print(printer.host(), port, document, TIMEOUT_MS);
-                return new Outcome(protocol, null, null, false,
+                return new Outcome(protocol, null, null, false, dropped,
                         "streamed %d bytes to %s:%d — this backend returns no confirmation, "
                                 .formatted(document.length, printer.host(), port)
                                 + "so delivery is confirmed but printing is not");
@@ -136,7 +152,7 @@ public final class PrintDispatcher {
                 var port = printer.protocol() == PrintProtocol.LPD
                         ? printer.port() : PrintProtocol.LPD.defaultPort();
                 LpdClient.print(printer.host(), port, LPD_QUEUE, jobName, user, document, TIMEOUT_MS);
-                return new Outcome(protocol, null, null, false,
+                return new Outcome(protocol, null, null, false, dropped,
                         "queued on %s:%d via LPD queue '%s' — the daemon acknowledged receipt "
                                 .formatted(printer.host(), port, LPD_QUEUE)
                                 + "but reports nothing about printing");

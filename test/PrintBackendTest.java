@@ -1,12 +1,12 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.printing.DiscoveredPrinter;
+import services.printing.JobAttributes;
 import services.printing.LpdClient;
 import services.printing.PrintProtocol;
 import services.printing.PrinterDiscovery;
 import services.printing.RawSocketClient;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.ServerSocket;
@@ -27,68 +27,110 @@ import java.util.concurrent.TimeUnit;
  */
 class PrintBackendTest extends UnitTest {
 
-    /** Accept one connection, read everything, ack each LPD step with a zero byte. */
-    private static CompletableFuture<byte[]> lpdDaemon(ServerSocket server, int ackCount) {
+    /** What a fake daemon received: the two command lines and the two payloads. */
+    private record LpdExchange(String queueCommand, String controlHeader, String control,
+                               String dataHeader, byte[] data) {}
+
+    /**
+     * A minimal but real RFC 1179 receiver.
+     *
+     * <p>Reads by the protocol's own framing — line, then exactly the byte count the
+     * header declared — rather than draining whatever happens to be buffered. An
+     * earlier version of this helper acked up front and read on {@code available()},
+     * which passed or failed depending on how the client's writes coalesced; that is
+     * a flaky harness, and a flaky harness is worse than no test. Reading by length
+     * also makes the declared counts part of what is asserted.
+     */
+    private static CompletableFuture<LpdExchange> lpdDaemon(ServerSocket server) {
         return CompletableFuture.supplyAsync(() -> {
             try (var socket = server.accept()) {
                 var in = socket.getInputStream();
                 var out = socket.getOutputStream();
-                var received = new ByteArrayOutputStream();
-                // Ack immediately and keep draining: the client writes the next
-                // step only after reading each ack, so acking up front is what
-                // lets the exchange proceed without modelling the state machine.
-                for (int i = 0; i < ackCount; i++) {
-                    out.write(0);
-                    out.flush();
-                    pump(in, received, 1);
-                }
-                pump(in, received, 0);
-                return received.toByteArray();
+
+                var queueCommand = readLine(in);
+                ack(out);
+
+                var controlHeader = readLine(in);
+                ack(out);
+                var control = new String(readExactly(in, payloadLength(controlHeader)),
+                        StandardCharsets.US_ASCII);
+                readExactly(in, 1); // trailing NUL
+                ack(out);
+
+                var dataHeader = readLine(in);
+                ack(out);
+                var data = readExactly(in, payloadLength(dataHeader));
+                readExactly(in, 1); // trailing NUL
+                ack(out);
+
+                return new LpdExchange(queueCommand, controlHeader, control, dataHeader, data);
             } catch (IOException e) {
                 throw new IllegalStateException(e);
             }
         });
     }
 
-    /** Drain whatever is currently available into {@code sink}. */
-    private static void pump(InputStream in, ByteArrayOutputStream sink, int minBytes) throws IOException {
-        var buf = new byte[8192];
-        int total = 0;
-        do {
-            int available = in.available();
-            if (available <= 0) {
-                if (total >= minBytes) return;
-                // Nothing buffered yet — a blocking read parks until the client writes.
-                int one = in.read();
-                if (one == -1) return;
-                sink.write(one);
-                total++;
-                continue;
+    private static void ack(java.io.OutputStream out) throws IOException {
+        out.write(0);
+        out.flush();
+    }
+
+    /** Byte count from a {@code \002<len> SP <name>} header. */
+    private static int payloadLength(String header) {
+        // Skip the leading subcommand byte, take up to the space.
+        var body = header.substring(1);
+        return Integer.parseInt(body.substring(0, body.indexOf(' ')));
+    }
+
+    private static String readLine(InputStream in) throws IOException {
+        var sb = new StringBuilder();
+        int c;
+        while ((c = in.read()) != -1 && c != '\n') {
+            sb.append((char) c);
+        }
+        return sb.toString();
+    }
+
+    /** Block until exactly {@code n} bytes have arrived — no partial reads. */
+    private static byte[] readExactly(InputStream in, int n) throws IOException {
+        var buf = new byte[n];
+        int read = 0;
+        while (read < n) {
+            int got = in.read(buf, read, n - read);
+            if (got == -1) {
+                throw new IOException("stream ended after " + read + " of " + n + " bytes");
             }
-            int n = in.read(buf, 0, Math.min(available, buf.length));
-            if (n == -1) return;
-            sink.write(buf, 0, n);
-            total += n;
-        } while (total < minBytes);
+            read += got;
+        }
+        return buf;
     }
 
     @Test
     void lpdSendsTheRfc1179Sequence() throws Exception {
         try (var server = new ServerSocket(0)) {
-            var daemon = lpdDaemon(server, 5);
+            var daemon = lpdDaemon(server);
+            var document = "PDFBYTES".getBytes(StandardCharsets.UTF_8);
             LpdClient.print("127.0.0.1", server.getLocalPort(), "lp", "invoice.pdf",
-                    "tester", "PDFBYTES".getBytes(StandardCharsets.UTF_8), 5000);
+                    "tester", document, 5000);
 
-            var wire = new String(daemon.get(10, TimeUnit.SECONDS), StandardCharsets.US_ASCII);
+            var seen = daemon.get(10, TimeUnit.SECONDS);
 
-            // \002 + queue + \n is the "receive a printer job" command.
-            assertTrue(wire.startsWith("\002lp\n"), "should open the queue first, got: " + wire);
-            // Control file is subcommand \002, data file \003 — in that order.
-            assertTrue(wire.indexOf("\002") < wire.indexOf("\003"),
-                    "control file must precede data file");
-            assertTrue(wire.contains("cfA"), "control file name should use the cfA<id> convention");
-            assertTrue(wire.contains("dfA"), "data file name should use the dfA<id> convention");
-            assertTrue(wire.contains("PDFBYTES"), "the document itself must reach the daemon");
+            // \002 + queue is "receive a printer job".
+            assertEquals("\002lp", seen.queueCommand());
+            // Control file is subcommand \002, data file \003.
+            assertTrue(seen.controlHeader().startsWith("\002"), seen.controlHeader());
+            assertTrue(seen.dataHeader().startsWith("\003"), seen.dataHeader());
+            assertTrue(seen.controlHeader().contains("cfA"),
+                    "control file name should use the cfA<id> convention: " + seen.controlHeader());
+            assertTrue(seen.dataHeader().contains("dfA"),
+                    "data file name should use the dfA<id> convention: " + seen.dataHeader());
+
+            // The daemon read both payloads using ONLY the declared byte counts, so
+            // arriving intact proves the length headers were correct — a wrong count
+            // desynchronises the stream and fails in readExactly.
+            assertArrayEquals(document, seen.data());
+            assertTrue(seen.control().contains("Ptester"), seen.control());
+            assertTrue(seen.control().contains("Jinvoice.pdf"), seen.control());
         }
     }
 
@@ -210,6 +252,74 @@ class PrintBackendTest extends UnitTest {
         assertEquals(1234, PrinterDiscovery.direct("printer.local", 1234, PrintProtocol.IPP).port());
         // No protocol given → IPP, the only backend that can report back.
         assertEquals(PrintProtocol.IPP, PrinterDiscovery.direct("p", null, null).protocol());
+    }
+
+    // ─── Job attributes ───
+
+    @Test
+    void jobAttributesValidateAgainstTheRfcKeywordSets() {
+        assertNull(new JobAttributes("two-sided-long-edge", "monochrome", "iso_a4_210x297mm")
+                .validationError());
+        assertNull(JobAttributes.DEFAULTS.validationError());
+
+        assertNotNull(new JobAttributes("duplex", null, null).validationError());
+        assertNotNull(new JobAttributes(null, "greyscale", null).validationError());
+
+        // media is deliberately open: its vocabulary spans PWG size names and
+        // vendor tray names, so a closed list would reject valid input.
+        assertNull(new JobAttributes(null, null, "vendor-tray-7").validationError());
+    }
+
+    @Test
+    void aFallbackBackendReportsThatItDroppedTheAttributes() throws Exception {
+        // The point of the whole droppedAttributes field. A duplex request that
+        // falls back to port 9100 prints single-sided, and the operator would
+        // otherwise learn that from the paper.
+        try (var server = new ServerSocket(0)) {
+            CompletableFuture.runAsync(() -> {
+                try (var socket = server.accept()) {
+                    socket.getInputStream().readAllBytes();
+                } catch (IOException ignored) {
+                    // Test sink; the assertion is on the dispatcher's outcome.
+                }
+            });
+
+            var printer = PrinterDiscovery.direct("127.0.0.1", server.getLocalPort(),
+                    PrintProtocol.RAW);
+            var outcome = services.printing.PrintDispatcher.print(printer, "job", "tester",
+                    "application/pdf", "x".getBytes(StandardCharsets.UTF_8),
+                    new JobAttributes("two-sided-long-edge", "monochrome", null));
+
+            assertEquals(PrintProtocol.RAW, outcome.protocol());
+            assertFalse(outcome.verified(), "raw socket cannot confirm anything");
+            assertNotNull(outcome.droppedAttributes(),
+                    "a raw-socket job must report that the attributes were not applied");
+            assertTrue(outcome.droppedAttributes().contains("two-sided-long-edge"),
+                    outcome.droppedAttributes());
+        }
+    }
+
+    @Test
+    void aFallbackWithNoAttributesRequestedReportsNothingDropped() throws Exception {
+        try (var server = new ServerSocket(0)) {
+            CompletableFuture.runAsync(() -> {
+                try (var socket = server.accept()) {
+                    socket.getInputStream().readAllBytes();
+                } catch (IOException ignored) {
+                    // Test sink.
+                }
+            });
+
+            var printer = PrinterDiscovery.direct("127.0.0.1", server.getLocalPort(),
+                    PrintProtocol.RAW);
+            var outcome = services.printing.PrintDispatcher.print(printer, "job", "tester",
+                    "application/pdf", "x".getBytes(StandardCharsets.UTF_8),
+                    JobAttributes.DEFAULTS);
+
+            // Nothing was asked for, so nothing was lost — warning here would be noise
+            // that trains the operator to ignore the real one.
+            assertNull(outcome.droppedAttributes());
+        }
     }
 
     @Test

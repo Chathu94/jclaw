@@ -60,19 +60,40 @@ public final class IppClient {
      * @param document       the bytes to print
      */
     public static PrintResult print(String printerUri, String jobName, String user,
-                                    String documentFormat, byte[] document) throws IOException {
-        var attributes = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
-        attributes.add(Types.attributesCharset.of("utf-8"));
-        attributes.add(Types.attributesNaturalLanguage.of("en"));
-        attributes.add(Types.printerUri.of(URI.create(printerUri)));
-        attributes.add(Types.requestingUserName.of(user));
-        attributes.add(Types.jobName.of(jobName));
+                                    String documentFormat, byte[] document,
+                                    JobAttributes job) throws IOException {
+        var operation = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
+        operation.add(Types.attributesCharset.of("utf-8"));
+        operation.add(Types.attributesNaturalLanguage.of("en"));
+        operation.add(Types.printerUri.of(URI.create(printerUri)));
+        operation.add(Types.requestingUserName.of(user));
+        operation.add(Types.jobName.of(jobName));
         if (documentFormat != null && !documentFormat.isBlank()) {
-            attributes.add(Types.documentFormat.of(documentFormat));
+            operation.add(Types.documentFormat.of(documentFormat));
+        }
+
+        // Job-template attributes go in their OWN group, not alongside the
+        // operation attributes. RFC 8011 §4.2 separates "how to address this
+        // request" from "how to print this job", and a printer that finds `sides`
+        // in the operation group is entitled to reject the whole request.
+        var groups = new java.util.ArrayList<AttributeGroup>();
+        groups.add(AttributeGroup.groupOf(Tag.operationAttributes, operation));
+        if (job != null && !job.isEmpty()) {
+            var template = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
+            if (job.sides() != null) {
+                template.add(Types.sides.of(job.sides()));
+            }
+            if (job.colorMode() != null) {
+                template.add(Types.printColorMode.of(job.colorMode()));
+            }
+            if (job.media() != null) {
+                template.add(Types.media.of(job.media()));
+            }
+            groups.add(AttributeGroup.groupOf(Tag.jobAttributes, template));
         }
 
         var packet = new IppPacket(Operation.printJob, REQUEST_ID.getAndIncrement(),
-                AttributeGroup.groupOf(Tag.operationAttributes, attributes));
+                groups.toArray(new AttributeGroup[0]));
 
         var response = exchange(printerUri, packet, document);
         var status = response.getStatus();

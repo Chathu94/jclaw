@@ -88,6 +88,10 @@ Three backends are tried in order, and the order is about **how much each can te
 
 That difference is surfaced, not hidden. When a job goes out over raw socket or LPD, the tool's reply says explicitly that the backend cannot confirm the document printed. An agent reporting "printed successfully" off a blind write would be stating something it has no way to know.
 
+**Job options.** `sides` (one-sided, two-sided-long-edge, two-sided-short-edge), `color` (color, monochrome, auto) and `media` (a paper size like `iso_a4_210x297mm`, or a tray name the printer advertises). Omit any of them to use the printer's own default.
+
+These are **IPP-only** — they travel as RFC 8011 job-template attributes, and the byte-stream backends have nowhere to put them. If a job asks for double-sided and then falls back to raw socket or LPD, it prints single-sided; the tool says so explicitly rather than letting you discover it from the paper.
+
 :::caution Printing is physical and irreversible
 Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target — `print` requires a printer you named — and it is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
 :::
