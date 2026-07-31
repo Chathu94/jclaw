@@ -140,10 +140,11 @@ public final class IppClient {
      *                  of sRGB, and this class of printer has a small spool
      * @param types     the raw {@code pwg-raster-document-type-supported} keywords
      */
-    public record RasterCapabilities(int dpi, boolean grayscale, java.util.Set<String> types) {
+    public record RasterCapabilities(int dpi, boolean grayscale, java.util.Set<String> types,
+                                     String mediaReady) {
         /** What to assume when the printer will not say. */
         public static final RasterCapabilities UNKNOWN =
-                new RasterCapabilities(0, false, java.util.Set.of());
+                new RasterCapabilities(0, false, java.util.Set.of(), null);
     }
 
     /**
@@ -180,7 +181,14 @@ public final class IppClient {
                 }
             }
         }
-        return new RasterCapabilities(dpi, typeSet.contains("sgray_8"), typeSet);
+        // What is actually in the tray. Load-bearing, not informational: this
+        // printer had Legal loaded, every job said A4, and it answered the
+        // mismatch with printer-state-reasons=spool-area-full and stopped —
+        // an error that reads like a size problem and is a paper problem.
+        var ready = response.getStrings(Tag.printerAttributes, Types.mediaReady);
+        var mediaReady = ready == null || ready.isEmpty() ? null : ready.getFirst().trim();
+
+        return new RasterCapabilities(dpi, typeSet.contains("sgray_8"), typeSet, mediaReady);
     }
 
     /** Query a printer's own state (Get-Printer-Attributes). */

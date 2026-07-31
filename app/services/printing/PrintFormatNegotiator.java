@@ -45,7 +45,14 @@ public final class PrintFormatNegotiator {
      * @param converted   whether the source was rasterised rather than passed through
      * @param explanation one line for the operator; null when the source went as-is
      */
-    public record Prepared(byte[] document, String format, boolean converted, String explanation) {}
+    public record Prepared(byte[] document, String format, boolean converted, String explanation,
+                           String media) {
+
+        /** Pass-through, with no media opinion of its own. */
+        static Prepared asIs(byte[] document, String format, String explanation) {
+            return new Prepared(document, format, false, explanation, null);
+        }
+    }
 
     /**
      * Choose an encoding the printer accepts.
@@ -75,15 +82,18 @@ public final class PrintFormatNegotiator {
         // letting a printer that would have coped decide for itself, and IPP will
         // say document-format-not-supported if it cannot.
         if (supported.isEmpty()) {
-            return new Prepared(document, sourceFormat, false, null);
+            return Prepared.asIs(document, sourceFormat, null);
         }
         // Native pass-through wins whenever it is available — no re-encode, no
         // resolution loss, and the printer's own renderer is better than ours.
         if (sourceFormat != null && supported.contains(sourceFormat.toLowerCase())) {
-            return new Prepared(document, sourceFormat, false, null);
+            return Prepared.asIs(document, sourceFormat, null);
         }
 
-        var media = job == null ? null : job.media();
+        // Default to the paper the printer says is loaded. Assuming A4 is how a
+        // job ends up mismatched with a Legal tray, which this printer reports as
+        // spool-area-full rather than anything mentioning paper.
+        var media = job != null && job.media() != null ? job.media() : raster.mediaReady();
 
         if (supported.contains(PWG_RASTER)) {
             // Colour only when the printer has no greyscale mode or the operator
@@ -98,9 +108,10 @@ public final class PrintFormatNegotiator {
             var tumble = job != null && "two-sided-short-edge".equals(job.sides());
             var encoded = PwgRasterEncoder.encode(pages, page.dpi(), media, duplex, tumble, gray);
             return new Prepared(encoded, PWG_RASTER, true,
-                    "rendered %d page(s) to PWG raster at %d DPI %s because the printer does not accept %s"
+                    "rendered %d page(s) to PWG raster at %d DPI %s on %s because the printer does not accept %s"
                             .formatted(pages.size(), page.dpi(), gray ? "greyscale" : "colour",
-                                    describe(sourceFormat)));
+                                    media == null ? "the default media" : media, describe(sourceFormat)),
+                    media);
         }
 
         var page = PrintRenderer.PageSize.fromMedia(media, PrintRenderer.DEFAULT_DPI);
@@ -117,7 +128,7 @@ public final class PrintFormatNegotiator {
                     : "";
             return new Prepared(jpeg, JPEG, true,
                     "rendered to JPEG because the printer does not accept %s"
-                            .formatted(describe(sourceFormat)) + note);
+                            .formatted(describe(sourceFormat)) + note, media);
         }
 
         if (supported.contains(OCTET_STREAM)) {
@@ -126,7 +137,7 @@ public final class PrintFormatNegotiator {
             // accepting, and an attempt beats a refusal.
             EventLogger.warn(CATEGORY, "Printer advertises no format JClaw can produce (%s); "
                     .formatted(String.join(", ", supported)) + "falling back to octet-stream");
-            return new Prepared(document, OCTET_STREAM, false,
+            return Prepared.asIs(document, OCTET_STREAM,
                     "sent as octet-stream — the printer advertises no format JClaw can render to, "
                             + "so it must detect the type itself");
         }

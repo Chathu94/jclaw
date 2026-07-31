@@ -183,8 +183,13 @@ public final class PrintDispatcher {
                 // list is octet-stream / jpeg / urf / pwg-raster.
                 var prepared = PrintFormatNegotiator.prepare(document, documentFormat,
                         supportedFormats(printer), job, rasterCapabilities(printer));
+                // Declare the media the raster was actually rendered for. Sending
+                // Legal-sized pixels while the request says A4 is the mismatch that
+                // stopped this printer in the first place.
+                var effective = prepared.media() == null ? job
+                        : new JobAttributes(job.sides(), job.colorMode(), prepared.media());
                 var result = IppClient.print(printer.ippUri(), jobName, user,
-                        prepared.format(), prepared.document(), job);
+                        prepared.format(), prepared.document(), effective);
                 if (!result.accepted()) {
                     // Carry the IPP status name, which is the whole point of IPP
                     // being tried first. "client-error-document-format-not-supported"

@@ -111,9 +111,54 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
+    void legalPaperGetsLegalGeometry() {
+        var legal = PrintRenderer.PageSize.fromMedia("na_legal_8.5x14in", 300);
+        // 8.5 x 14in. Falling through to A4 here is what put A4-shaped pixels in a
+        // Legal tray, which this printer reported as spool-area-full and stopped on.
+        assertEquals(2550, legal.width());
+        assertEquals(4200, legal.height());
+
+        // Legal and Letter share a width and differ in length; matching the wrong
+        // one silently loses three inches of page.
+        var letter = PrintRenderer.PageSize.fromMedia("na_letter_8.5x11in", 300);
+        assertEquals(legal.width(), letter.width());
+        assertTrue(legal.height() > letter.height());
+    }
+
+    @Test
+    void theLoadedPaperIsUsedWhenTheCallerNamesNone() throws Exception {
+        // The root cause of three rounds of failed prints: JClaw assumed A4 while
+        // the printer had Legal loaded. media-ready is the printer telling us what
+        // is physically in the tray, and it must win over our default.
+        var caps = new services.printing.IppClient.RasterCapabilities(
+                600, true, Set.of("sgray_8"), "na_legal_8.5x14in");
+        var prepared = PrintFormatNegotiator.prepare(
+                "hi".getBytes(StandardCharsets.UTF_8), "text/plain",
+                Set.of("image/pwg-raster"), JobAttributes.DEFAULTS, caps);
+
+        assertEquals("na_legal_8.5x14in", prepared.media(),
+                "the resolved media must be declared on the job, not just rendered to");
+        assertTrue(prepared.explanation().contains("na_legal_8.5x14in"), prepared.explanation());
+    }
+
+    @Test
+    void anExplicitMediaRequestBeatsWhatIsLoaded() throws Exception {
+        // Defaulting to the tray must not become overriding the operator: someone
+        // who asks for A4 has presumably just loaded it.
+        var caps = new services.printing.IppClient.RasterCapabilities(
+                600, true, Set.of("sgray_8"), "na_legal_8.5x14in");
+        var prepared = PrintFormatNegotiator.prepare(
+                "hi".getBytes(StandardCharsets.UTF_8), "text/plain",
+                Set.of("image/pwg-raster"),
+                new JobAttributes(null, null, "iso_a4_210x297mm"), caps);
+
+        assertEquals("iso_a4_210x297mm", prepared.media());
+    }
+
+    @Test
     void greyscaleRenderingIsAQuarterOfTheHeapAndAThirdOfTheWire() throws Exception {
         var canon = Set.of("image/pwg-raster");
-        var caps = new services.printing.IppClient.RasterCapabilities(600, true, Set.of("sgray_8"));
+        var caps = new services.printing.IppClient.RasterCapabilities(600, true, Set.of("sgray_8"), null);
         var text = "hello printer".getBytes(StandardCharsets.UTF_8);
 
         var grey = PrintFormatNegotiator.prepare(text, "text/plain", canon,

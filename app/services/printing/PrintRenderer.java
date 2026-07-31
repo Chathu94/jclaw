@@ -47,6 +47,9 @@ public final class PrintRenderer {
     private static final double LETTER_IN_W = 8.5;
     private static final double LETTER_IN_H = 11.0;
 
+    /** US Legal in inches — same width as Letter, three inches longer. */
+    private static final double LEGAL_IN_H = 14.0;
+
     /** Printable margin, in inches. Most inkjets cannot reach closer than ~5mm. */
     private static final double MARGIN_IN = 0.5;
 
@@ -76,9 +79,19 @@ public final class PrintRenderer {
          */
         public static PageSize fromMedia(String media, int dpi) {
             var resolved = dpi > 0 ? dpi : DEFAULT_DPI;
-            var letter = media != null && media.toLowerCase().contains("letter");
-            var w = letter ? LETTER_IN_W : A4_IN_W;
-            var h = letter ? LETTER_IN_H : A4_IN_H;
+            var name = media == null ? "" : media.toLowerCase();
+            // Legal before Letter: "na_legal_8.5x14in" contains neither substring
+            // of the other, but checking the longer name first keeps the intent
+            // obvious if more sizes are added.
+            var w = A4_IN_W;
+            var h = A4_IN_H;
+            if (name.contains("legal")) {
+                w = LETTER_IN_W;
+                h = LEGAL_IN_H;
+            } else if (name.contains("letter")) {
+                w = LETTER_IN_W;
+                h = LETTER_IN_H;
+            }
             return new PageSize((int) Math.round(w * resolved), (int) Math.round(h * resolved), resolved);
         }
 
