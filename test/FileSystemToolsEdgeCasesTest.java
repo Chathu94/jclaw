@@ -52,11 +52,18 @@ class FileSystemToolsEdgeCasesTest extends UnitTest {
     }
 
     @Test
-    void unknownActionIsRejectedByName() {
+    void unknownActionIsRejectedByNameAndNamesTheValidOnes() {
         var result = tool.execute("""
                 {"action": "chmod", "path": "whatever.txt"}
                 """, agent);
-        assertEquals("Error: Unknown action 'chmod'", result);
+        assertTrue(result.startsWith("Error: Unknown action 'chmod'"),
+                "the rejected action must be named back; got: " + result);
+        // JCLAW-905: the schema enum is advisory and a model was observed ignoring
+        // it, so the error is the only channel left to recover from a wrong guess.
+        // Rejecting without naming the alternatives cost nine calls on task_manager.
+        assertTrue(result.contains("writeFile") && result.contains("readFile")
+                        && result.contains("applyPatch"),
+                "the error must list the valid actions; got: " + result);
     }
 
     @Test

@@ -103,6 +103,21 @@ class TaskToolTest extends UnitTest {
                 "unknown action must surface a structured error; got: " + result);
     }
 
+    @Test
+    void unknownActionNamesTheValidOnesSoOneWrongGuessIsEnough() {
+        // JCLAW-905: the schema enum is advisory, and kimi-k2.6 ignored it —
+        // guessing create, scheduleTask, listTasks and addTask across nine tool
+        // calls and ten model rounds before finding createTask, creating duplicate
+        // scheduled tasks on the way. The error string is the only channel that
+        // reaches the model AFTER a wrong guess, so it has to carry the answer and
+        // not just the verdict. 'create' is the guess actually observed.
+        var result = tool.execute("{\"action\":\"create\"}", agent);
+        assertTrue(result.contains("createTask"),
+                "error must name the action the caller was reaching for; got: " + result);
+        assertTrue(result.contains("listRecurringTasks"),
+                "error must list every valid action, not only the near miss; got: " + result);
+    }
+
     // === createTask: all four schedule shorthands ===
 
     @Test

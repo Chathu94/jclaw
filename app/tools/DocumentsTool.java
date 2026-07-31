@@ -50,6 +50,16 @@ public class DocumentsTool implements ToolRegistry.Tool {
     private static final String ACTION_APPEND = "appendDocument";
     private static final String ACTION_RENDER = "renderDocument";
 
+    /**
+     * Every valid action, single-sourced so the schema enum and the unknown-action
+     * error cannot drift — the same shape as {@code WRITE_FORMATS} below. The enum
+     * is advisory: JCLAW-905 recorded a model sending action names outside it and
+     * burning nine calls guessing, so the error has to name the alternatives rather
+     * than only reject the input.
+     */
+    private static final List<String> ACTIONS =
+            List.of(ACTION_READ, ACTION_WRITE, ACTION_APPEND, ACTION_RENDER);
+
     // JSON argument keys
     private static final String ARG_ACTION = "action";
     private static final String ARG_CONTENT = "content";
@@ -103,7 +113,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
                         ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of(ACTION_READ, ACTION_WRITE, ACTION_APPEND, ACTION_RENDER),
+                                SchemaKeys.ENUM, ACTIONS,
                                 SchemaKeys.DESCRIPTION, "The document operation to perform"),
                         "path", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "File path relative to the agent workspace (target for writeDocument/renderDocument, source for readDocument)"),
@@ -177,7 +187,8 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 var format = JsonArgs.optString(args, ARG_FORMAT);
                 yield richResult(writeDocument(target, relativePath, content, format));
             }
-            default -> ToolRegistry.ToolResult.text("Error: Unknown action '%s'".formatted(action));
+            default -> ToolRegistry.ToolResult.text("Error: Unknown action '%s'. Valid actions: %s"
+                    .formatted(action, String.join(", ", ACTIONS)));
         };
     }
 

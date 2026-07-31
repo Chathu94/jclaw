@@ -65,6 +65,23 @@ public class TaskTool implements ToolRegistry.Tool {
     private static final String ACTION_LIST_RECURRING_TASKS = "listRecurringTasks";
     private static final String ACTION_LIST_REMINDERS = "listReminders";
 
+    /**
+     * Every valid {@code action}, single-sourced so the schema enum and the
+     * unknown-action error cannot drift apart.
+     *
+     * <p>The enum alone is not enough: it is advisory to the model, and JCLAW-905
+     * recorded kimi-k2.6 sending {@code create}, {@code scheduleTask},
+     * {@code listTasks} and {@code addTask} — none of them in the enum — burning
+     * nine tool calls and ten model rounds guessing. The error message is the only
+     * channel that reaches the model AFTER it has guessed wrong, so it has to carry
+     * the answer. Mirrors {@code DateTimeTool}, whose error already named its
+     * actions and which passed every sweep in that same experiment.
+     */
+    private static final List<String> ACTIONS = List.of(
+            ACTION_CREATE_TASK, ACTION_UPDATE_TASK, ACTION_PAUSE, ACTION_RESUME,
+            ACTION_RUN_NOW, ACTION_CANCEL_TASK, ACTION_DELETE_TASK,
+            ACTION_LIST_RECURRING_TASKS, ACTION_LIST_REMINDERS);
+
     // --- JSON argument / schema keys ---
     private static final String KEY_ACTION = "action";
     private static final String KEY_NAME = "name";
@@ -156,9 +173,7 @@ public class TaskTool implements ToolRegistry.Tool {
         // Map.ofEntries because Map.of caps at 10 keys and we have more.
         var props = Map.ofEntries(
                 Map.entry(KEY_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.ENUM, List.of(ACTION_CREATE_TASK, ACTION_UPDATE_TASK, ACTION_PAUSE, ACTION_RESUME,
-                                ACTION_RUN_NOW, ACTION_CANCEL_TASK, ACTION_DELETE_TASK, ACTION_LIST_RECURRING_TASKS,
-                                ACTION_LIST_REMINDERS),
+                        SchemaKeys.ENUM, ACTIONS,
                         SchemaKeys.DESCRIPTION, "The action to perform")),
                 Map.entry(KEY_NAME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Task name — short kebab-case identifier, e.g. "
@@ -241,7 +256,8 @@ public class TaskTool implements ToolRegistry.Tool {
             case ACTION_DELETE_TASK -> deleteTask(args, agent);
             case ACTION_LIST_RECURRING_TASKS -> TaskListRenderer.recurring(agent);
             case ACTION_LIST_REMINDERS -> TaskListRenderer.reminders(agent);
-            default -> "Error: Unknown action '%s'".formatted(action);
+            default -> "Error: Unknown action '%s'. Valid actions: %s"
+                    .formatted(action, String.join(", ", ACTIONS));
         };
     }
 

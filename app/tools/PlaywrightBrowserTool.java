@@ -43,6 +43,16 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final String ACTION_EVALUATE = "evaluate";
     private static final String ACTION_CLOSE = "close";
 
+    /**
+     * Every valid action, single-sourced so the schema enum and the unknown-action
+     * error cannot drift. The enum is advisory — JCLAW-905 recorded a model sending
+     * action names outside it and burning nine calls guessing — so the error has to
+     * name the alternatives rather than only reject the input.
+     */
+    private static final List<String> ACTIONS = List.of(
+            ACTION_NAVIGATE, ACTION_CLICK, ACTION_FILL, ACTION_GET_TEXT,
+            ACTION_SCREENSHOT, ACTION_EVALUATE, ACTION_CLOSE);
+
     // JSON argument keys
     private static final String ARG_ACTION = "action";
     private static final String ARG_SELECTOR = "selector";
@@ -134,7 +144,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
                         ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of(ACTION_NAVIGATE, ACTION_CLICK, ACTION_FILL, ACTION_GET_TEXT, ACTION_SCREENSHOT, ACTION_EVALUATE, ACTION_CLOSE),
+                                SchemaKeys.ENUM, ACTIONS,
                                 SchemaKeys.DESCRIPTION, "The browser action to perform"),
                         "url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "URL to navigate to (for navigate action)"),
@@ -198,7 +208,8 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                         args.has(ARG_SELECTOR) ? args.get(ARG_SELECTOR).getAsString() : "body");
                 case ACTION_SCREENSHOT -> screenshot(page, agent.name, agent.id);
                 case ACTION_EVALUATE -> evaluate(page, args.get("expression").getAsString());
-                default -> "Error: Unknown action '%s'".formatted(action);
+                default -> "Error: Unknown action '%s'. Valid actions: %s"
+                        .formatted(action, String.join(", ", ACTIONS));
             };
         } catch (PlaywrightException e) {
             return "Browser error: %s".formatted(e.getMessage());

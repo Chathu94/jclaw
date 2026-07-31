@@ -21,6 +21,16 @@ public class FileSystemTools implements ToolRegistry.Tool {
     private static final String ACTION_APPLY_PATCH = "applyPatch";
     private static final String ACTION_LIST_FILES = "listFiles";
 
+    /**
+     * Every valid action, single-sourced so the schema enum and the unknown-action
+     * error cannot drift. The enum is advisory — JCLAW-905 recorded a model sending
+     * action names outside it and burning nine calls guessing — so the error has to
+     * name the alternatives rather than only reject the input.
+     */
+    private static final List<String> ACTIONS = List.of(
+            ACTION_READ_FILE, ACTION_WRITE_FILE, ACTION_APPEND_FILE,
+            ACTION_LIST_FILES, ACTION_EDIT_FILE, ACTION_EDIT_LINES, ACTION_APPLY_PATCH);
+
     // === Argument keys (JSON field names on tool calls) ===
     private static final String ARG_ACTION = "action";
     static final String ARG_CONTENT = "content";
@@ -94,8 +104,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.ofEntries(
                         Map.entry(ARG_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.ENUM, List.of(ACTION_READ_FILE, ACTION_WRITE_FILE, ACTION_APPEND_FILE,
-                                        ACTION_LIST_FILES, ACTION_EDIT_FILE, ACTION_EDIT_LINES, ACTION_APPLY_PATCH),
+                                SchemaKeys.ENUM, ACTIONS,
                                 SchemaKeys.DESCRIPTION, "The file operation to perform")),
                         Map.entry("path", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "File or directory path relative to workspace (required for all actions except applyPatch)")),
@@ -176,7 +185,8 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 }
                 return FsLineEditor.editLines(agent, target, args.getAsJsonArray(ARG_OPERATIONS));
             });
-            default -> "Error: Unknown action '%s'".formatted(action);
+            default -> "Error: Unknown action '%s'. Valid actions: %s"
+                    .formatted(action, String.join(", ", ACTIONS));
         };
     }
 
