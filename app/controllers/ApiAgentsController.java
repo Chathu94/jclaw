@@ -98,6 +98,24 @@ public class ApiAgentsController extends Controller {
                         || LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME.equalsIgnoreCase(name));
     }
 
+    /**
+     * Names hidden from the user-facing agent list. A superset of
+     * {@link #isReservedName}: the eval agent is harness infrastructure and has no
+     * business in the chat page's Agent selector, but it is deliberately NOT
+     * reserved.
+     *
+     * <p>The difference is deletion. Reserved names 404 through
+     * {@link #requireAgent}, which would break the documented cleanup for an eval
+     * sweep — both AGENTS.md and {@code ./jclaw.sh evals --help} tell the operator
+     * to DELETE {@code __evaltest__} to clear what a sweep created, and that is the
+     * supported way to remove the tasks a suite's cases leave behind. Hiding it
+     * from a dropdown must not take that away.
+     */
+    private static boolean isHiddenFromList(String name) {
+        return isReservedName(name)
+                || (name != null && Agent.EVALTEST_AGENT_NAME.equalsIgnoreCase(name));
+    }
+
     @SuppressWarnings("java:S2259")
     private static Agent requireAgent(Long id) {
         var agent = AgentService.findById(id);
@@ -174,7 +192,7 @@ public class ApiAgentsController extends Controller {
         // Filtering here keeps the chat UI's "Agent" selector strictly for
         // top-level agents.
         var result = agents.stream()
-                .filter(a -> !isReservedName(a.name))
+                .filter(a -> !isHiddenFromList(a.name))
                 .filter(a -> a.parentAgent == null)
                 .map(a -> AgentView.of(a, configuredKeys))
                 .toList();

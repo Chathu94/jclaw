@@ -53,13 +53,17 @@ class ApiAgentsControllerTest extends FunctionalTest {
      * and the subsequent HTTP request wouldn't see the row.
      */
     private Long createMainAgent() {
+        return createAgentNamed(Agent.MAIN_AGENT_NAME);
+    }
+
+    private Long createAgentNamed(String name) {
         var holder = new java.util.concurrent.atomic.AtomicLong(0);
         var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
         var t = Thread.ofVirtual().start(() -> {
             try {
                 services.Tx.run(() -> {
                     var main = new Agent();
-                    main.name = Agent.MAIN_AGENT_NAME;
+                    main.name = name;
                     main.modelProvider = "openrouter";
                     main.modelId = "gpt-4.1";
                     main.enabled = true;
@@ -487,6 +491,32 @@ class ApiAgentsControllerTest extends FunctionalTest {
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"name\":\"main\""),
                 "main agent must remain visible in /api/agents listing");
+    }
+
+    @Test
+    void evalAgentIsHiddenFromTheListEndpoint() {
+        // The eval agent (JCLAW-883) is harness infrastructure and was appearing in
+        // the chat page's Agent selector alongside the operator's own agents.
+        login();
+        createAgentNamed(Agent.EVALTEST_AGENT_NAME);
+        var response = GET("/api/agents");
+        assertIsOk(response);
+        assertFalse(getContent(response).contains(Agent.EVALTEST_AGENT_NAME),
+                "the eval agent must not appear in the user-facing agent listing");
+    }
+
+    @Test
+    void evalAgentStaysDeletableDespiteBeingHidden() {
+        // Hidden is deliberately NOT reserved, and the whole difference is deletion.
+        // AGENTS.md and './jclaw.sh evals --help' both tell the operator to DELETE
+        // __evaltest__ to clear what a sweep created — that is the supported way to
+        // remove the scheduled tasks a suite's cases leave behind. Folding this name
+        // into isReservedName would 404 the delete through requireAgent and silently
+        // break that documented cleanup, so this test exists to stop the two
+        // predicates being "simplified" back into one.
+        login();
+        var id = createAgentNamed(Agent.EVALTEST_AGENT_NAME);
+        assertIsOk(DELETE("/api/agents/" + id));
     }
 
     @Test
