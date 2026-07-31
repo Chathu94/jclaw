@@ -1,6 +1,7 @@
 import agents.ToolRegistry;
 import models.Agent;
 import models.AgentToolConfig;
+import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -102,6 +103,23 @@ class EvalCalibrationTest extends UnitTest {
                 .toList());
     }
 
+    /** A task of the kind a previous sweep's task_manager call would have left behind. */
+    private static void seedTask(Long agentId, String name) {
+        commitInFreshTx(() -> {
+            var task = new Task();
+            task.agent = (Agent) Agent.findById(agentId);
+            task.name = name;
+            task.type = Task.Type.CRON;
+            task.cronExpression = "0 0 9 * * 1-5";
+            task.save();
+            return null;
+        });
+    }
+
+    private static long taskCountFor(Long agentId) {
+        return commitInFreshTx(() -> Task.count("agent = ?1", (Agent) Agent.findById(agentId)));
+    }
+
     private static void drop(Long agentId) {
         commitInFreshTx(() -> {
             var agent = (Agent) Agent.findById(agentId);
@@ -154,8 +172,37 @@ class EvalCalibrationTest extends UnitTest {
         // outcome for an agent this code does not own.
         var id = seedAgent("operators-own-agent");
         try {
+            seedTask(id, "operators-own-task");
             calibrate(suiteNeeding("datetime", "web_search"), id);
             assertTrue(grantedTo(id).isEmpty(), "no grants were written to a non-eval agent");
+            // JCLAW-907 widened calibration to delete tasks. Deleting an operator's
+            // scheduled work because they pointed capture at their own agent would be
+            // far worse than the misconfiguration it punishes.
+            assertEquals(1L, taskCountFor(id), "a non-eval agent's tasks must survive calibration");
+        } finally {
+            drop(id);
+        }
+    }
+
+    @Test
+    void calibrationClearsTasksLeftByAPreviousSweep() {
+        // JCLAW-907: calibration reset the tool surface but not what the tools DID, so
+        // consecutive sweeps of a suite whose cases create tasks each started from a
+        // different world. Measured on 2026-07-31: fifteen sweeps of tool-selection
+        // produced five different action sequences for one case, several of them the
+        // agent correctly declining to duplicate a task its predecessor had created.
+        var id = seedAgent(Agent.EVALTEST_AGENT_NAME);
+        try {
+            seedTask(id, "left-by-the-last-sweep");
+            seedTask(id, "and-another");
+            assertEquals(2L, taskCountFor(id), "guard: the fixture must actually have seeded state");
+
+            calibrate(suiteNeeding("task_manager"), id);
+
+            assertEquals(0L, taskCountFor(id),
+                    "a sweep must not inherit the previous sweep's tasks");
+            assertEquals(List.of("task_manager"), grantedTo(id),
+                    "clearing task state must not disturb the tool grants");
         } finally {
             drop(id);
         }

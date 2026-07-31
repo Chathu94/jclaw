@@ -6,8 +6,10 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.AgentToolConfig;
+import models.Task;
 import services.AttachmentService;
 import services.EventLogger;
+import services.TaskWriteService;
 import services.Tx;
 import utils.LatencyTrace;
 
@@ -177,12 +179,49 @@ public final class EvalCapture {
                 config.enabled = true;
                 config.save();
             }
+            clearTaskState(agent);
         });
         ToolRegistry.invalidateDisabledToolsCache(agent);
 
         EventLogger.info(EVENT_CATEGORY, "Calibrated %s for suite '%s': granted %s"
                 .formatted(Agent.EVALTEST_AGENT_NAME, suite.id(),
                         suite.requiredTools().isEmpty() ? "no tools" : suite.requiredTools()));
+    }
+
+    /**
+     * Delete every task the eval agent owns, so a sweep starts from the same state
+     * as the one before it (JCLAW-907).
+     *
+     * <p>Same argument as the tool-grant reset above, applied to what the tools
+     * DID rather than which ones were offered. Measured on 2026-07-31: fifteen
+     * sweeps of {@code tool-selection} produced five different action sequences for
+     * one case — {@code [createTask]}, {@code [listRecurringTasks]} (found the task
+     * a previous sweep left and declined to duplicate it), {@code [listRecurringTasks,
+     * updateTask]}, and once {@code [listRecurringTasks, cancelTask, cancelTask,
+     * cancelTask, createTask]} clearing three accumulated duplicates. Those are not
+     * model variance; several are the agent responding correctly to a world its
+     * predecessor left behind. A suite that asserts a fixed call sequence cannot
+     * pass against a starting state that changes every run.
+     *
+     * <p>Routed through {@link TaskWriteService#deleteWithHistory} rather than a bulk
+     * delete: a task owns TaskRun, TaskRunMessage and Notification rows, and a live
+     * scheduler entry that outlives the row unless cancelled. A bulk delete would
+     * leave a deleted reminder firing.
+     *
+     * <p>Caller guarantees this only ever runs for {@code __evaltest__} — see the
+     * {@code isEvalTest} guard in {@link #calibrate}. Deleting an operator's tasks
+     * because they pointed capture at their own agent would be unforgivable.
+     */
+    @SuppressWarnings("unchecked") // Play's find().fetch() is a raw List; same copy as TaskTool.findTasks
+    private static void clearTaskState(Agent agent) {
+        var raw = (List<Object>) (List<?>) Task.find("agent = ?1", agent).fetch();
+        for (var row : raw) {
+            TaskWriteService.deleteWithHistory((Task) row);
+        }
+        if (!raw.isEmpty()) {
+            EventLogger.info(EVENT_CATEGORY, "Cleared %d task(s) left by a previous sweep"
+                    .formatted(raw.size()));
+        }
     }
 
     /**
