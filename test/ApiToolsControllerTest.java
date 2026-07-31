@@ -151,6 +151,33 @@ class ApiToolsControllerTest extends FunctionalTest {
                 "per-agent listing must surface the enabled flag: " + body);
     }
 
+    @Test
+    void listForAgentReportsEffectiveStateNotADefaultPolicyGuess() {
+        login();
+        var id = createAgent("tools-effective-state-agent");
+
+        var body = getContent(GET("/api/agents/" + id + "/tools"));
+        // Gson emits no spaces, so a name/flag pair is contiguous per entry.
+        assertTrue(body.contains("\"name\":\"datetime\",\"description\""),
+                "sanity: the listing should include a default-ON native tool");
+
+        // The bug this pins: these four are hidden from the model unless a row
+        // explicitly enables them, but the endpoint used to re-derive "native
+        // tools are on" and report them enabled. The agent editor then showed a
+        // ticked box for a tool the agent could not call. Found in JCLAW-911 UAT.
+        for (var optIn : java.util.List.of("printer", "generate_image",
+                "generate_video", "generate_audio")) {
+            var idx = body.indexOf("\"name\":\"" + optIn + "\"");
+            assertTrue(idx >= 0, optIn + " should appear in the listing: " + body);
+            var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
+            var enabledAt = entry.indexOf("\"enabled\":");
+            assertTrue(enabledAt >= 0, "no enabled flag for " + optIn);
+            assertTrue(entry.startsWith("\"enabled\":false", enabledAt),
+                    optIn + " is opt-in, so a fresh agent must see it as disabled here — "
+                            + "otherwise the UI contradicts the agent loop");
+        }
+    }
+
     // --- PUT /api/agents/{id}/tools/{name} ---
 
     @Test

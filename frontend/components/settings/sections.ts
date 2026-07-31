@@ -32,6 +32,7 @@ import {
   MagnifyingGlassIcon,
   MicrophoneIcon,
   PhotoIcon,
+  PrinterIcon,
   PuzzlePieceIcon,
   ShieldCheckIcon,
   SpeakerWaveIcon,
@@ -47,6 +48,7 @@ import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
 import SettingsOcrPanel from './SettingsOcrPanel.vue'
 import SettingsPasswordPanel from './SettingsPasswordPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
+import SettingsPrintersPanel from './SettingsPrintersPanel.vue'
 import SettingsProvidersPanel from './SettingsProvidersPanel.vue'
 import SettingsRestartPanel from './SettingsRestartPanel.vue'
 import SettingsSearchPanel from './SettingsSearchPanel.vue'
@@ -91,6 +93,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'logging', title: 'Logging', icon: DocumentTextIcon, component: SettingsLoggingPanel },
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
+      { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
       { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
       // Last in the group deliberately: it's the one section whose primary
       // control takes the instance down, so it shouldn't sit next to the

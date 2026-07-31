@@ -247,6 +247,14 @@ POST    /api/tailscale                          ApiTailscaleController.toggle
 GET     /api/system/restart                     ApiSystemController.restartPreflight
 POST    /api/system/restart                     ApiSystemController.restart
 
+# Printers (JCLAW-911). GET /api/printers is a live mDNS browse, never a cache.
+# The /default pair is the operator's saved choice, consulted by the printer tool
+# when a call names no target.
+GET     /api/printers                           ApiPrintersController.discover
+GET     /api/printers/options                   ApiPrintersController.options
+GET     /api/printers/default                   ApiPrintersController.getDefault
+PUT     /api/printers/default                   ApiPrintersController.saveDefault
+
 # Webhooks (no auth — verified by their own mechanisms)
 POST    /api/webhooks/telegram/{bindingId}      WebhookTelegramController.webhook
 POST    /api/webhooks/slack/{bindingId}         WebhookSlackController.webhook

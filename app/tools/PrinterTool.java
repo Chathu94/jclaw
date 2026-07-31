@@ -10,6 +10,7 @@ import services.printing.DiscoveredPrinter;
 import services.printing.JobAttributes;
 import services.printing.PrintDispatcher;
 import services.printing.PrintProtocol;
+import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
 import utils.WorkspacePathGuard;
 
@@ -27,10 +28,16 @@ import java.util.Map;
  * container that has no printing stack at all.
  *
  * <p>Printing is irreversible in a way most tools are not: paper comes out of a
- * device in someone's room, and there is no undo. The tool therefore never
- * guesses a target — {@code print} requires an explicit printer — and it reports
- * honestly when the backend it fell back to cannot confirm the job actually
- * printed (see {@link PrintDispatcher.Outcome#verified()}).
+ * device in someone's room, and there is no undo. So the destination is always a
+ * human's choice, never the tool's: {@code print} uses an explicit printer, or
+ * the default the operator saved under Settings → Printers, and refuses when
+ * neither exists. A saved default is still a human choice — made once, in
+ * Settings — which is the distinction that matters here, as opposed to inferring
+ * a target from whatever happened to answer a discovery browse.
+ *
+ * <p>It also reports honestly when the backend it fell back to cannot confirm
+ * the job printed, or could not carry the requested job options (see
+ * {@link PrintDispatcher.Outcome}).
  */
 public class PrinterTool implements ToolRegistry.Tool {
 
@@ -201,7 +208,8 @@ public class PrinterTool implements ToolRegistry.Tool {
     private static String print(JsonObject args, Agent agent) throws IOException {
         var target = resolveTarget(args);
         if (target == null) {
-            return "Error: 'print' needs a 'printer' (from discover) or an explicit 'host'.";
+            return "Error: 'print' needs a 'printer' (from discover) or an explicit 'host', "
+                    + "or a default printer saved under Settings -> Printers.";
         }
 
         var path = str(args, ARG_PATH);
@@ -242,7 +250,15 @@ public class PrinterTool implements ToolRegistry.Tool {
             return "Error: refusing to print an empty document.";
         }
 
-        var job = new JobAttributes(str(args, ARG_SIDES), str(args, ARG_COLOR), str(args, ARG_MEDIA));
+        // Per-call arguments win; anything omitted falls back to the operator's
+        // saved job options, then to the printer's own defaults. Merged per field
+        // rather than all-or-nothing so asking for one override (say monochrome)
+        // does not silently discard a configured duplex default.
+        var saved = PrinterDefaults.load();
+        var job = new JobAttributes(
+                firstNonNull(str(args, ARG_SIDES), saved.sides()),
+                firstNonNull(str(args, ARG_COLOR), saved.color()),
+                firstNonNull(str(args, ARG_MEDIA), saved.media()));
         var invalid = job.validationError();
         if (invalid != null) {
             // Rejected here rather than at the printer, which would answer with an
@@ -272,7 +288,8 @@ public class PrinterTool implements ToolRegistry.Tool {
     private static String status(JsonObject args) throws IOException {
         var target = resolveTarget(args);
         if (target == null) {
-            return "Error: 'status' needs a 'printer' (from discover) or an explicit 'host'.";
+            return "Error: 'status' needs a 'printer' (from discover) or an explicit 'host', "
+                    + "or a default printer saved under Settings -> Printers.";
         }
         return PrintDispatcher.status(target, intOrNull(args, ARG_JOB_ID));
     }
@@ -305,7 +322,16 @@ public class PrinterTool implements ToolRegistry.Tool {
         }
         var name = str(args, ARG_PRINTER);
         if (name == null) {
-            return null;
+            // Fall back to the operator's default from Settings → Printers. This is
+            // not the tool guessing: the distinction that matters is whether a human
+            // chose the destination, and this one was chosen once in Settings rather
+            // than inferred per call. With no default saved, print still refuses.
+            var saved = PrinterDefaults.load();
+            if (saved.isUnset()) {
+                return null;
+            }
+            return PrinterDiscovery.direct(saved.host(), saved.port(),
+                    PrintProtocol.parse(saved.protocol()));
         }
         var hits = PrinterDiscovery.matching(PrinterDiscovery.discover(Duration.ofSeconds(2)), name);
         if (hits.isEmpty()) {
@@ -325,6 +351,10 @@ public class PrinterTool implements ToolRegistry.Tool {
         // Deliberately not a guess: a conforming printer treats octet-stream as
         // "sniff it yourself", which beats asserting a format that is wrong.
         return "application/octet-stream";
+    }
+
+    private static String firstNonNull(String a, String b) {
+        return a != null ? a : b;
     }
 
     private static String str(JsonObject args, String key) {

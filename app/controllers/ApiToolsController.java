@@ -17,7 +17,6 @@ import play.mvc.With;
 import services.AgentService;
 import utils.ApiResponses;
 
-import java.util.HashMap;
 import java.util.List;
 
 import static utils.GsonHolder.GSON;
@@ -93,24 +92,23 @@ public class ApiToolsController extends Controller {
         Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
-        var allTools = ToolRegistry.listTools();
-        var configs = AgentToolConfig.findByAgent(agent);
-        var configMap = new HashMap<String, Boolean>();
-        for (var c : configs) {
-            configMap.put(c.toolName, c.enabled);
-        }
-
-        // Default policy: native tools are enabled-by-default; grouped tools
-        // (MCP) are enabled-by-default for the main agent, disabled-by-default
-        // for custom agents. Mirrors ToolRegistry.loadDisabledTools so the UI
-        // and the agent loop agree on the resolved state.
-        boolean isMain = agent.isMain();
-
-        var result = allTools.stream().map(t -> {
-            boolean defaultEnabled = t.group() == null || isMain;
-            boolean enabled = configMap.getOrDefault(t.name(), defaultEnabled);
-            return new AgentToolEntry(t.name(), t.description(), t.group(), enabled);
-        }).toList();
+        // Ask the agent loop what it will actually do rather than re-deriving the
+        // policy here. The previous version reimplemented it as "native tools are
+        // on, MCP is on for main", which silently stopped being true once tools
+        // began opting out by default: generate_image (JCLAW-228), generate_video
+        // (JCLAW-235), generate_audio (JCLAW-876) and printer (JCLAW-911) are all
+        // hidden from the model unless a row explicitly enables them, but this
+        // endpoint kept reporting them enabled. The agent editor therefore showed
+        // a ticked box for a tool the agent could not call, and ticking it again
+        // was what actually turned it on. Found during JCLAW-911 UAT.
+        //
+        // One source of truth means a tool added to the default-off list later
+        // shows up correctly here without anyone remembering to update this file.
+        var disabled = ToolRegistry.loadDisabledTools(agent);
+        var result = ToolRegistry.listTools().stream()
+                .map(t -> new AgentToolEntry(t.name(), t.description(), t.group(),
+                        !disabled.contains(t.name())))
+                .toList();
         renderJSON(gson.toJson(result));
     }
 

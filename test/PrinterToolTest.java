@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
+import services.printing.PrinterDefaults;
 import tools.PrinterTool;
 
 import java.util.List;
@@ -27,6 +28,10 @@ class PrinterToolTest extends UnitTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
+        // play1 runs test classes concurrently against one DB, so a default saved
+        // by PrinterDefaultsTest can otherwise leak in and satisfy the very
+        // "no target" checks below. Clear it so these assert the tool, not the order.
+        PrinterDefaults.clear();
         agent = AgentService.create("printer-test", "openrouter", "gpt-4.1");
     }
 
