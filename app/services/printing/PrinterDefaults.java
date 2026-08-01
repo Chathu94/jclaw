@@ -179,7 +179,7 @@ public final class PrinterDefaults {
         }
         try {
             return Integer.parseInt(raw.trim());
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             // A hand-edited config row should not break printing; the protocol's
             // standard port is the safe reading of "not a number".
             return 0;

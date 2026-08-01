@@ -183,7 +183,7 @@ class PrintBackendTest extends UnitTest {
                 try (var socket = server.accept()) {
                     socket.getOutputStream().write(2);
                     socket.getOutputStream().flush();
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // Test server; the assertion is on the client side.
                 }
             });
@@ -279,7 +279,7 @@ class PrintBackendTest extends UnitTest {
             CompletableFuture.runAsync(() -> {
                 try (var socket = server.accept()) {
                     socket.getInputStream().readAllBytes();
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // Test sink; the assertion is on the dispatcher's outcome.
                 }
             });
@@ -305,7 +305,7 @@ class PrintBackendTest extends UnitTest {
             CompletableFuture.runAsync(() -> {
                 try (var socket = server.accept()) {
                     socket.getInputStream().readAllBytes();
-                } catch (IOException ignored) {
+                } catch (IOException _) {
                     // Test sink.
                 }
             });

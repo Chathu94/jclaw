@@ -36,6 +36,9 @@ public final class IppClient {
 
     private static final MediaType IPP = MediaType.get("application/ipp");
 
+    /** RFC 8011 requires every request to declare its charset; IPP only defines this one. */
+    private static final String CHARSET = "utf-8";
+
     /**
      * IPP request ids need only be unique within a connection, but a monotonic
      * counter makes a packet capture readable across jobs when several are in
@@ -77,7 +80,7 @@ public final class IppClient {
                                     JobAttributes job,
                                     java.util.Map<String, String> options) throws IOException {
         var operation = new java.util.ArrayList<com.hp.jipp.encoding.Attribute<?>>();
-        operation.add(Types.attributesCharset.of("utf-8"));
+        operation.add(Types.attributesCharset.of(CHARSET));
         operation.add(Types.attributesNaturalLanguage.of("en"));
         operation.add(Types.printerUri.of(URI.create(printerUri)));
         operation.add(Types.requestingUserName.of(user));
@@ -115,10 +118,10 @@ public final class IppClient {
         // IPP status codes below 0x0100 are the successful family (successful-ok and
         // its warning variants). Anything at or above is a genuine rejection —
         // treating a warning as failure would fail jobs that actually printed.
-        var accepted = status != null && status.getCode() < 0x0100;
+        var accepted = status.getCode() < 0x0100;
         return new PrintResult(accepted, jobId,
                 jobState == null ? null : jobState.getName(),
-                status == null ? "no status returned" : status.getName());
+                status.getName());
     }
 
     /**
@@ -187,12 +190,12 @@ public final class IppClient {
     public static java.util.Set<String> supportedFormats(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
-                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesCharset.of(CHARSET),
                         Types.attributesNaturalLanguage.of("en"),
                         Types.printerUri.of(URI.create(printerUri))));
         var response = exchange(printerUri, packet, null);
         var formats = response.getStrings(Tag.printerAttributes, Types.documentFormatSupported);
-        if (formats == null || formats.isEmpty()) {
+        if (formats.isEmpty()) {
             return java.util.Set.of();
         }
         return formats.stream().map(f -> f.toLowerCase().trim())
@@ -224,28 +227,25 @@ public final class IppClient {
     public static RasterCapabilities rasterCapabilities(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
-                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesCharset.of(CHARSET),
                         Types.attributesNaturalLanguage.of("en"),
                         Types.printerUri.of(URI.create(printerUri))));
         var response = exchange(printerUri, packet, null);
 
         var types = response.getStrings(Tag.printerAttributes,
                 Types.pwgRasterDocumentTypeSupported);
-        var typeSet = types == null ? java.util.Set.<String>of()
-                : types.stream().map(t -> t.toLowerCase().trim())
-                        .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        var typeSet = types.stream().map(t -> t.toLowerCase().trim())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
 
         var resolutions = response.getStrings(Tag.printerAttributes,
                 Types.pwgRasterDocumentResolutionSupported);
         var dpi = 0;
-        if (resolutions != null) {
-            for (var r : resolutions) {
-                // Rendered as e.g. "600dpi" or "600x600dpi"; take the first number.
-                var digits = r.replaceAll("[^0-9x].*$", "").split("x")[0];
-                if (!digits.isEmpty()) {
-                    dpi = Integer.parseInt(digits);
-                    break;
-                }
+        for (var r : resolutions) {
+            // Rendered as e.g. "600dpi" or "600x600dpi"; take the first number.
+            var digits = r.replaceAll("[^0-9x].*$", "").split("x")[0];
+            if (!digits.isEmpty()) {
+                dpi = Integer.parseInt(digits);
+                break;
             }
         }
         // What is actually in the tray. Load-bearing, not informational: this
@@ -253,24 +253,22 @@ public final class IppClient {
         // mismatch with printer-state-reasons=spool-area-full and stopped —
         // an error that reads like a size problem and is a paper problem.
         var ready = response.getStrings(Tag.printerAttributes, Types.mediaReady);
-        var mediaReady = ready == null || ready.isEmpty() ? null : ready.getFirst().trim();
+        var mediaReady = ready.isEmpty() ? null : ready.getFirst().trim();
 
         return new RasterCapabilities(dpi, typeSet.contains("sgray_8"), typeSet, mediaReady);
     }
 
     /**
-     * One job option this printer announced, ready to render as a select.
+     * One job option this printer announced, ready to render as a select or,
+     * when it carries a range, a number input.
      *
      * @param name         the IPP job-template attribute name, e.g. {@code sides}
      * @param label        a human label for the UI
-     * @param values       the values this printer accepts, from {@code <name>-supported}
-     * @param defaultValue what it uses when a job omits the attribute, or null
-     */
-    /**
-     * @param values       selectable values; empty for a numeric range
+     * @param values       the values this printer accepts, from {@code <name>-supported};
+     *                     empty for a numeric range
      * @param min          lower bound when this is a range, else null
      * @param max          upper bound when this is a range, else null
-     * @param defaultValue what the printer uses when a job omits it, or null
+     * @param defaultValue what it uses when a job omits the attribute, or null
      */
     public record JobOption(String name, String label, java.util.List<OptionValue> values,
                             Integer min, Integer max, String defaultValue) {
@@ -365,7 +363,7 @@ public final class IppClient {
     public static java.util.List<JobOption> jobOptions(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
-                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesCharset.of(CHARSET),
                         Types.attributesNaturalLanguage.of("en"),
                         Types.printerUri.of(URI.create(printerUri))));
         var response = exchange(printerUri, packet, null);
@@ -423,21 +421,21 @@ public final class IppClient {
     public static String printerState(String printerUri) throws IOException {
         var packet = new IppPacket(Operation.getPrinterAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
-                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesCharset.of(CHARSET),
                         Types.attributesNaturalLanguage.of("en"),
                         Types.printerUri.of(URI.create(printerUri))));
         var response = exchange(printerUri, packet, null);
         var state = response.getValue(Tag.printerAttributes, Types.printerState);
         var reasons = response.getStrings(Tag.printerAttributes, Types.printerStateReasons);
         var text = state == null ? "unknown" : state.getName();
-        return reasons == null || reasons.isEmpty() ? text : text + " (" + String.join(", ", reasons) + ")";
+        return reasons.isEmpty() ? text : text + " (" + String.join(", ", reasons) + ")";
     }
 
     /** Query one job's state (Get-Job-Attributes). */
     public static String jobState(String printerUri, int jobId) throws IOException {
         var packet = new IppPacket(Operation.getJobAttributes, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
-                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesCharset.of(CHARSET),
                         Types.attributesNaturalLanguage.of("en"),
                         Types.printerUri.of(URI.create(printerUri)),
                         Types.jobId.of(jobId)));
@@ -450,14 +448,13 @@ public final class IppClient {
     public static String cancel(String printerUri, int jobId, String user) throws IOException {
         var packet = new IppPacket(Operation.cancelJob, REQUEST_ID.getAndIncrement(),
                 AttributeGroup.groupOf(Tag.operationAttributes,
-                        Types.attributesCharset.of("utf-8"),
+                        Types.attributesCharset.of(CHARSET),
                         Types.attributesNaturalLanguage.of("en"),
                         Types.printerUri.of(URI.create(printerUri)),
                         Types.jobId.of(jobId),
                         Types.requestingUserName.of(user)));
         var response = exchange(printerUri, packet, null);
-        var status = response.getStatus();
-        return status == null ? "no status returned" : status.getName();
+        return response.getStatus().getName();
     }
 
     /**
@@ -495,11 +492,7 @@ public final class IppClient {
             if (!response.isSuccessful()) {
                 throw new IOException("IPP request failed: HTTP " + response.code());
             }
-            var responseBody = response.body();
-            if (responseBody == null) {
-                throw new IOException("IPP response had no body");
-            }
-            try (var in = new IppInputStream(responseBody.byteStream())) {
+            try (var in = new IppInputStream(response.body().byteStream())) {
                 return in.readPacket();
             }
         }

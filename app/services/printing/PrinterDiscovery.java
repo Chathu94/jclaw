@@ -100,7 +100,7 @@ public final class PrinterDiscovery {
                             (a, b) -> a.protocol().ordinal() <= b.protocol().ordinal() ? a : b);
                 }
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return List.of();
         }

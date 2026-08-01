@@ -43,6 +43,14 @@ public class PrinterTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "printer";
 
+    // Each action name is the same string in three places — the actions() list,
+    // the schema enum the model reads, and the dispatch switch. Naming them once
+    // keeps those three from drifting apart silently.
+    private static final String ACTION_DISCOVER = "discover";
+    private static final String ACTION_PRINT = "print";
+    private static final String ACTION_STATUS = "status";
+    private static final String ACTION_CANCEL = "cancel";
+
     private static final String ARG_ACTION = "action";
     private static final String ARG_PRINTER = "printer";
     private static final String ARG_JOB_ID = "jobId";
@@ -81,10 +89,10 @@ public class PrinterTool implements ToolRegistry.Tool {
     @Override
     public List<ToolAction> actions() {
         return List.of(
-                new ToolAction("discover", "Find printers on the local network over mDNS/Bonjour"),
-                new ToolAction("print", "Send a workspace file or literal text to a printer"),
-                new ToolAction("status", "Report a printer's state, and a job's state when given a job id"),
-                new ToolAction("cancel", "Cancel a queued print job by id"));
+                new ToolAction(ACTION_DISCOVER, "Find printers on the local network over mDNS/Bonjour"),
+                new ToolAction(ACTION_PRINT, "Send a workspace file or literal text to a printer"),
+                new ToolAction(ACTION_STATUS, "Report a printer's state, and a job's state when given a job id"),
+                new ToolAction(ACTION_CANCEL, "Cancel a queued print job by id"));
     }
 
     @Override
@@ -109,7 +117,7 @@ public class PrinterTool implements ToolRegistry.Tool {
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.<String, Object>ofEntries(
                         Map.entry(ARG_ACTION, prop(SchemaKeys.STRING,
-                                List.of("discover", "print", "status", "cancel"),
+                                List.of(ACTION_DISCOVER, ACTION_PRINT, ACTION_STATUS, ACTION_CANCEL),
                                 "Which operation to perform.")),
                         Map.entry(ARG_PRINTER, prop(SchemaKeys.STRING, null,
                                 "Printer name or host, as reported by 'discover'. Required for "
@@ -160,7 +168,7 @@ public class PrinterTool implements ToolRegistry.Tool {
         JsonObject args;
         try {
             args = JsonParser.parseString(argsJson).getAsJsonObject();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return "Error: arguments were not a JSON object.";
         }
         var action = str(args, ARG_ACTION);
@@ -170,10 +178,10 @@ public class PrinterTool implements ToolRegistry.Tool {
         }
         try {
             return switch (action.toLowerCase()) {
-                case "discover" -> discover();
-                case "print" -> print(args, agent);
-                case "status" -> status(args);
-                case "cancel" -> cancel(args, agent);
+                case ACTION_DISCOVER -> discover();
+                case ACTION_PRINT -> print(args, agent);
+                case ACTION_STATUS -> status(args);
+                case ACTION_CANCEL -> cancel(args, agent);
                 default -> "Error: unknown action '" + action
                         + "'. Valid actions: discover, print, status, cancel.";
             };
@@ -380,7 +388,7 @@ public class PrinterTool implements ToolRegistry.Tool {
         }
         try {
             return args.get(key).getAsInt();
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return null;
         }
     }

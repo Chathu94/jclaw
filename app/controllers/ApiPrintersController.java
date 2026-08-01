@@ -29,6 +29,7 @@ import static utils.GsonHolder.GSON;
 public class ApiPrintersController extends Controller {
 
     private static final String CATEGORY = "printer";
+    private static final String KEY_OPTIONS = "options";
 
     /**
      * @param name         advertised printer name
@@ -82,8 +83,8 @@ public class ApiPrintersController extends Controller {
         // offered. Named fields here would mean a code change every time a vendor
         // exposes something new, which is the opposite of reading capabilities.
         var options = new java.util.LinkedHashMap<String, String>();
-        if (body.has("options") && body.get("options").isJsonObject()) {
-            for (var entry : body.getAsJsonObject("options").entrySet()) {
+        if (body.has(KEY_OPTIONS) && body.get(KEY_OPTIONS).isJsonObject()) {
+            for (var entry : body.getAsJsonObject(KEY_OPTIONS).entrySet()) {
                 var value = entry.getValue().isJsonNull() ? null : entry.getValue().getAsString().trim();
                 if (value != null && !value.isEmpty()) {
                     options.put(entry.getKey(), value);
