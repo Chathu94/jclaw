@@ -254,6 +254,29 @@ class PrintBackendTest extends UnitTest {
         assertEquals(PrintProtocol.IPP, PrinterDiscovery.direct("p", null, null).protocol());
     }
 
+    @Test
+    void reachabilityDistinguishesAListeningPortFromAClosedOne() throws Exception {
+        int port;
+        try (var server = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            port = server.getLocalPort();
+            assertTrue(PrinterDiscovery.reachable("127.0.0.1", port),
+                    "a listening socket must read as reachable");
+        }
+        // Same port, now closed — without this half the check could return true for
+        // everything and still pass, which is what a stale-default badge must never do.
+        assertFalse(PrinterDiscovery.reachable("127.0.0.1", port),
+                "a closed port must read as unreachable");
+    }
+
+    @Test
+    void reachabilityRejectsAnUnusableAddressWithoutWaiting() {
+        // Blank host and non-port answer immediately rather than burning the timeout
+        // on a settings page load.
+        assertFalse(PrinterDiscovery.reachable(null, 631));
+        assertFalse(PrinterDiscovery.reachable("", 631));
+        assertFalse(PrinterDiscovery.reachable("127.0.0.1", 0));
+    }
+
     // ─── Job attributes ───
 
     @Test

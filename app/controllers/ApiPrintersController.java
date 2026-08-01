@@ -1,5 +1,6 @@
 package controllers;
 
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -57,6 +58,29 @@ public class ApiPrintersController extends Controller {
     /** GET /api/printers/default — the saved default printer and job options. */
     public static void getDefault() {
         renderJSON(GSON.toJson(PrinterDefaults.load()));
+    }
+
+    /**
+     * Reachability of the saved default, as its own call so the Printers panel can
+     * render immediately and fill the badge in when the probe returns.
+     *
+     * @param configured false when no default is saved, which is not a fault
+     * @param reachable  whether anything answered at the saved address
+     */
+    public record DefaultStatus(boolean configured, boolean reachable, String host, int port) {}
+
+    /** GET /api/printers/default/status — is the saved default still answering? */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DefaultStatus.class)))
+    @Operation(summary = "Probe whether the saved default printer answers at its address")
+    public static void defaultStatus() {
+        var saved = PrinterDefaults.load();
+        if (saved.isUnset()) {
+            renderJSON(GSON.toJson(new DefaultStatus(false, false, null, 0)));
+        }
+        var protocol = PrintProtocol.parse(saved.protocol());
+        var port = saved.port() > 0 ? saved.port() : protocol.defaultPort();
+        renderJSON(GSON.toJson(new DefaultStatus(
+                true, PrinterDiscovery.reachable(saved.host(), port), saved.host(), port)));
     }
 
     /**

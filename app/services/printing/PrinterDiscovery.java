@@ -192,6 +192,31 @@ public final class PrinterDiscovery {
                 resolved, Map.of());
     }
 
+    /**
+     * How long to wait for a saved printer to answer. Short because this runs on a
+     * settings page load, where a slow probe reads as a hung page.
+     */
+    static final int REACHABILITY_TIMEOUT_MS = 2_500;
+
+    /**
+     * Does anything answer at {@code host:port}? A saved default outlives the DHCP
+     * lease it was saved under — this one answered on .60 for a week and then moved
+     * to .51, which surfaced as a print that timed out rather than as a stale
+     * address. Deliberately a bare TCP connect: it is protocol-agnostic, so RAW and
+     * LPD defaults get the same answer as IPP, and it cannot itself queue a job.
+     */
+    public static boolean reachable(String host, int port) {
+        if (host == null || host.isBlank() || port <= 0) {
+            return false;
+        }
+        try (var socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress(host, port), REACHABILITY_TIMEOUT_MS);
+            return true;
+        } catch (IOException | IllegalArgumentException | SecurityException e) {
+            return false;
+        }
+    }
+
     /** Discovered printers whose name or host matches {@code query}, case-insensitively. */
     public static List<DiscoveredPrinter> matching(List<DiscoveredPrinter> printers, String query) {
         if (query == null || query.isBlank()) {

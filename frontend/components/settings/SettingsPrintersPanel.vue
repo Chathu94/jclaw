@@ -25,6 +25,14 @@ interface PrinterDefaults {
   options: Record<string, string>
 }
 
+interface PrinterReachability {
+  /** False when no default is saved — absence, not a fault. */
+  configured: boolean
+  reachable: boolean
+  host: string | null
+  port: number
+}
+
 /** One job option the printer announced — the UI has no list of its own. */
 /** A selectable value: what to send, and what to show. They differ for enums —
  *  print-quality is carried as '4' but reads as 'normal'. */
@@ -56,6 +64,11 @@ interface PrinterOptions {
 const { mutate } = useApiMutation()
 
 const { data: saved, refresh: refreshSaved } = useLazyFetch<PrinterDefaults>('/api/printers/default')
+// Separate lazy call so the saved address paints immediately and the badge fills in
+// after the probe: a default outlives the DHCP lease it was saved under, and the
+// only symptom until now was a print that timed out with no hint the address moved.
+const { data: reach, refresh: refreshReach }
+  = useLazyFetch<PrinterReachability>('/api/printers/default/status')
 // Options are per-printer, not global: this Canon reports sides-supported =
 // one-sided only, so offering duplex would let an operator save a default the
 // printer must reject. Re-queried whenever the selected printer changes.
@@ -198,6 +211,9 @@ async function persist(body: Record<string, unknown>) {
     return
   }
   await refreshSaved()
+  // Re-probe: saving is exactly when the address changes, so a badge left over from
+  // the previous default would be reporting on something that is no longer set.
+  await refreshReach()
   // Re-scan silently so the "Default" badge moves without another click.
   if (found.value) await scan()
   notice.value = body.host ? 'Default printer saved.' : 'Default printer cleared.'
@@ -226,10 +242,34 @@ async function persist(body: Record<string, unknown>) {
                  just the host (which manual entry makes it). -->
             <template v-if="hasDefault">
               {{ defaultLabel }}
+              <span
+                v-if="reach?.configured"
+                class="ml-2 inline-flex items-center gap-1.5 align-middle"
+                data-testid="printer-reachability"
+              >
+                <span
+                  class="w-1.5 h-1.5 rounded-full shrink-0"
+                  :class="reach.reachable ? 'bg-emerald-500' : 'bg-amber-500'"
+                  aria-hidden="true"
+                />
+                <span :class="reach.reachable ? 'text-fg-muted' : 'text-amber-600 dark:text-amber-400'">
+                  {{ reach.reachable ? 'Online' : 'Not answering' }}
+                </span>
+              </span>
             </template>
             <template v-else>
               None set. Agents must name a printer on every call.
             </template>
+            <!-- Named rather than implied: the operator cannot act on "offline" until
+                 they know the address is the suspect, and a moved DHCP lease is the
+                 common cause. -->
+            <div
+              v-if="reach?.configured && !reach.reachable"
+              class="mt-1 text-amber-600 dark:text-amber-400"
+            >
+              Nothing answered at this address. If the printer moved to a new IP, scan
+              and save it again.
+            </div>
           </div>
         </div>
         <button

@@ -253,6 +253,9 @@ POST    /api/system/restart                     ApiSystemController.restart
 GET     /api/printers                           ApiPrintersController.discover
 GET     /api/printers/options                   ApiPrintersController.options
 GET     /api/printers/default                   ApiPrintersController.getDefault
+# Split from getDefault so the panel paints the saved address at once and fills the
+# reachability badge in after — a saved default outlives its DHCP lease.
+GET     /api/printers/default/status            ApiPrintersController.defaultStatus
 PUT     /api/printers/default                   ApiPrintersController.saveDefault
 
 # Webhooks (no auth — verified by their own mechanisms)
