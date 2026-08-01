@@ -232,7 +232,10 @@ public final class PrintDispatcher {
                     throw new IOException("printer rejected the job — " + result.message()
                             + " (sent as " + prepared.format() + ")");
                 }
-                var applied = job.isEmpty() ? "" : " with " + job.describe();
+                // effective, not job: the negotiator overrides media to whatever the
+                // printer says is loaded, so reporting the request hides the override
+                // exactly when it mattered.
+                var applied = effective.isEmpty() ? "" : " with " + effective.describe();
                 var conversion = prepared.explanation() == null
                         ? "" : " — " + prepared.explanation();
                 return new Outcome(protocol, result.jobId(), result.state(), true, null, List.of(),

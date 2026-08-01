@@ -105,7 +105,9 @@ public class PrinterTool implements ToolRegistry.Tool {
                 + "'discover' lists printers found over mDNS; 'print' sends a workspace file "
                 + "(path) or literal text to a named printer; 'status' reports printer/job state; "
                 + "'cancel' cancels a job. Always run 'discover' first and print to a printer the "
-                + "user named — never guess a target, because printing cannot be undone.";
+                + "user named — never guess a target, because printing cannot be undone. Leave "
+                + "sides, color and media unset unless the user asked for them; the printer's own "
+                + "settings are right more often than a guess, and a wrong one wastes paper.";
     }
 
     @Override
@@ -138,18 +140,26 @@ public class PrinterTool implements ToolRegistry.Tool {
                                 "Literal text to print. Mutually exclusive with 'path'.")),
                         Map.entry(ARG_JOB_ID, prop(SchemaKeys.INTEGER, null,
                                 "Job id, as returned by 'print'. Required for 'cancel'.")),
+                        // These three are omitted far more often than they are set, and
+                        // every one of them is a way to break a job that would otherwise
+                        // have printed — so each says when to set it rather than what to
+                        // set it to. An earlier version listed example values here and
+                        // the model reliably chose one, sending Letter to a Legal-
+                        // registered tray (E59) and duplex to a printer with no duplexer.
                         Map.entry(ARG_SIDES, prop(SchemaKeys.STRING, JobAttributes.SIDES_VALUES,
-                                "Duplex mode. 'two-sided-long-edge' is normal double-sided for "
-                                        + "portrait pages; 'two-sided-short-edge' flips on the short "
-                                        + "edge (calendar style). Omit for the printer's default. "
+                                "Set only when the user asks for double-sided; omitted means the "
+                                        + "printer's own default. Requesting duplex on a printer "
+                                        + "without one gets the job substituted or refused. "
                                         + "IPP printers only — other backends cannot carry it.")),
                         Map.entry(ARG_COLOR, prop(SchemaKeys.STRING, JobAttributes.COLOR_MODE_VALUES,
-                                "Colour mode: 'monochrome' for black and white. Omit for the "
-                                        + "printer's default. IPP printers only.")),
+                                "Set only when the user asks for colour or black-and-white; "
+                                        + "omitted means the printer's own default. IPP printers only.")),
                         Map.entry(ARG_MEDIA, prop(SchemaKeys.STRING, null,
-                                "Paper or input tray, e.g. 'iso_a4_210x297mm', 'na_letter_8.5x11in', "
-                                        + "or a tray name the printer advertises. Omit for the "
-                                        + "printer's default. IPP printers only."))),
+                                "Set only when the user names a paper size or tray. Omitting it is "
+                                        + "the correct default: JClaw reads the media the printer "
+                                        + "reports as loaded and declares that, whereas a guessed "
+                                        + "size that disagrees with the tray is refused and no page "
+                                        + "comes out. IPP printers only."))),
                 SchemaKeys.REQUIRED, List.of(ARG_ACTION));
     }
 

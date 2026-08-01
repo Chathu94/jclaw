@@ -48,9 +48,9 @@ public final class PrintFormatNegotiator {
     public record Prepared(byte[] document, String format, boolean converted, String explanation,
                            String media) {
 
-        /** Pass-through, with no media opinion of its own. */
-        static Prepared asIs(byte[] document, String format, String explanation) {
-            return new Prepared(document, format, false, explanation, null);
+        /** Pass-through, still declaring the media the printer says is loaded. */
+        static Prepared asIs(byte[] document, String format, String explanation, String media) {
+            return new Prepared(document, format, false, explanation, media);
         }
     }
 
@@ -78,22 +78,23 @@ public final class PrintFormatNegotiator {
     public static Prepared prepare(byte[] document, String sourceFormat, Set<String> supported,
                                    JobAttributes job, IppClient.RasterCapabilities raster)
             throws IOException {
+        // The paper the printer says is loaded, unless the operator named one.
+        // Resolved before any branch returns, because pass-through needs it just as
+        // much as the raster path: a job declaring Letter into a Legal tray is
+        // refused as E59/2114 and no page comes out.
+        var media = job != null && job.media() != null ? job.media() : raster.mediaReady();
+
         // Unknown capabilities: send as-is. Converting on a guess is worse than
         // letting a printer that would have coped decide for itself, and IPP will
         // say document-format-not-supported if it cannot.
         if (supported.isEmpty()) {
-            return Prepared.asIs(document, sourceFormat, null);
+            return Prepared.asIs(document, sourceFormat, null, media);
         }
         // Native pass-through wins whenever it is available — no re-encode, no
         // resolution loss, and the printer's own renderer is better than ours.
         if (sourceFormat != null && supported.contains(sourceFormat.toLowerCase())) {
-            return Prepared.asIs(document, sourceFormat, null);
+            return Prepared.asIs(document, sourceFormat, null, media);
         }
-
-        // Default to the paper the printer says is loaded. Assuming A4 is how a
-        // job ends up mismatched with a Legal tray, which this printer reports as
-        // spool-area-full rather than anything mentioning paper.
-        var media = job != null && job.media() != null ? job.media() : raster.mediaReady();
 
         if (supported.contains(PWG_RASTER)) {
             // Colour only when the printer has no greyscale mode or the operator
@@ -139,7 +140,7 @@ public final class PrintFormatNegotiator {
                     .formatted(String.join(", ", supported)) + "falling back to octet-stream");
             return Prepared.asIs(document, OCTET_STREAM,
                     "sent as octet-stream — the printer advertises no format JClaw can render to, "
-                            + "so it must detect the type itself");
+                            + "so it must detect the type itself", media);
         }
 
         throw new IOException("Printer accepts none of the formats JClaw can produce. "

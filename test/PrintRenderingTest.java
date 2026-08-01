@@ -1,5 +1,6 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.printing.IppClient;
 import services.printing.JobAttributes;
 import services.printing.PrintFormatNegotiator;
 import services.printing.PrintRenderer;
@@ -80,6 +81,39 @@ class PrintRenderingTest extends UnitTest {
         // Sent unchanged as the type the printer advertises, not sniffed as bytes.
         assertEquals("image/jpeg", prepared.format());
         assertFalse(prepared.converted());
+    }
+
+    @Test
+    void passThroughStillDeclaresTheLoadedMedia() throws Exception {
+        // Pass-through used to return before media was resolved, so it declared
+        // nothing and the request's own size went through unchallenged. Letter
+        // against a Legal tray is refused as E59/2114 with no page printed.
+        var canon = Set.of("application/octet-stream", "image/jpeg", "image/urf", "image/pwg-raster");
+        var legalLoaded = new IppClient.RasterCapabilities(
+                600, true, Set.of("sgray_8"), "na_legal_8.5x14in");
+
+        var prepared = PrintFormatNegotiator.prepare(
+                png(120, 80), tools.PrinterTool.formatFor("photo.jpeg"),
+                canon, JobAttributes.DEFAULTS, legalLoaded);
+
+        assertFalse(prepared.converted(), "image/jpeg is advertised, so this is pass-through");
+        assertEquals("na_legal_8.5x14in", prepared.media(),
+                "pass-through must carry the loaded media, not leave it unset");
+    }
+
+    @Test
+    void anExplicitMediaChoiceBeatsWhatTheTrayReports() throws Exception {
+        // The operator asked for something specific; mediaReady is only the default.
+        var canon = Set.of("application/octet-stream", "image/jpeg");
+        var legalLoaded = new IppClient.RasterCapabilities(
+                600, true, Set.of("sgray_8"), "na_legal_8.5x14in");
+        var wantsA4 = new JobAttributes(null, null, "iso_a4_210x297mm");
+
+        var prepared = PrintFormatNegotiator.prepare(
+                png(120, 80), tools.PrinterTool.formatFor("photo.jpeg"),
+                canon, wantsA4, legalLoaded);
+
+        assertEquals("iso_a4_210x297mm", prepared.media());
     }
 
     @Test
