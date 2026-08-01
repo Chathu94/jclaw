@@ -91,8 +91,13 @@ public final class PrintFormatNegotiator {
             return Prepared.asIs(document, sourceFormat, null, media);
         }
         // Native pass-through wins whenever it is available — no re-encode, no
-        // resolution loss, and the printer's own renderer is better than ours.
-        if (sourceFormat != null && supported.contains(sourceFormat.toLowerCase())) {
+        // resolution loss, and the printer's own renderer is usually better than ours.
+        // Progressive JPEG is the exception: a Canon E3300 advertising image/jpeg
+        // accepted one with successful-ok, fed the sheet, and printed nothing. The
+        // advertisement covers the MIME type, not every encoding of it, and a blank
+        // page reports as success — so rasterise it here where we can see the pixels.
+        if (sourceFormat != null && supported.contains(sourceFormat.toLowerCase())
+                && !isProgressiveJpeg(document)) {
             return Prepared.asIs(document, sourceFormat, null, media);
         }
 
@@ -145,6 +150,47 @@ public final class PrintFormatNegotiator {
 
         throw new IOException("Printer accepts none of the formats JClaw can produce. "
                 + "It advertises: " + String.join(", ", supported));
+    }
+
+    /**
+     * True when {@code document} is a progressive JPEG (SOF2).
+     *
+     * <p>Walks the marker chain rather than searching for the {@code FFC2} bytes,
+     * which occur freely inside entropy-coded scan data. Anything that is not a
+     * well-formed JPEG answers false and takes the normal path.
+     */
+    public static boolean isProgressiveJpeg(byte[] document) {
+        if (document == null || document.length < 4
+                || (document[0] & 0xFF) != 0xFF || (document[1] & 0xFF) != 0xD8) {
+            return false;
+        }
+        var i = 2;
+        while (i + 3 < document.length) {
+            if ((document[i] & 0xFF) != 0xFF) {
+                return false;  // desynchronised — do not guess
+            }
+            var marker = document[i + 1] & 0xFF;
+            if (marker == 0xFF) {
+                i++;           // fill byte before the real marker
+                continue;
+            }
+            if (marker == 0x01 || (marker >= 0xD0 && marker <= 0xD8)) {
+                i += 2;        // standalone marker, carries no length
+                continue;
+            }
+            if (marker == 0xC2) {
+                return true;
+            }
+            if (marker == 0xDA || marker == 0xD9) {
+                return false;  // scan data or end of image; no SOF2 will follow
+            }
+            var length = ((document[i + 2] & 0xFF) << 8) | (document[i + 3] & 0xFF);
+            if (length < 2) {
+                return false;
+            }
+            i += 2 + length;
+        }
+        return false;
     }
 
     /** Encode one page as JPEG at {@link #JPEG_QUALITY}. */

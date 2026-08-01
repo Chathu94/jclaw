@@ -83,6 +83,65 @@ class PrintRenderingTest extends UnitTest {
         assertFalse(prepared.converted());
     }
 
+    /** Same picture as {@link #png}, encoded as a real progressive JPEG. */
+    private static byte[] progressiveJpeg(int w, int h) throws Exception {
+        var img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        var g = img.createGraphics();
+        g.setColor(Color.RED);
+        g.fillRect(0, 0, w, h);
+        g.dispose();
+        var writer = ImageIO.getImageWritersByFormatName("jpeg").next();
+        var param = writer.getDefaultWriteParam();
+        param.setProgressiveMode(javax.imageio.ImageWriteParam.MODE_DEFAULT);
+        var out = new ByteArrayOutputStream();
+        try (var stream = ImageIO.createImageOutputStream(out)) {
+            writer.setOutput(stream);
+            writer.write(null, new javax.imageio.IIOImage(img, null, null), param);
+        }
+        writer.dispose();
+        return out.toByteArray();
+    }
+
+    private static byte[] baselineJpeg(int w, int h) throws Exception {
+        var img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        var g = img.createGraphics();
+        g.setColor(Color.RED);
+        g.fillRect(0, 0, w, h);
+        g.dispose();
+        var out = new ByteArrayOutputStream();
+        ImageIO.write(img, "jpeg", out);
+        return out.toByteArray();
+    }
+
+    @Test
+    void progressiveJpegIsDetectedAndBaselineIsNot() throws Exception {
+        assertTrue(PrintFormatNegotiator.isProgressiveJpeg(progressiveJpeg(64, 48)));
+        assertFalse(PrintFormatNegotiator.isProgressiveJpeg(baselineJpeg(64, 48)));
+        // Not a JPEG, and a truncated one, both take the normal path rather than guess.
+        assertFalse(PrintFormatNegotiator.isProgressiveJpeg(png(16, 16)));
+        assertFalse(PrintFormatNegotiator.isProgressiveJpeg(new byte[]{(byte) 0xFF, (byte) 0xD8}));
+    }
+
+    @Test
+    void aProgressiveJpegIsRasterisedRatherThanPassedThrough() throws Exception {
+        // A Canon E3300 advertising image/jpeg accepted a progressive one with
+        // successful-ok and printed a blank sheet. Re-encoded baseline, same picture,
+        // same printer, it came out — so the advertisement covers the type, not the
+        // encoding, and a blank page reports as success.
+        var canon = Set.of("application/octet-stream", "image/jpeg", "image/urf", "image/pwg-raster");
+
+        var progressive = PrintFormatNegotiator.prepare(
+                progressiveJpeg(120, 80), "image/jpeg", canon, JobAttributes.DEFAULTS);
+        assertTrue(progressive.converted(), "a progressive JPEG must not be passed through");
+        assertEquals("image/pwg-raster", progressive.format());
+
+        // The baseline equivalent still takes the fast path — the guard is narrow.
+        var baseline = PrintFormatNegotiator.prepare(
+                baselineJpeg(120, 80), "image/jpeg", canon, JobAttributes.DEFAULTS);
+        assertFalse(baseline.converted(), "baseline JPEG must still pass through natively");
+        assertEquals("image/jpeg", baseline.format());
+    }
+
     @Test
     void passThroughStillDeclaresTheLoadedMedia() throws Exception {
         // Pass-through used to return before media was resolved, so it declared
