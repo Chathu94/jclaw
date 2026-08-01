@@ -212,7 +212,7 @@ public final class PrinterDiscovery {
         try (var socket = new java.net.Socket()) {
             socket.connect(new java.net.InetSocketAddress(host, port), REACHABILITY_TIMEOUT_MS);
             return true;
-        } catch (IOException | IllegalArgumentException | SecurityException e) {
+        } catch (IOException | IllegalArgumentException | SecurityException _) {
             return false;
         }
     }
