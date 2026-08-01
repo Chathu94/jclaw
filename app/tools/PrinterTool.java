@@ -365,6 +365,18 @@ public class PrinterTool implements ToolRegistry.Tool {
         if (lower.endsWith(".pdf")) return "application/pdf";
         if (lower.endsWith(".ps")) return "application/postscript";
         if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";
+        // Naming the image type is load-bearing twice over. PrintRenderer routes on
+        // an "image/" prefix and otherwise falls through to its text branch, so an
+        // undeclared JPEG rasterises as pages of mojibake; and the negotiator's
+        // native pass-through matches on this string, so a printer advertising
+        // image/jpeg never receives the JPEG it could have printed unchanged.
+        // This list tracks what PrintRenderer.readImage decodes.
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".bmp")) return "image/bmp";
+        if (lower.endsWith(".tif") || lower.endsWith(".tiff")) return "image/tiff";
+        if (lower.endsWith(".webp")) return "image/webp";
         // Deliberately not a guess: a conforming printer treats octet-stream as
         // "sniff it yourself", which beats asserting a format that is wrong.
         return "application/octet-stream";

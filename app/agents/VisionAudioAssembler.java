@@ -204,7 +204,12 @@ public final class VisionAudioAssembler {
         // !supportsVision branch, so a text-only model "sees" the image as a
         // description instead of an image_url part it can't accept.
         var captionBlocks = supportsVision ? "" : collectCaptionBlocks(atts);
-        var combinedText = text + fileNotes + transcriptBlocks + captionBlocks;
+        // The caption block is what carries an image's workspace location, and it
+        // is suppressed exactly when the model can see the image for itself — so a
+        // vision model could describe the picture but not name the file when asked
+        // to print or send it. This is that block's counterpart.
+        var imagePaths = supportsVision ? collectImagePathNotes(atts) : "";
+        var combinedText = text + fileNotes + transcriptBlocks + captionBlocks + imagePaths;
 
         var parts = new ArrayList<Map<String, Object>>();
         if (!combinedText.isBlank()) {
@@ -268,6 +273,31 @@ public final class VisionAudioAssembler {
             }
         }
         return transcriptBlocks.toString();
+    }
+
+    /**
+     * Workspace paths for images a vision model receives as {@code image_url} parts.
+     *
+     * <p>The path alone — no caption, and deliberately not the original filename.
+     * The model can already see the image and knows what the user called it; what
+     * it lacks is a path to hand a tool. Emitting {@code originalFilename} here
+     * would also break the invariant that an image's own name stays out of the text
+     * part when it rides as {@code image_url}, which
+     * {@code VisionAudioAssemblyTest.mixedAttachmentsEmitOrderedContentParts} pins.
+     * The stored leaf is a UUID, so the path carries no such name.
+     *
+     * <p>Mirrors the path clause inside {@link #collectCaptionBlocks} for the branch
+     * that block does not run on.
+     */
+    private static String collectImagePathNotes(List<MessageAttachment> atts) {
+        var notes = new StringBuilder();
+        for (var a : atts) {
+            if (!a.isImage()) continue;
+            notes.append("\n[The image above is in your workspace at \"")
+                    .append(AttachmentService.workspaceRelativePath(a))
+                    .append("\" — use that path with the printer, documents or filesystem tools]");
+        }
+        return notes.toString();
     }
 
     /**

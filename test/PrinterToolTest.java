@@ -179,6 +179,22 @@ class PrinterToolTest extends UnitTest {
     }
 
     @Test
+    void everyRenderableImageTypeIsNamedRatherThanLeftToSniffing() {
+        // These went out as octet-stream, which sent them down PrintRenderer's text
+        // branch: a JPEG rendered as UTF-8 is up to 100 pages of mojibake, reported
+        // as a successful job. Every type PrintRenderer.readImage decodes must be
+        // nameable here, or the renderer's image path is unreachable from the tool.
+        assertEquals("image/jpeg", PrinterTool.formatFor("photo.jpg"));
+        assertEquals("image/jpeg", PrinterTool.formatFor("photo.JPEG"));
+        assertEquals("image/png", PrinterTool.formatFor("diagram.png"));
+        assertEquals("image/gif", PrinterTool.formatFor("anim.gif"));
+        assertEquals("image/bmp", PrinterTool.formatFor("old.bmp"));
+        assertEquals("image/tiff", PrinterTool.formatFor("scan.tif"));
+        assertEquals("image/tiff", PrinterTool.formatFor("scan.tiff"));
+        assertEquals("image/webp", PrinterTool.formatFor("modern.webp"));
+    }
+
+    @Test
     void printerIsNotParallelSafe() {
         // Two jobs racing to one device interleave at the printer, where there is
         // no undo. Serialisation is the point, not an oversight.

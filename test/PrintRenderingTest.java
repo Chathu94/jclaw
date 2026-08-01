@@ -69,6 +69,42 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
+    void anImageFilenameReachesNativePassThroughRatherThanOctetStream() throws Exception {
+        // The seam this pair covers: PrinterTool.formatFor turns a filename into the
+        // MIME type the negotiator matches on. Both sides were tested in isolation —
+        // the negotiator with "image/png" handed in directly, formatFor with .pdf and
+        // .md — so an image filename never crossed the join, and every image left as
+        // application/octet-stream.
+        var canon = Set.of("application/octet-stream", "image/jpeg", "image/urf", "image/pwg-raster");
+        var prepared = PrintFormatNegotiator.prepare(
+                png(120, 80), tools.PrinterTool.formatFor("photo.jpeg"),
+                canon, JobAttributes.DEFAULTS);
+
+        // Sent unchanged as the type the printer advertises, not sniffed as bytes.
+        assertEquals("image/jpeg", prepared.format());
+        assertFalse(prepared.converted());
+    }
+
+    @Test
+    void anImageRastersThroughTheImageBranchNotTheTextBranch() throws Exception {
+        // No octet-stream here, so pass-through misses and the raster path runs. With
+        // the format undeclared this called PrintRenderer with octet-stream, which is
+        // neither "image/" nor PDF — so the PNG went through renderText and became
+        // pages of mojibake, reported as a successful job.
+        var rasterOnly = Set.of("image/pwg-raster");
+        var prepared = PrintFormatNegotiator.prepare(
+                png(120, 80), tools.PrinterTool.formatFor("diagram.png"),
+                rasterOnly, JobAttributes.DEFAULTS);
+
+        assertEquals("image/pwg-raster", prepared.format());
+        assertTrue(prepared.converted());
+        assertEquals("RaS2", new String(prepared.document(), 0, 4, StandardCharsets.US_ASCII));
+        // The explanation names the real source type; it read "application/octet-stream"
+        // while the bug was live, which is the visible tell.
+        assertTrue(prepared.explanation().contains("image/png"), prepared.explanation());
+    }
+
+    @Test
     void aCorruptImageFailsWithSomethingActionable() {
         var boom = assertThrows(java.io.IOException.class,
                 () -> PrintRenderer.render("not an image".getBytes(StandardCharsets.UTF_8),
