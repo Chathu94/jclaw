@@ -104,10 +104,14 @@ public class PrinterTool implements ToolRegistry.Tool {
         return "Discover printers on the local network and print to them. Actions: "
                 + "'discover' lists printers found over mDNS; 'print' sends a workspace file "
                 + "(path) or literal text to a named printer; 'status' reports printer/job state; "
-                + "'cancel' cancels a job. Always run 'discover' first and print to a printer the "
-                + "user named — never guess a target, because printing cannot be undone. Leave "
-                + "sides, color and media unset unless the user asked for them; the printer's own "
-                + "settings are right more often than a guess, and a wrong one wastes paper.";
+                + "'cancel' cancels a job. When a default printer is saved, 'print' already uses "
+                + "it — call 'print' directly rather than discovering first, which costs seconds "
+                + "and finds what is already configured. Discover only when there is no default, "
+                + "when 'print' reports the default is not answering, or when the user asks for a "
+                + "different printer; never guess a target, because printing cannot be undone. "
+                + "Leave sides, color and media unset unless the user asked for them; the "
+                + "printer's own settings are right more often than a guess, and a wrong one "
+                + "wastes paper.";
     }
 
     @Override
@@ -227,6 +231,14 @@ public class PrinterTool implements ToolRegistry.Tool {
         if (target == null) {
             return "Error: 'print' needs a 'printer' (from discover) or an explicit 'host', "
                     + "or a default printer saved under Settings -> Printers.";
+        }
+        // Only when the default was used — an explicitly named target is the operator's
+        // call and gets attempted as given. A default outlives the DHCP lease it was
+        // saved under, and reaching a dead one costs a 60s IPP timeout before falling
+        // back to a backend that cannot confirm anything printed.
+        if (str(args, "host") == null && str(args, ARG_PRINTER) == null
+                && !PrinterDiscovery.reachable(target.host(), target.port())) {
+            return defaultNotAnswering(target);
         }
 
         var path = str(args, ARG_PATH);
@@ -366,6 +378,29 @@ public class PrinterTool implements ToolRegistry.Tool {
             return PrinterDiscovery.direct(name, intOrNull(args, "port"), protocol);
         }
         return hits.getFirst();
+    }
+
+    /**
+     * The saved default did not answer. Browse and hand back what is actually on the
+     * network, so the operator picks a replacement in one turn instead of being told
+     * to go and discover for themselves.
+     */
+    private static String defaultNotAnswering(DiscoveredPrinter stale) {
+        var where = "%s at %s:%d".formatted(stale.name(), stale.host(), stale.port());
+        var found = PrinterDiscovery.discover();
+        if (found.isEmpty()) {
+            return "Error: the default printer (" + where + ") is not answering, and no "
+                    + "other printer answered an mDNS browse. Check it is powered on and "
+                    + "on this network, or save a new default under Settings -> Printers.";
+        }
+        var alternatives = new StringBuilder();
+        for (var p : found) {
+            alternatives.append("\n- ").append(p.name()).append(" — ").append(p.host())
+                    .append(':').append(p.port()).append(" (").append(p.protocol()).append(')');
+        }
+        return "Error: the default printer (" + where + ") is not answering. These are on "
+                + "the network now — ask the user which to use, then pass it as 'host':"
+                + alternatives;
     }
 
     /** MIME type from the filename, or null to let the printer sniff. */

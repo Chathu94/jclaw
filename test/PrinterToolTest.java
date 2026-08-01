@@ -19,7 +19,9 @@ import java.util.Map;
  *
  * <p>Nothing here reaches a printer. Every case asserted below is one the tool
  * must reject or answer BEFORE any network I/O, which is exactly the set that can
- * be pinned without hardware.
+ * be pinned without hardware. The one exception is
+ * {@link #anUnreachableDefaultOffersWhatIsOnTheNetworkInstead}, which needs a
+ * refused connection to a closed loopback port to reach the guard at all.
  */
 class PrinterToolTest extends UnitTest {
 
@@ -166,6 +168,47 @@ class PrinterToolTest extends UnitTest {
                 + "\"text\":\"hi\",\"color\":\"rainbow\"}");
         assertTrue(color.startsWith("Error:"), color);
         assertTrue(color.contains("rainbow"), color);
+    }
+
+    @Test
+    void anUnreachableDefaultOffersWhatIsOnTheNetworkInstead() throws Exception {
+        // A default outlives the DHCP lease it was saved under. Reaching a dead one
+        // used to cost a 60s IPP timeout and then a RAW fallback that cannot confirm
+        // anything printed, so the address is probed before any job is committed.
+        int deadPort;
+        try (var probe = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            deadPort = probe.getLocalPort();
+        }
+        PrinterDefaults.save(new PrinterDefaults.Defaults(
+                "Ghost printer", "127.0.0.1", deadPort, "IPP", Map.of()));
+
+        var out = run("{\"action\":\"print\",\"text\":\"hi\"}");
+
+        assertTrue(out.startsWith("Error:"), out);
+        assertTrue(out.contains("not answering"), out);
+        // Names the stale target: "the default is unreachable" is only actionable if
+        // the operator can see which address was tried.
+        assertTrue(out.contains("127.0.0.1:" + deadPort), out);
+        // Asserted on the shared prefix only — whether an mDNS browse finds anything
+        // depends on the machine running the suite, and both branches must say this.
+    }
+
+    @Test
+    void anExplicitlyNamedTargetIsNotProbedFirst() throws Exception {
+        // Only the saved default is pre-checked. A host the operator typed is their
+        // call and gets attempted as given, so a printer that ignores mDNS or answers
+        // slowly is still reachable by address.
+        int deadPort;
+        try (var probe = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
+            deadPort = probe.getLocalPort();
+        }
+        var out = run("{\"action\":\"print\",\"text\":\"hi\",\"host\":\"127.0.0.1\",\"port\":"
+                + deadPort + "}");
+
+        // It fails — nothing is listening — but as a delivery failure, not as the
+        // stale-default message, which would mean the guard fired on the wrong path.
+        assertTrue(out.startsWith("Error:"), out);
+        assertFalse(out.contains("not answering"), out);
     }
 
     @Test
