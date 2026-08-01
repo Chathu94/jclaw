@@ -179,11 +179,8 @@ class McpConnectionManagerTest extends UnitTest {
 
     @Test
     void toolListNeverOutlivesConnectedStatus() throws Exception {
-        // The watchdog teardown leaves entry.client attached while it drops the
-        // entry out of CONNECTED, so a tool read that only null-checked the
-        // client kept reporting the dead client's cached list for the whole
-        // reconnect. That surfaced in Settings as a row reading CONNECTING
-        // beside its full tool count.
+        // The watchdog teardown leaves entry.client attached while dropping the entry
+        // out of CONNECTED, so a null-check-only read serves the dead client's list.
         McpConnectionManager.setBackoff(400, 800);  // widen the window setUp shrinks
         var server = seedStdioServer("flaps", DIES_AFTER_HANDSHAKE_SCRIPT);
         McpConnectionManager.connect(server);

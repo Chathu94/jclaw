@@ -70,11 +70,8 @@ class PrintRenderingTest extends UnitTest {
 
     @Test
     void anImageFilenameReachesNativePassThroughRatherThanOctetStream() throws Exception {
-        // The seam this pair covers: PrinterTool.formatFor turns a filename into the
-        // MIME type the negotiator matches on. Both sides were tested in isolation —
-        // the negotiator with "image/png" handed in directly, formatFor with .pdf and
-        // .md — so an image filename never crossed the join, and every image left as
-        // application/octet-stream.
+        // Covers the seam: formatFor turns a filename into the MIME type the negotiator
+        // matches on. Both sides were tested alone, so no image filename crossed the join.
         var canon = Set.of("application/octet-stream", "image/jpeg", "image/urf", "image/pwg-raster");
         var prepared = PrintFormatNegotiator.prepare(
                 png(120, 80), tools.PrinterTool.formatFor("photo.jpeg"),
@@ -87,10 +84,8 @@ class PrintRenderingTest extends UnitTest {
 
     @Test
     void anImageRastersThroughTheImageBranchNotTheTextBranch() throws Exception {
-        // No octet-stream here, so pass-through misses and the raster path runs. With
-        // the format undeclared this called PrintRenderer with octet-stream, which is
-        // neither "image/" nor PDF — so the PNG went through renderText and became
-        // pages of mojibake, reported as a successful job.
+        // No octet-stream, so pass-through misses and the raster path runs. Undeclared,
+        // the format is neither "image/" nor PDF and the PNG renders as text.
         var rasterOnly = Set.of("image/pwg-raster");
         var prepared = PrintFormatNegotiator.prepare(
                 png(120, 80), tools.PrinterTool.formatFor("diagram.png"),

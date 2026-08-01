@@ -289,17 +289,46 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ### 8. Comments Carry Reasoning, Not Narration — Tersely
 
-**Explain why the code is the way it is; never restate what it already says. Say it in one line.**
+**Never write a comment that restates the code. Default to no comment; when one is warranted, default to one line.**
 
-Comments earn their place with design rationale, non-obvious invariants, the failure a guard prevents, and decision provenance (the ticket, the measurement, the bug that motivated it). Everything else is noise that ages badly.
+Redundant commenting is the most common defect in agent-written code, and the pull toward it is strong enough to survive a general instruction to stop. So this section is checks and examples rather than adjectives — apply it mechanically, not by feel.
 
-**Verbosity is the default failure mode, so default to one line.** Match the comment density and length of the code around it: a new entry in a list of one-line comments gets one line, not a paragraph. Before writing a second line, check whether the first already said it. Before writing a fifth, assume it didn't need saying.
+**The delete test — run it on every comment you write.** Delete the comment and re-read the code. If the code still conveys everything the comment did, it stays deleted. A comment survives only by carrying what the code cannot: a reason, a constraint, a measurement, or a bug.
 
-Extra length is earned only by something a reader would otherwise get wrong. In `SettingsUnmanagedBanner.vue`'s prefix list, `playwright.` and `jtokkit.` run several lines because one is a deliberately-retained retired namespace and the other is written autonomously by a job — both are genuinely surprising. Every ordinary entry beside them is a single line, and a new one that isn't will be sent back.
+**Never write these:**
 
-Provenance for a *change* belongs in the commit message, not the code: "why this must stay" is a comment, "why I added this" is history. If a comment needs a paragraph to justify the code beneath it, the code is wrong — fix the code (see §3).
+```java
+// Loop through the discovered printers        ← restates the next line
+for (var p : printers) { ... }
 
-This matters most during refactors: a comment recording *why* a check exists is frequently the only surviving record of a bug that was actually hit, and deleting it as clutter is how the bug comes back. When restructuring code, the comments move with the logic they explain.
+// Added image types (JCLAW-911)               ← changelog; belongs in the commit message
+// Now also deletes the transcode cache        ← narrates your change, not the code
+// This is important because...                ← if it needs a paragraph, fix the code (§3)
+// TODO: could be faster                       ← aspirational; open a ticket or delete it
+```
+
+**Write these:**
+
+```java
+// Canon rejects text/plain outright — negotiate the format before sending.
+// A4 job against a Legal tray reports as spool-area-full, not as a size error.
+// JIPP is Kotlin: getStatus() is @NotNull, so a null guard here is dead code.
+```
+
+**A comment earns its place only by recording one of:**
+
+- why the code is this way and not the obvious way — name the ticket, benchmark, or bug that decided it
+- a non-obvious invariant or precondition a caller has to hold
+- the specific failure a guard prevents
+- an external contract the code cannot state itself: wire format, provider quirk, library nullability
+
+**Length is one line.** A second line requires a reader who would otherwise get it wrong. A fifth means the code is unclear — fix the code (§3), don't explain it. Match the density around you: a new entry in a list of one-line comments gets one line. In `SettingsUnmanagedBanner.vue`'s prefix list, `playwright.` and `jtokkit.` run several lines because one is a deliberately-retained retired namespace and the other is written autonomously by a job — both genuinely surprising. Every ordinary entry beside them is a single line, and a new one that isn't will be sent back.
+
+**Javadoc is held to the same bar.** Stating a public contract — parameters, return, thrown conditions, threading — earns its length. Prose rationale *inside* a Javadoc block does not: it faces the same delete test as any other comment, and a private helper usually needs no Javadoc at all. A ten-line block explaining why a two-line method exists is the same defect as a ten-line inline comment.
+
+**Provenance for a *change* belongs in the commit message, not the code.** "Why this must stay" is a comment; "why I added this" is history. Explaining the bug you just fixed, in the code that fixes it, duplicates the commit body and ages into noise within one refactor.
+
+**During refactors, comments move with the logic they explain.** A comment recording *why* a check exists is frequently the only surviving record of a bug that was actually hit, and deleting it as clutter is how the bug comes back.
 
 ### 9. Commit Messages Are Public
 

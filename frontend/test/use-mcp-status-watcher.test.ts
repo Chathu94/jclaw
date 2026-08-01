@@ -39,9 +39,8 @@ function mountWatcher(initial: McpServer[] | null) {
 
 describe('useMcpStatusWatcher', () => {
   it('refreshes on its own after mount, with no user action', async () => {
-    // The regression this composable exists for: the page previously polled
-    // only after the operator's own save/toggle, so arriving mid-connect left
-    // a CONNECTING badge frozen until a manual reload.
+    // The regression this exists for: polling was armed only by the operator's own
+    // save/toggle, so arriving mid-connect froze the badge until a manual reload.
     const { wrapper, refresh } = mountWatcher([server('CONNECTING')])
     expect(refresh).not.toHaveBeenCalled()
     await tick(600)
@@ -92,8 +91,7 @@ describe('useMcpStatusWatcher', () => {
   })
 
   it('survives a failing refresh and keeps polling', async () => {
-    // One network blip must not end the watch — the loop is the page's only
-    // source of updates, so an escaping rejection would freeze every badge.
+    // The loop is the page's only source of updates: an escaping rejection ends it.
     const servers = ref<McpServer[] | null>([server('CONNECTING')])
     const refresh = vi.fn()
       .mockRejectedValueOnce(new Error('network'))

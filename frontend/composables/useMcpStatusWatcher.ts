@@ -3,12 +3,8 @@ import type { McpServer } from '~/types/api'
 
 /** Cadence while a row is mid-handshake — fast enough to read as live. */
 const FAST_POLL_MS = 600
-/**
- * Idle heartbeat. Connections change without the operator touching anything:
- * the backend watchdog tears down and reconnects a server whose transport
- * dies, so a burst armed only at mount would miss every transition that
- * starts while the page sits open.
- */
+/** Idle heartbeat: the backend watchdog reconnects unprompted, so a burst armed
+ *  only at mount would miss every transition that starts after load. */
 const SLOW_POLL_MS = 10_000
 
 export interface UseMcpStatusWatcher {
@@ -17,13 +13,9 @@ export interface UseMcpStatusWatcher {
 }
 
 /**
- * Keep MCP connection status current for as long as the caller is mounted,
- * polling fast while any server is CONNECTING and idling otherwise.
- *
- * Deliberately unbounded rather than capped at an attempt count: a
- * docker-backed STDIO server takes ~90s to spawn, handshake and sync its
- * allowlist, so any ceiling short enough to look tidy gives up while the
- * slowest server is still legitimately connecting. The mount is the bound.
+ * Poll while any server is CONNECTING, idle otherwise, for as long as the caller is
+ * mounted. Unbounded by design: a docker-backed STDIO server takes ~90s to spawn,
+ * handshake and sync its allowlist, so any tidy-looking ceiling gives up mid-connect.
  */
 export function useMcpStatusWatcher(
   servers: Ref<McpServer[] | null | undefined>,
@@ -54,10 +46,8 @@ export function useMcpStatusWatcher(
       const connecting = servers.value?.some(row => row.status === 'CONNECTING') ?? false
       await sleep(connecting ? FAST_POLL_MS : SLOW_POLL_MS)
       if (!watching) return
-      // A failed refresh must not end the watch. This loop is the page's only
-      // source of updates, so letting one network blip escape would freeze
-      // every badge until a manual reload — the exact failure this composable
-      // exists to remove.
+      // This loop is the page's only source of updates: one escaping rejection
+      // would end the watch and freeze every badge until a manual reload.
       try {
         await refresh()
       }

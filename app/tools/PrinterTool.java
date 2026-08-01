@@ -43,9 +43,8 @@ public class PrinterTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "printer";
 
-    // Each action name is the same string in three places — the actions() list,
-    // the schema enum the model reads, and the dispatch switch. Naming them once
-    // keeps those three from drifting apart silently.
+    // Each name appears in three places — actions(), the schema enum, the dispatch
+    // switch — which is what makes drift between them silent.
     private static final String ACTION_DISCOVER = "discover";
     private static final String ACTION_PRINT = "print";
     private static final String ACTION_STATUS = "status";
@@ -365,12 +364,9 @@ public class PrinterTool implements ToolRegistry.Tool {
         if (lower.endsWith(".pdf")) return "application/pdf";
         if (lower.endsWith(".ps")) return "application/postscript";
         if (lower.endsWith(".txt") || lower.endsWith(".md")) return "text/plain";
-        // Naming the image type is load-bearing twice over. PrintRenderer routes on
-        // an "image/" prefix and otherwise falls through to its text branch, so an
-        // undeclared JPEG rasterises as pages of mojibake; and the negotiator's
-        // native pass-through matches on this string, so a printer advertising
-        // image/jpeg never receives the JPEG it could have printed unchanged.
-        // This list tracks what PrintRenderer.readImage decodes.
+        // Must track what PrintRenderer.readImage decodes: it routes on the "image/"
+        // prefix and otherwise falls through to its text branch, and the negotiator's
+        // native pass-through matches on this exact string.
         if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
         if (lower.endsWith(".png")) return "image/png";
         if (lower.endsWith(".gif")) return "image/gif";

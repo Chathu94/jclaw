@@ -180,10 +180,8 @@ class PrinterToolTest extends UnitTest {
 
     @Test
     void everyRenderableImageTypeIsNamedRatherThanLeftToSniffing() {
-        // These went out as octet-stream, which sent them down PrintRenderer's text
-        // branch: a JPEG rendered as UTF-8 is up to 100 pages of mojibake, reported
-        // as a successful job. Every type PrintRenderer.readImage decodes must be
-        // nameable here, or the renderer's image path is unreachable from the tool.
+        // Every type PrintRenderer.readImage decodes must be nameable here, or the
+        // renderer's image branch is unreachable from the tool and images render as text.
         assertEquals("image/jpeg", PrinterTool.formatFor("photo.jpg"));
         assertEquals("image/jpeg", PrinterTool.formatFor("photo.JPEG"));
         assertEquals("image/png", PrinterTool.formatFor("diagram.png"));
