@@ -292,7 +292,11 @@ public final class AttachmentService {
      */
     public static void deleteImageFile(MessageAttachment att) {
         try {
-            Files.deleteIfExists(resolveOnDisk(att));
+            var file = resolveOnDisk(att);
+            Files.deleteIfExists(file);
+            // Kind-agnostic despite the name: audio leaves a transcoded sibling
+            // (JCLAW-654), and freeing only the original left a playable copy.
+            Files.deleteIfExists(services.transcription.LlmAudio.cachePath(file));
         } catch (IOException | SecurityException e) {
             Logger.warn("Failed to delete attachment file %s: %s", att.uuid, e.getMessage());
         }

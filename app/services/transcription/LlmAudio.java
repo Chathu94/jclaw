@@ -44,6 +44,13 @@ public final class LlmAudio {
         return prepare(path, att.mimeType);
     }
 
+    /** The transcoded sibling {@code <file>.llm.mp3}. Public because anything freeing
+     *  an attachment's bytes must delete it too; only exists above
+     *  {@link #TRANSCODE_THRESHOLD_BYTES}. */
+    public static Path cachePath(Path path) {
+        return path.resolveSibling(path.getFileName() + ".llm.mp3");
+    }
+
     /** Path-level core (the diarize tool resolves its own path). */
     public static Prepared prepare(Path path, String mimeType) throws IOException {
         var format = MimeExtensions.forMime(mimeType, FORMAT_CANDIDATES);
@@ -54,7 +61,7 @@ public final class LlmAudio {
         if (size <= TRANSCODE_THRESHOLD_BYTES) {
             return new Prepared(Base64.getEncoder().encodeToString(Files.readAllBytes(path)), format);
         }
-        var cached = path.resolveSibling(path.getFileName() + ".llm.mp3");
+        var cached = cachePath(path);
         if (!Files.isRegularFile(cached)
                 || Files.getLastModifiedTime(cached).compareTo(Files.getLastModifiedTime(path)) < 0) {
             transcode(path, cached);

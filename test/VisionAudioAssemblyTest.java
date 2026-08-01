@@ -76,11 +76,18 @@ class VisionAudioAssemblyTest extends UnitTest {
         assertEquals("mp3", inner.get("format"),
                 "format should derive from audio/mpeg via Play's mime-types properties");
 
-        // Sanity: user's raw text still rides as the text part, untouched.
+        // Was byte-equality, which held only because this branch appended nothing —
+        // the !supportsAudio branch has always injected a transcript block with a path.
+        // The real invariant is that the audio's own filename stays out of the text.
         var textPart = firstPartOfType(parts, "text");
         assertNotNull(textPart);
-        assertEquals("what's in these?", textPart.get("text"),
-                "audio attachments must NOT inject filename references into the text");
+        var text = (String) textPart.get("text");
+        assertTrue(text.startsWith("what's in these?"), text);
+        assertFalse(text.contains("clip.mp3"),
+                "audio attachments must NOT inject filename references into the text: " + text);
+        // The workspace path is deliberately present: without it an audio-capable
+        // model can hear the recording and cannot name the file for any tool.
+        assertTrue(text.contains("The audio above is in your workspace at"), text);
     }
 
     @Test
@@ -150,6 +157,50 @@ class VisionAudioAssemblyTest extends UnitTest {
                 "FILE kind must surface the original filename in the text part: " + text);
         assertTrue(text.contains("[Attached file:"),
                 "FILE kind must use the bracketed filename marker: " + text);
+    }
+
+    @Test
+    void nativelyCarriedMediaStillGetsItsWorkspacePath() throws Exception {
+        // The caption and transcript blocks carry the path, and neither runs when the
+        // model consumes the medium natively — leaving it unable to name either file.
+        persistAttachment("shot.png", "image/png",
+                MessageAttachment.KIND_IMAGE, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+        persistAttachment("voice.mp3", "audio/mpeg",
+                MessageAttachment.KIND_AUDIO, new byte[]{1, 2});
+
+        var fresh = Message.<Message>findById(message.id);
+        var parts = (List<?>) agents.VisionAudioAssembler.userMessageFor(fresh).content();
+        var text = (String) firstPartOfType(parts, "text").get("text");
+
+        assertTrue(text.contains("The image above is in your workspace at"), text);
+        assertTrue(text.contains("The audio above is in your workspace at"), text);
+        // Workspace-root-relative: no {agentName}/ prefix for a tool to trip on.
+        assertTrue(text.contains("attachments/" + conversation.id + "/"), text);
+        // UUID leaf — what lets the path coexist with the filename invariant below.
+        assertFalse(text.contains("shot.png"), text);
+        assertFalse(text.contains("voice.mp3"), text);
+    }
+
+    @Test
+    void aSpokenTurnGetsNoAudioPathBecauseItsFileIsSessionScoped() throws Exception {
+        // Blank content beside audio marks a spoken turn; its WAV dies with the session.
+        message.content = "";
+        message.save();
+        persistAttachment("voice.wav", "audio/wav",
+                MessageAttachment.KIND_AUDIO, new byte[]{1, 2});
+        // The gate is about spoken-audio lifetime, not paths wholesale — images still get one.
+        persistAttachment("shot.png", "image/png",
+                MessageAttachment.KIND_IMAGE, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+
+        var fresh = Message.<Message>findById(message.id);
+        var parts = (List<?>) agents.VisionAudioAssembler.userMessageFor(fresh).content();
+        var text = (String) firstPartOfType(parts, "text").get("text");
+
+        assertFalse(text.contains("The audio above is in your workspace at"), text);
+        assertTrue(text.contains("The image above is in your workspace at"), text);
+        // The audio itself still reaches the model — only its path is withheld.
+        assertNotNull(firstPartOfType(parts, "input_audio"),
+                "the spoken audio must still ride as an input_audio part");
     }
 
     @Test

@@ -204,12 +204,13 @@ public final class VisionAudioAssembler {
         // !supportsVision branch, so a text-only model "sees" the image as a
         // description instead of an image_url part it can't accept.
         var captionBlocks = supportsVision ? "" : collectCaptionBlocks(atts);
-        // The caption block is what carries an image's workspace location, and it
-        // is suppressed exactly when the model can see the image for itself — so a
-        // vision model could describe the picture but not name the file when asked
-        // to print or send it. This is that block's counterpart.
-        var imagePaths = supportsVision ? collectImagePathNotes(atts) : "";
-        var combinedText = text + fileNotes + transcriptBlocks + captionBlocks + imagePaths;
+        // Counterpart to the two blocks above, which carry the file's path but are
+        // suppressed exactly when the model can consume that medium itself. Blank text
+        // beside audio marks a spoken turn (VoiceController passes ""); its WAV dies
+        // with the session, so naming it would cite a path that is about to vanish.
+        var mediaPaths = collectNativeMediaPathNotes(
+                atts, supportsAudio && !text.isBlank(), supportsVision);
+        var combinedText = text + fileNotes + transcriptBlocks + captionBlocks + mediaPaths;
 
         var parts = new ArrayList<Map<String, Object>>();
         if (!combinedText.isBlank()) {
@@ -276,26 +277,29 @@ public final class VisionAudioAssembler {
     }
 
     /**
-     * Workspace paths for images a vision model receives as {@code image_url} parts.
-     *
-     * <p>The path alone — no caption, and deliberately not the original filename.
-     * The model can already see the image and knows what the user called it; what
-     * it lacks is a path to hand a tool. Emitting {@code originalFilename} here
-     * would also break the invariant that an image's own name stays out of the text
-     * part when it rides as {@code image_url}, which
-     * {@code VisionAudioAssemblyTest.mixedAttachmentsEmitOrderedContentParts} pins.
-     * The stored leaf is a UUID, so the path carries no such name.
-     *
-     * <p>Mirrors the path clause inside {@link #collectCaptionBlocks} for the branch
-     * that block does not run on.
+     * Workspace paths for media the model receives natively. Never the original
+     * filename — {@code mixedAttachmentsEmitOrderedContentParts} pins that a
+     * natively-carried file's name stays out of the text part; the stored leaf is a
+     * UUID, so the path itself is safe.
      */
-    private static String collectImagePathNotes(List<MessageAttachment> atts) {
+    private static String collectNativeMediaPathNotes(List<MessageAttachment> atts,
+                                                      boolean includeAudio, boolean includeImage) {
         var notes = new StringBuilder();
         for (var a : atts) {
-            if (!a.isImage()) continue;
-            notes.append("\n[The image above is in your workspace at \"")
+            String kind;
+            String tools;
+            if (a.isImage() && includeImage) {
+                kind = "image";
+                tools = "printer, documents or filesystem";
+            } else if (a.isAudio() && includeAudio) {
+                kind = "audio";
+                tools = "documents, filesystem or diarize_audio";
+            } else {
+                continue;
+            }
+            notes.append("\n[The ").append(kind).append(" above is in your workspace at \"")
                     .append(AttachmentService.workspaceRelativePath(a))
-                    .append("\" — use that path with the printer, documents or filesystem tools]");
+                    .append("\" — use that path with the ").append(tools).append(" tools]");
         }
         return notes.toString();
     }
