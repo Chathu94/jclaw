@@ -92,13 +92,20 @@ public final class PrintFormatNegotiator {
         }
         // Native pass-through wins whenever it is available — no re-encode, no
         // resolution loss, and the printer's own renderer is usually better than ours.
-        // Progressive JPEG is the exception: a Canon E3300 advertising image/jpeg
-        // accepted one with successful-ok, fed the sheet, and printed nothing. The
-        // advertisement covers the MIME type, not every encoding of it, and a blank
-        // page reports as success — so rasterise it here where we can see the pixels.
-        if (sourceFormat != null && supported.contains(sourceFormat.toLowerCase())
-                && !isProgressiveJpeg(document)) {
-            return Prepared.asIs(document, sourceFormat, null, media);
+        if (sourceFormat != null && supported.contains(sourceFormat.toLowerCase())) {
+            if (!isProgressiveJpeg(document)) {
+                return Prepared.asIs(document, sourceFormat, null, media);
+            }
+            // A Canon E3300 advertising image/jpeg accepted a progressive one with
+            // successful-ok, fed the sheet and printed nothing: the advertisement
+            // covers the MIME type, not every encoding of it. Re-encode rather than
+            // rasterise — a photo rasterised to A4 at 600 DPI is tens of MB because
+            // RLE barely compresses photographic content, which timed the IPP upload
+            // out at 60s and fell back to RAW. Baseline keeps the payload at roughly
+            // source size and the printer renders it correctly.
+            return new Prepared(toJpeg(PrintRenderer.readImage(document)), sourceFormat, true,
+                    "re-encoded to baseline JPEG because this printer accepts image/jpeg "
+                            + "but prints a progressive one as a blank page", media);
         }
 
         if (supported.contains(PWG_RASTER)) {

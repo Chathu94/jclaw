@@ -123,17 +123,20 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
-    void aProgressiveJpegIsRasterisedRatherThanPassedThrough() throws Exception {
+    void aProgressiveJpegIsReEncodedToBaselineRatherThanRasterised() throws Exception {
         // A Canon E3300 advertising image/jpeg accepted a progressive one with
-        // successful-ok and printed a blank sheet. Re-encoded baseline, same picture,
-        // same printer, it came out — so the advertisement covers the type, not the
-        // encoding, and a blank page reports as success.
+        // successful-ok and printed a blank sheet; the same picture re-encoded
+        // baseline came out. Rasterising also fixes the blank page but makes a
+        // multi-megabyte PWG page for a photo, which timed the IPP upload out at 60s
+        // and fell back to RAW — so re-encode and keep the payload near source size.
         var canon = Set.of("application/octet-stream", "image/jpeg", "image/urf", "image/pwg-raster");
 
         var progressive = PrintFormatNegotiator.prepare(
                 progressiveJpeg(120, 80), "image/jpeg", canon, JobAttributes.DEFAULTS);
-        assertTrue(progressive.converted(), "a progressive JPEG must not be passed through");
-        assertEquals("image/pwg-raster", progressive.format());
+        assertTrue(progressive.converted(), "a progressive JPEG must be re-encoded");
+        assertEquals("image/jpeg", progressive.format(), "still JPEG — not rasterised");
+        assertFalse(PrintFormatNegotiator.isProgressiveJpeg(progressive.document()),
+                "the re-encoded document must itself be baseline, or nothing was fixed");
 
         // The baseline equivalent still takes the fast path — the guard is narrow.
         var baseline = PrintFormatNegotiator.prepare(
