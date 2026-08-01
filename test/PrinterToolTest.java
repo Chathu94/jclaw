@@ -21,7 +21,11 @@ import java.util.Map;
  * must reject or answer BEFORE any network I/O, which is exactly the set that can
  * be pinned without hardware. The one exception is
  * {@link #anUnreachableDefaultOffersWhatIsOnTheNetworkInstead}, which needs a
- * refused connection to a closed loopback port to reach the guard at all.
+ * refused connection to a closed loopback port to reach the guard at all — and it
+ * stops there, before any backend is dispatched to. Nothing here may reach the
+ * dispatcher: it falls back to RAW on the well-known port 9100, so a test that let
+ * a job through would depend on nothing answering there, and would stream bytes at
+ * whatever did.
  */
 class PrinterToolTest extends UnitTest {
 
@@ -194,20 +198,20 @@ class PrinterToolTest extends UnitTest {
     }
 
     @Test
-    void anExplicitlyNamedTargetIsNotProbedFirst() throws Exception {
+    void anExplicitlyNamedTargetIsNotProbedFirst() {
         // Only the saved default is pre-checked. A host the operator typed is their
-        // call and gets attempted as given, so a printer that ignores mDNS or answers
-        // slowly is still reachable by address.
-        int deadPort;
-        try (var probe = new java.net.ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress())) {
-            deadPort = probe.getLocalPort();
-        }
-        var out = run("{\"action\":\"print\",\"text\":\"hi\",\"host\":\"127.0.0.1\",\"port\":"
-                + deadPort + "}");
+        // call and gets attempted as given, or a printer that ignores mDNS but prints
+        // fine would become unreachable by policy.
+        //
+        // Passing path AND text lands on the validation error that sits immediately
+        // past the guard, so reaching it proves the guard was skipped — without
+        // dispatching. Port 9 is never read: a named host bypasses the probe entirely,
+        // and if the guard were ever widened to probe every target, a refused loopback
+        // connect would surface as the stale-default message this asserts against.
+        var out = run("{\"action\":\"print\",\"host\":\"127.0.0.1\",\"port\":9,"
+                + "\"path\":\"a.pdf\",\"text\":\"hi\"}");
 
-        // It fails — nothing is listening — but as a delivery failure, not as the
-        // stale-default message, which would mean the guard fired on the wrong path.
-        assertTrue(out.startsWith("Error:"), out);
+        assertTrue(out.contains("not both"), out);
         assertFalse(out.contains("not answering"), out);
     }
 
