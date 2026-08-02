@@ -1,14 +1,12 @@
 package agents;
 
 import llm.LlmTypes.ChatMessage;
-import models.MessageRole;
 import services.TimezoneResolver;
 
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Owns the "current date and time" block and splices it into the outgoing
