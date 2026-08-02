@@ -13,6 +13,7 @@ import jakarta.persistence.PostRemove;
 import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.BatchSize;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
@@ -146,6 +147,11 @@ public class Message extends Model {
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.
     @SuppressWarnings("java:S1948")
+    // Hydration walks a whole history window and initializes this bag per user
+    // row (MessageHydrator, then again in VisionAudioAssembler), so without a
+    // batch the window costs one SELECT per message. 50 matches the
+    // chat.maxContextMessages default, so a default window drains in one query.
+    @BatchSize(size = 50)
     @OneToMany(mappedBy = "message", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")
     public List<MessageAttachment> attachments;

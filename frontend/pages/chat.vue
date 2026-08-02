@@ -46,8 +46,12 @@ import { isLocalProvider } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 
-const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
-const { data: configData } = await useFetch<ConfigResponse>('/api/config')
+// Issued before either await so the two round trips overlap — in an SPA Nuxt
+// starts a useFetch at its call site, not at the await.
+const agentsFetch = useFetch<Agent[]>('/api/agents')
+const configFetch = useFetch<ConfigResponse>('/api/config')
+const { data: agents, refresh: refreshAgents } = await agentsFetch
+const { data: configData } = await configFetch
 
 // Seed selectedAgentId synchronously from the agents we just loaded so the
 // conversations useFetch below has a valid agentId on its first render. If we
