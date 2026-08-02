@@ -169,7 +169,18 @@ public final class OpenRouterProvider extends LlmProvider {
         if (!request.has(FIELD_MESSAGES) || !request.get(FIELD_MESSAGES).isJsonArray()) return;
         var messages = request.getAsJsonArray(FIELD_MESSAGES);
         if (messages.isEmpty()) return;
-        var last = messages.get(messages.size() - 1);
+        // JCLAW-900: skip the trailing clock block. Anchoring to it would put a
+        // value that changes every turn INSIDE the cached prefix, which is the
+        // defect this pairing fixes — the breakpoint has to land on the last
+        // message whose content is stable, and the clock then rides past it
+        // uncached and therefore always fresh.
+        int idx = messages.size() - 1;
+        if (messages.get(idx).isJsonObject()
+                && isClockMessage(messages.get(idx).getAsJsonObject())) {
+            idx--;
+        }
+        if (idx < 0) return;
+        var last = messages.get(idx);
         if (!last.isJsonObject()) return;
         var msg = last.getAsJsonObject();
         if (!msg.has("role") || !MessageRole.USER.value.equals(msg.get("role").getAsString())) return;
@@ -177,6 +188,21 @@ public final class OpenRouterProvider extends LlmProvider {
         var blocks = ensureBlockArrayContent(msg);
         if (blocks == null || blocks.isEmpty()) return;
         attachCacheControl(blocks.get(blocks.size() - 1).getAsJsonObject());
+    }
+
+    /**
+     * True when this message is the trailing clock block appended by
+     * {@link agents.CurrentTimeInjector}. Content-based rather than positional:
+     * the tool loop appends assistant and tool messages after it, so "last" is
+     * not a reliable test once a turn has run a tool round.
+     */
+    private static boolean isClockMessage(JsonObject msg) {
+        if (!msg.has("role") || !MessageRole.USER.value.equals(msg.get("role").getAsString())) {
+            return false;
+        }
+        var content = msg.get(FIELD_CONTENT);
+        return content != null && content.isJsonPrimitive()
+                && agents.CurrentTimeInjector.isClockBlock(content.getAsString());
     }
 
     /**

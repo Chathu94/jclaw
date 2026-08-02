@@ -24,11 +24,29 @@ import java.util.Map;
  * <p>Verified on prompts captured off the shipped path. With the clock in the
  * system message the cacheable prefix is pinned at a constant length — it can
  * never extend past the clock's position — so the re-processed region grows
- * every turn (247, 300, 351, 405 chars over four turns). With the clock on the
- * last user message the cacheable prefix grows with the conversation and the
- * re-processed tail stays constant (~346 chars). Flat versus linear is the
- * verified property; the absolute numbers are small only because those captured
- * turns carried very short messages.
+ * every turn (247, 300, 351, 405 chars over four turns). Flat versus linear is
+ * the verified property; the absolute numbers are small only because those
+ * captured turns carried very short messages.
+ *
+ * <h2>JCLAW-900: why it is now its own message</h2>
+ * <p>Merging the block into the last user message fixed that for engines which
+ * reuse the longest common token prefix INCREMENTALLY — llama.cpp and MLX, the
+ * two this was measured against. It does not transfer to a provider that caches
+ * at explicit breakpoints. Anthropic via OpenRouter re-reads only up to a
+ * breakpoint, and merging mutated a message that ships as history WITHOUT the
+ * block one turn later, so the prefix broke at the FIRST history message every
+ * turn. Measured on the shipped path: {@code cached} froze at the system-message
+ * size while the re-written tail grew 500, 595, 689 tokens across three turns,
+ * each re-write paying the 1.25x cache-write premium. Cost per turn climbed
+ * $0.001657, $0.002291, $0.002404, $0.002542 against $0.001657 for the one turn
+ * that hit cache fully — a 10x saving forfeited from turn three onward.
+ *
+ * <p>As its own trailing message the block is merged into nothing, so every
+ * history message is byte-stable. Both engine families win: incremental engines
+ * still diverge only at the tail (constant re-processing, the property measured
+ * above), and breakpoint engines get a prefix that grows with the conversation.
+ * Confirmed live against anthropic/claude-haiku-4.5 — turn two read 5,110 cached
+ * tokens and wrote 13, where the merged form read 0 beyond the system block.
  *
  * <p>A synthetic harness against a local 7B put the same effect in milliseconds
  * (+334 ms/turn with the clock in the system message versus +12 ms/turn on the
@@ -85,48 +103,44 @@ public final class CurrentTimeInjector {
     }
 
     /**
-     * Return a copy of {@code messages} with the clock block prepended to the
-     * last user message. Returns the input unchanged when there is no user
-     * message to attach to — a tool-only or system-only list has nowhere
-     * sensible to put it, and inventing a message would change the shape
-     * providers expect.
+     * Return a copy of {@code messages} with the clock appended as its own
+     * trailing message. Returns the input unchanged for an empty list.
+     *
+     * <p>JCLAW-900: this used to merge the block into the last user message.
+     * That mutated a message which, one turn later, ships as history WITHOUT the
+     * block — so the message's content differed depending on whether it happened
+     * to be newest, and a block-caching provider's prefix broke there every turn.
+     * Measured on the shipped path: {@code cached} froze at the system-message
+     * size while the re-written tail grew 500, 595, 689 tokens over three turns,
+     * each re-write paying Anthropic's 1.25x cache-write premium.
+     *
+     * <p>As a separate message the clock is never merged into anything, so every
+     * history message is byte-stable and the cacheable prefix grows with the
+     * conversation. The provider anchors its cache breakpoint to the last message
+     * that is NOT this one (see {@code OpenRouterProvider}), leaving the volatile
+     * block outside the cached region — fresh every turn, at a cost of ~70
+     * uncached tokens.
+     *
+     * <p>Appended unconditionally at the end rather than searched-for, because
+     * {@code inject} runs once per turn before the tool loop. On a tool round the
+     * loop appends the assistant and tool messages after this block, which keeps
+     * the clock present for the whole turn without re-injecting it per round.
      */
     public static List<ChatMessage> inject(List<ChatMessage> messages) {
         if (messages == null || messages.isEmpty()) return messages;
-
-        int idx = -1;
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if (MessageRole.USER.value.equals(messages.get(i).role())) {
-                idx = i;
-                break;
-            }
-        }
-        if (idx < 0) return messages;
-
-        var target = messages.get(idx);
-        var merged = prepend(target.content());
-        if (merged == null) return messages;
-
         var out = new ArrayList<>(messages);
-        out.set(idx, new ChatMessage(target.role(), merged, target.toolCalls(),
-                target.toolCallId(), target.toolName()));
+        out.add(ChatMessage.user(block()));
         return out;
     }
 
     /**
-     * Text turns carry a String; multimodal turns carry a List of OpenAI-style
-     * content parts (see {@link VisionAudioAssembler}). Both are handled.
-     * Anything else returns null so the caller leaves the message untouched
-     * rather than guessing at an unknown shape.
+     * True when {@code content} is the clock block this class appends — the test
+     * a provider uses to avoid anchoring its cache breakpoint to a value that
+     * changes every turn. Matches on {@link #HEADING} because that is the one
+     * part of the block guaranteed constant; everything else is the timestamp.
      */
-    private static Object prepend(Object content) {
-        if (content instanceof String s) return block() + "\n" + s;
-        if (content instanceof List<?> parts) {
-            var out = new ArrayList<Object>();
-            out.add(Map.of("type", "text", "text", block()));
-            out.addAll(parts);
-            return out;
-        }
-        return null;
+    public static boolean isClockBlock(Object content) {
+        return content instanceof String s && s.contains(HEADING);
     }
+
 }

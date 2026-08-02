@@ -437,6 +437,31 @@ class LlmClientTest extends UnitTest {
     }
 
     @Test
+    void openrouter_cache_breakpointSkipsTheTrailingClockMessage() {
+        // JCLAW-900: the clock rides as its own trailing message and changes every
+        // turn. Anchoring to it would put a volatile value inside the cached prefix
+        // — which is the whole defect. The breakpoint must land on the last STABLE
+        // message instead, leaving the clock past it, uncached and always fresh.
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("sys"),
+                        llm.LlmTypes.ChatMessage.user("first turn"),
+                        llm.LlmTypes.ChatMessage.assistant("response"),
+                        llm.LlmTypes.ChatMessage.user("follow-up"),
+                        llm.LlmTypes.ChatMessage.user(agents.CurrentTimeInjector.block())));
+
+        var body = serialize(openRouterProvider(), req);
+        var messages = body.getAsJsonArray("messages");
+        var clock = messages.get(messages.size() - 1).getAsJsonObject();
+        var anchor = messages.get(messages.size() - 2).getAsJsonObject();
+
+        assertFalse(clock.get("content").isJsonArray(),
+                "the clock message must be left untouched — no breakpoint on it");
+        var blocks = anchor.get("content").getAsJsonArray();
+        assertTrue(blocks.get(blocks.size() - 1).getAsJsonObject().has("cache_control"),
+                "breakpoint must anchor to the last stable message, not the clock");
+    }
+
+    @Test
     void openrouter_cache_trailingToolMessageSkipsBreakpoint() {
         // Mid-round tool loop case: last message is role=tool. No cache tag
         // on that message (would be wasted — tool_result text varies every
