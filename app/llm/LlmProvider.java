@@ -78,6 +78,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     private static final String JSON_TOOL_CALL_ID = "tool_call_id";
     private static final String JSON_FINISH_REASON = "finish_reason";
     private static final String JSON_PROMPT_TOKENS_DETAILS = "prompt_tokens_details";
+    private static final String JSON_COMPLETION_TOKENS_DETAILS = "completion_tokens_details";
     // OpenAI tool-call type — the only value the spec defines today.
     private static final String TYPE_FUNCTION = "function";
 
@@ -240,7 +241,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      */
     protected int readReasoningTokens(JsonObject usageObj) {
         int top = readUsageInt(usageObj, "reasoning_tokens");
-        return top > 0 ? top : readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
+        return top > 0 ? top : readUsageInt(usageObj, JSON_COMPLETION_TOKENS_DETAILS, "reasoning_tokens");
     }
 
     /**
