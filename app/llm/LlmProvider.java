@@ -77,6 +77,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     private static final String JSON_TOOL_CALLS = "tool_calls";
     private static final String JSON_TOOL_CALL_ID = "tool_call_id";
     private static final String JSON_FINISH_REASON = "finish_reason";
+    private static final String JSON_PROMPT_TOKENS_DETAILS = "prompt_tokens_details";
     // OpenAI tool-call type — the only value the spec defines today.
     private static final String TYPE_FUNCTION = "function";
 
@@ -253,7 +254,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * @return cache-read tokens, or {@code 0} when none reported
      */
     protected int extractCachedTokens(JsonObject usageObj) {
-        return readUsageInt(usageObj, "prompt_tokens_details", "cached_tokens");
+        return readUsageInt(usageObj, JSON_PROMPT_TOKENS_DETAILS, "cached_tokens");
     }
 
     /**
@@ -282,8 +283,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // call and cached_tokens=4421 on the warm one. We were reading the wrong key.
         int top = readUsageInt(usageObj, "cache_creation_input_tokens");
         if (top > 0) return top;
-        int nested = readUsageInt(usageObj, "prompt_tokens_details", "cache_creation_tokens");
-        return nested > 0 ? nested : readUsageInt(usageObj, "prompt_tokens_details", "cache_write_tokens");
+        int nested = readUsageInt(usageObj, JSON_PROMPT_TOKENS_DETAILS, "cache_creation_tokens");
+        return nested > 0 ? nested : readUsageInt(usageObj, JSON_PROMPT_TOKENS_DETAILS, "cache_write_tokens");
     }
 
     /**
