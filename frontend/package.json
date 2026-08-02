@@ -33,7 +33,7 @@
     "dompurify": "^3.4.12",
     "driver.js": "^1.8.0",
     "marked": "^18.0.6",
-    "nuxt": "4.5.0",
+    "nuxt": "4.5.1",
     "qrcode": "^1.5.4",
     "reka-ui": "^2.10.1",
     "shadcn-nuxt": "^2.8.0",
