@@ -244,6 +244,12 @@ interface LlmStreamCarriers {
         int reasoningTokens;
         int cachedTokens;
         int cacheCreationTokens;
+        /**
+         * Sum of provider-reported per-call cost across every round of the turn, in USD
+         * (JCLAW-901). Stays 0 when no round reported one, which is how the usage JSON
+         * tells "cost nothing" apart from "provider said nothing".
+         */
+        double costUsd;
         /** Sum of streamed reasoning-text chars, used as a token fallback when the provider returns 0 reasoning_tokens. */
         int reasoningChars;
         /** True once any round has detected reasoning, used to gate the fallback estimate. */
@@ -293,6 +299,7 @@ interface LlmStreamCarriers {
                 reasoningTokens += u.reasoningTokens();
                 cachedTokens += u.cachedTokens();
                 cacheCreationTokens += u.cacheCreationTokens();
+                costUsd += u.costUsd();
             }
             addJtokkitRound(acc);
             if (acc.reasoningDetected) reasoningDetected = true;
@@ -364,6 +371,7 @@ interface LlmStreamCarriers {
         public int reasoningTokens() { return reasoningTokens; }
         public int cachedTokens() { return cachedTokens; }
         public int cacheCreationTokens() { return cacheCreationTokens; }
+        public double costUsd() { return costUsd; }
         public int reasoningChars() { return reasoningChars; }
         public boolean reasoningDetected() { return reasoningDetected; }
         public boolean hasProviderUsage() { return hasProviderUsage; }

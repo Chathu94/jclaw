@@ -128,6 +128,10 @@ public final class LlmTypes {
      * @param cacheCreationTokens  cache <em>writes</em> — subset of
      *                             {@code promptTokens}; typically {@code 0} on
      *                             OpenAI routes
+     * @param costUsd              what the provider says the call cost, in USD, or
+     *                             {@code 0} when it reports none (JCLAW-901). Measured
+     *                             rather than derived from tokens times a price table,
+     *                             so it survives pricing changes and BYOK
      */
     public record Usage(
             int promptTokens,
@@ -135,8 +139,20 @@ public final class LlmTypes {
             int totalTokens,
             int reasoningTokens,
             int cachedTokens,
-            int cacheCreationTokens
-    ) {}
+            int cacheCreationTokens,
+            double costUsd
+    ) {
+        /**
+         * Back-compat for the providers and tests that report no cost — same pattern as
+         * {@code ConversationQueue.QueuedMessage}, so adding the component did not have
+         * to touch twenty-odd existing construction sites.
+         */
+        public Usage(int promptTokens, int completionTokens, int totalTokens,
+                     int reasoningTokens, int cachedTokens, int cacheCreationTokens) {
+            this(promptTokens, completionTokens, totalTokens, reasoningTokens,
+                    cachedTokens, cacheCreationTokens, 0d);
+        }
+    }
 
     // --- Streaming types ---
 

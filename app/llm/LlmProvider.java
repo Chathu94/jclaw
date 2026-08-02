@@ -270,10 +270,48 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * @return cache-write tokens, or {@code 0} when none reported
      */
     protected int extractCacheCreationTokens(JsonObject usageObj) {
-        // Anthropic/OpenRouter: top-level cache_creation_input_tokens.
-        // Some normalizations nest it under prompt_tokens_details.cache_creation_tokens.
+        // Three spellings, because providers disagree and OpenRouter changed theirs.
+        // Anthropic native: top-level cache_creation_input_tokens. Some normalizations
+        // nest it as prompt_tokens_details.cache_creation_tokens. OpenRouter today
+        // emits prompt_tokens_details.cache_write_tokens.
+        //
+        // JCLAW-901: only the first two were read, so cache WRITES came back 0 on every
+        // OpenRouter call. That is not a provider gap, which is what it was previously
+        // recorded as — a live probe on 2026-08-02 (anthropic/claude-haiku-4.5, a 4432-
+        // token prompt with cache_control) returned cache_write_tokens=4421 on the cold
+        // call and cached_tokens=4421 on the warm one. We were reading the wrong key.
         int top = readUsageInt(usageObj, "cache_creation_input_tokens");
-        return top > 0 ? top : readUsageInt(usageObj, "prompt_tokens_details", "cache_creation_tokens");
+        if (top > 0) return top;
+        int nested = readUsageInt(usageObj, "prompt_tokens_details", "cache_creation_tokens");
+        return nested > 0 ? nested : readUsageInt(usageObj, "prompt_tokens_details", "cache_write_tokens");
+    }
+
+    /**
+     * Extract what the provider says this call actually cost, in USD.
+     *
+     * <p>Defaults to OpenRouter's top-level {@code usage.cost}, which it returns for
+     * every request once {@code usage: {include: true}} is set — that opt-in is
+     * unconditional, so this covers OpenAI-, Anthropic-, Gemini- and DeepSeek-routed
+     * traffic through OpenRouter alike. Providers that report differently, or not at
+     * all, override this.
+     *
+     * <p>Why measure rather than compute: JClaw already derives cost from token counts
+     * times {@code ModelInfo} prices, which is inference about someone else's pricing.
+     * The provider's own figure survives price changes, promotional rates and BYOK, and
+     * it is what makes a cache saving quotable as money. The same probe above measured
+     * $0.00555725 cold against $0.00047310 warm on an identical prompt — an 11.7x
+     * difference the token counts alone cannot express without a pricing table.
+     *
+     * @param usageObj the provider's {@code usage} JSON object
+     * @return reported cost in USD, or {@code 0} when the provider reports none
+     */
+    protected double extractCostUsd(JsonObject usageObj) {
+        if (usageObj == null || !usageObj.has("cost") || usageObj.get("cost").isJsonNull()) return 0d;
+        try {
+            return usageObj.get("cost").getAsDouble();
+        } catch (Exception _) {
+            return 0d;
+        }
     }
 
     /**
@@ -314,9 +352,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             int reasoning = Math.max(chunk.usage().reasoningTokens(), extractReasoningTokens(usageObj));
             int cached = Math.max(chunk.usage().cachedTokens(), extractCachedTokens(usageObj));
             int cacheCreation = Math.max(chunk.usage().cacheCreationTokens(), extractCacheCreationTokens(usageObj));
+            double cost = Math.max(chunk.usage().costUsd(), extractCostUsd(usageObj));
             if (reasoning == chunk.usage().reasoningTokens()
                     && cached == chunk.usage().cachedTokens()
-                    && cacheCreation == chunk.usage().cacheCreationTokens()) {
+                    && cacheCreation == chunk.usage().cacheCreationTokens()
+                    && cost == chunk.usage().costUsd()) {
                 return chunk;
             }
             var augmented = new Usage(
@@ -325,7 +365,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                     chunk.usage().totalTokens(),
                     reasoning,
                     cached,
-                    cacheCreation);
+                    cacheCreation,
+                    cost);
             return new ChatCompletionChunk(chunk.id(), chunk.model(), chunk.choices(), augmented);
         } catch (Exception _) {
             return chunk;
@@ -840,12 +881,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     /**
      * Instance method: parse a usage JSON object using this provider's template
      * methods ({@link #extractReasoningTokens}, {@link #extractCachedTokens},
-     * {@link #extractCacheCreationTokens}). Subclass overrides are honoured,
-     * so provider-specific JSON paths are handled correctly.
+     * {@link #extractCacheCreationTokens}, {@link #extractCostUsd}). Subclass
+     * overrides are honoured, so provider-specific JSON paths are handled correctly.
      *
      * @param usageObj the provider's {@code usage} JSON object
-     * @return the parsed {@link Usage} record with all token-count categories
-     *         populated
+     * @return the parsed {@link Usage} record with all token-count categories and
+     *         the provider-reported cost populated
      */
     public Usage parseUsage(JsonObject usageObj) {
         return new Usage(
@@ -854,7 +895,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 readUsageInt(usageObj, "total_tokens"),
                 extractReasoningTokens(usageObj),
                 extractCachedTokens(usageObj),
-                extractCacheCreationTokens(usageObj));
+                extractCacheCreationTokens(usageObj),
+                extractCostUsd(usageObj));
     }
 
     public static class LlmException extends RuntimeException {

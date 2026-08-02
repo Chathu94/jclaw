@@ -39,6 +39,11 @@ class LlmProviderTest extends UnitTest {
                 "openai", "https://api.openai.com/v1", "sk-test", List.of()));
     }
 
+    private static OpenRouterProvider openRouter() {
+        return new OpenRouterProvider(new ProviderConfig(
+                "openrouter", "https://openrouter.ai/api/v1", "sk-test", List.of()));
+    }
+
     // =====================
     // forConfig — factory routing
     // =====================
@@ -139,6 +144,72 @@ class LlmProviderTest extends UnitTest {
                  "prompt_tokens_details": {"cached_tokens": 80}}
                 """).getAsJsonObject());
         assertEquals(80, usage.cachedTokens());
+    }
+
+    // =====================
+    // JCLAW-901 — cache writes and provider-reported cost
+    // =====================
+
+    @Test
+    void cacheWritesAreReadFromOpenRoutersActualFieldName() {
+        // The payload below is what OpenRouter returned on a live probe (2026-08-02,
+        // anthropic/claude-haiku-4.5, 4432-token prompt with cache_control) on the COLD
+        // call. Only cache_creation_input_tokens and cache_creation_tokens were read
+        // before, so every OpenRouter cache write scored 0 — which was then recorded as
+        // "the provider doesn't report writes" when in fact the key differs.
+        var usage = openRouter().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 4432, "completion_tokens": 4, "total_tokens": 4436,
+                 "cost": 0.00555725,
+                 "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 4421}}
+                """).getAsJsonObject());
+        assertEquals(4421, usage.cacheCreationTokens(), "cache_write_tokens must be read");
+        assertEquals(0, usage.cachedTokens());
+    }
+
+    @Test
+    void theWarmCallReportsReadsNotWrites() {
+        // Same probe, the WARM call — the pair is what proves the two keys are distinct
+        // rather than aliases, and that an 11.7x cost drop rides on them.
+        var usage = openRouter().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 4432, "completion_tokens": 4, "total_tokens": 4436,
+                 "cost": 0.0004731,
+                 "prompt_tokens_details": {"cached_tokens": 4421, "cache_write_tokens": 0}}
+                """).getAsJsonObject());
+        assertEquals(4421, usage.cachedTokens());
+        assertEquals(0, usage.cacheCreationTokens());
+        assertEquals(0.0004731, usage.costUsd(), 1e-9);
+    }
+
+    @Test
+    void anthropicsOwnSpellingStillWinsOverTheOpenRouterOne() {
+        // Precedence matters: a route that emits both must not double-count or pick the
+        // wrong one. Native Anthropic's top-level key is checked first.
+        var usage = openRouter().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11,
+                 "cache_creation_input_tokens": 700,
+                 "prompt_tokens_details": {"cache_write_tokens": 42}}
+                """).getAsJsonObject());
+        assertEquals(700, usage.cacheCreationTokens());
+    }
+
+    @Test
+    void costIsZeroWhenTheProviderReportsNone() {
+        // Absent must read as 0 here and be OMITTED downstream, so "free" and "not
+        // reported" stay distinguishable in the persisted usage JSON.
+        var usage = openAi().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11}
+                """).getAsJsonObject());
+        assertEquals(0d, usage.costUsd(), 1e-9);
+    }
+
+    @Test
+    void aMalformedCostDoesNotBreakUsageParsing() {
+        var usage = openRouter().parseUsage(JsonParser.parseString("""
+                {"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11,
+                 "cost": "not-a-number"}
+                """).getAsJsonObject());
+        assertEquals(0d, usage.costUsd(), 1e-9);
+        assertEquals(10, usage.promptTokens(), "a bad cost must not lose the token counts");
     }
 
     // =====================

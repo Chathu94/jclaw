@@ -106,6 +106,13 @@ public final class UsageMetricsBuilder {
         usageMap.addProperty("reasoning", effectiveReasoningTokens(turnUsage));
         usageMap.addProperty("cached", providerUsage ? turnUsage.cachedTokens() : 0);
         usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens() : 0);
+        // JCLAW-901: only emitted when the provider actually reported a cost. Absent
+        // rather than 0 on purpose — a hard 0 cannot be told apart from "this call was
+        // free", and that ambiguity is exactly what made cacheCreation misread as a
+        // provider gap when it was really a key-name mismatch.
+        if (providerUsage && turnUsage.costUsd() > 0d) {
+            usageMap.addProperty("costUsd", turnUsage.costUsd());
+        }
         usageMap.addProperty("usageSource", providerUsage ? "provider" : "jtokkit");
         if (!providerUsage) usageMap.addProperty("estimated", true);
         usageMap.addProperty("durationMs", durationMs);
