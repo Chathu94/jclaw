@@ -10,7 +10,7 @@
  * probing (JCLAW-931) — the probe is what accepts a model and where the read-only
  * dimension comes from.
  */
-import type { EmbeddingProbeResponse } from '~/types/api'
+import type { DiscoverModelsResponse, EmbeddingProbeResponse, ProviderModelDef } from '~/types/api'
 import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
 
 const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
@@ -29,19 +29,58 @@ const showAllModels = ref(false)
 const providerNames = computed(() => (providersData.value ?? []).map(p => p.name))
 
 /**
+ * Models discovered live from the provider, which is where embedding models
+ * actually live. {@code provider.<name>.models} is the operator's curated chat
+ * catalog — embedding models are not added to it, so on a real instance it lists
+ * only chat models and the embedding model in active use is not even selectable.
+ * The stored list is the fallback for a provider whose discovery fails.
+ */
+const discovered = ref<ProviderModelDef[] | null>(null)
+const discovering = ref(false)
+
+async function discoverModels() {
+  if (!selectedProvider.value) return
+  discovering.value = true
+  discovered.value = null
+  try {
+    const r = await $fetch<DiscoverModelsResponse>(
+      `/api/providers/${encodeURIComponent(selectedProvider.value)}/discover-models`,
+      { method: 'POST', body: {} },
+    )
+    discovered.value = (r?.models ?? []) as unknown as ProviderModelDef[]
+  }
+  catch {
+    discovered.value = null // fall back to the stored catalog
+  }
+  finally {
+    discovering.value = false
+  }
+}
+
+const catalog = computed<ProviderModelDef[]>(() => {
+  const base = discovered.value ?? getProviderModels(selectedProvider.value)
+  // The saved model must always be representable, or the panel cannot show the
+  // configuration it is editing.
+  if (savedModel.value && selectedProvider.value === savedProvider.value
+    && !base.some(m => m.id === savedModel.value)) {
+    return [{ id: savedModel.value, name: savedModel.value }, ...base]
+  }
+  return base
+})
+
+/**
  * The shortlist narrows; it never decides. A provider we have not seen may name a
  * valid embedding model in a way the heuristic misses, so "show all" stays
  * available and the probe is the only thing that accepts a model.
  */
 const models = computed(() => {
-  const all = getProviderModels(selectedProvider.value)
-  if (showAllModels.value) return all
-  const shortlisted = all.filter(m => looksLikeEmbeddingModel(m.id, m.name))
-  return shortlisted.length > 0 ? shortlisted : all
+  if (showAllModels.value) return catalog.value
+  const shortlisted = catalog.value.filter(m => looksLikeEmbeddingModel(m.id, m.name))
+  return shortlisted.length > 0 ? shortlisted : catalog.value
 })
 
 const hiddenModelCount = computed(() =>
-  showAllModels.value ? 0 : getProviderModels(selectedProvider.value).length - models.value.length,
+  showAllModels.value ? 0 : catalog.value.length - models.value.length,
 )
 
 /** A change is only committable once the probe has confirmed the exact model. */
@@ -53,9 +92,18 @@ const isDirty = computed(() =>
   selectedProvider.value !== savedProvider.value || selectedModel.value !== savedModel.value,
 )
 
-watch(selectedProvider, () => {
-  selectedModel.value = ''
+watch(selectedProvider, (p, prev) => {
+  // Keep the saved model selected on first render; only a real change clears it.
+  if (prev !== undefined) selectedModel.value = ''
   probe.value = null
+  showAllModels.value = false
+  if (p) discoverModels()
+})
+
+// The panel opens on the saved provider, so discover its catalog without waiting
+// for the operator to re-pick it.
+onMounted(() => {
+  if (selectedProvider.value) discoverModels()
 })
 watch(selectedModel, () => {
   probe.value = null
@@ -195,8 +243,15 @@ async function saveSelection() {
               </option>
             </select>
           </label>
+          <p
+            v-if="discovering"
+            class="mt-1 text-[11px] text-fg-muted"
+            data-testid="memory-embedding-discovering"
+          >
+            Loading models from {{ selectedProvider }}…
+          </p>
           <button
-            v-if="hiddenModelCount > 0"
+            v-else-if="hiddenModelCount > 0"
             type="button"
             class="mt-1 text-[11px] text-fg-muted underline hover:text-fg-strong"
             data-testid="memory-embedding-show-all"

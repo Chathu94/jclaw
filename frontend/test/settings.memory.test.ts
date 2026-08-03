@@ -84,11 +84,45 @@ describe('Settings page — Memory Embeddings', () => {
     expect(component.text()).toContain('lm-studio')
   })
 
+  it('lists models discovered from the provider, not the curated chat catalog', async () => {
+    // The bug this covers: provider.<name>.models is the operator's chat list, and
+    // embedding models are never added to it — so on a real instance the picker
+    // offered only chat models and the embedding model in use was unselectable.
+    baseEndpoints([...vectorEnabledConfig(), { key: 'memory.jpa.vector.provider', value: 'lm-studio' }])
+    registerEndpoint('/api/providers/lm-studio/discover-models', () => ({
+      models: [{ id: EMBED_MODEL, name: EMBED_MODEL }, { id: CHAT_MODEL, name: CHAT_MODEL }],
+      count: 2,
+    }))
+    const component = await mountSettingsSection('memory')
+    await flushPromises()
+
+    const values = component.find('[data-testid="memory-embedding-model"]')
+      .findAll('option').map(o => o.attributes('value'))
+    expect(values).toContain(EMBED_MODEL)
+  })
+
+  it('keeps the saved model selectable even when the catalog omits it', async () => {
+    // Otherwise the panel cannot represent the configuration it is editing.
+    baseEndpoints([
+      { key: 'memory.jpa.vector.enabled', value: 'true' },
+      { key: 'memory.jpa.vector.provider', value: 'lm-studio' },
+      { key: 'memory.jpa.vector.model', value: EMBED_MODEL },
+      { key: 'provider.lm-studio.models', value: JSON.stringify([{ id: CHAT_MODEL, name: CHAT_MODEL }]) },
+    ])
+    const component = await mountSettingsSection('memory')
+    await flushPromises()
+
+    const values = component.find('[data-testid="memory-embedding-model"]')
+      .findAll('option').map(o => o.attributes('value'))
+    expect(values).toContain(EMBED_MODEL)
+  })
+
   it('shortlists the model dropdown but keeps the rest reachable', async () => {
     baseEndpoints(vectorEnabledConfig())
     const component = await mountSettingsSection('memory')
 
     await component.find('[data-testid="memory-embedding-provider"]').setValue('lm-studio')
+    await flushPromises()
     await flushPromises()
 
     const options = component.find('[data-testid="memory-embedding-model"]').findAll('option')
@@ -112,6 +146,7 @@ describe('Settings page — Memory Embeddings', () => {
     const component = await mountSettingsSection('memory')
 
     await component.find('[data-testid="memory-embedding-provider"]').setValue('lm-studio')
+    await flushPromises()
     await flushPromises()
     await component.find('[data-testid="memory-embedding-model"]').setValue(EMBED_MODEL)
     await flushPromises()
@@ -141,6 +176,7 @@ describe('Settings page — Memory Embeddings', () => {
     const component = await mountSettingsSection('memory')
 
     await component.find('[data-testid="memory-embedding-provider"]').setValue('lm-studio')
+    await flushPromises()
     await flushPromises()
     await component.find('[data-testid="memory-embedding-show-all"]').trigger('click')
     await flushPromises()
