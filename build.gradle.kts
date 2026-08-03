@@ -243,7 +243,7 @@ dependencies {
     // The tree-wide standard for expressing null contracts; introduced first on
     // the security-utility public surface (PasswordHasher / SsrfGuard /
     // WorkspacePathGuard). Broadening to the rest of app/ is the next increment.
-    implementation("org.jspecify:jspecify:1.0.0")
+    implementation("org.jspecify:jspecify:1.0.1")
 
     // ArchUnit — architecture rules as unit tests (test/ArchitectureTest). Guards
     // the canonical seams the audit waves keep having to re-consolidate: outbound
