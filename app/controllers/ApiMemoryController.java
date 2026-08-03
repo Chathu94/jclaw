@@ -249,7 +249,7 @@ public class ApiMemoryController extends Controller {
     /** A recall, the settings that shaped it, and every candidate it considered. */
     public record RecallView(String agentId, String query, int limit,
                              double relevanceWeight, double importanceWeight, double mmrLambda,
-                             String vectorBackend, List<Long> selectedIds,
+                             double redundancyFloor, String vectorBackend, List<Long> selectedIds,
                              List<RecallCandidateView> candidates) {}
 
     /**
@@ -297,7 +297,7 @@ public class ApiMemoryController extends Controller {
                 .toList();
         renderJSON(gson.toJson(new RecallView(agentId, query, result.limit(),
                 result.relevanceWeight(), result.importanceWeight(), result.mmrLambda(),
-                vectorBackendLabel(),
+                result.redundancyFloor(), vectorBackendLabel(),
                 result.selected().stream().map(e -> Long.parseLong(e.id())).toList(),
                 candidates)));
     }

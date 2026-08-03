@@ -31,17 +31,26 @@ public final class MemoryMmr {
     private MemoryMmr() {}
 
     /**
+     * How aggressively to trade relevance for novelty.
+     *
+     * @param lambda          1.0 keeps the incoming order exactly; lower values trade
+     *                        relevance for novelty
+     * @param redundancyFloor similarity below which two memories are treated as carrying
+     *                        different information, and no penalty applies at all
+     */
+    public record Settings(double lambda, double redundancyFloor) {}
+
+    /**
      * Select up to {@code limit} entries balancing score against novelty.
      *
-     * @param ranked  candidates, best-scoring first
-     * @param score   the blended recall score; normalised internally against the top
-     *                score so {@code lambda} weighs comparable magnitudes whatever the
-     *                blend produced
-     * @param lambda  1.0 keeps the incoming order exactly; lower values trade relevance
-     *                for novelty
+     * @param ranked candidates, best-scoring first
+     * @param score  the blended recall score; normalised internally against the top score
+     *               so {@code lambda} weighs comparable magnitudes whatever the blend
+     *               produced
      */
     public static List<MemoryEntry> select(List<MemoryEntry> ranked,
-            ToDoubleFunction<MemoryEntry> score, double lambda, int limit) {
+            ToDoubleFunction<MemoryEntry> score, Settings settings, int limit) {
+        double lambda = settings.lambda();
         if (limit <= 0 || ranked.isEmpty()) return List.of();
         if (lambda >= 1.0 || ranked.size() <= 1) {
             return ranked.stream().limit(limit).toList();
@@ -60,7 +69,8 @@ public final class MemoryMmr {
             for (int i = 0; i < remaining.size(); i++) {
                 double relevance = top > 0 ? score.applyAsDouble(remaining.get(i)) / top : 0.0;
                 double value = lambda * relevance
-                        - (1 - lambda) * maxSimilarity(tokens.get(i), selectedTokens);
+                        - (1 - lambda) * maxSimilarity(tokens.get(i), selectedTokens,
+                                settings.redundancyFloor());
                 if (value > bestValue) {
                     bestValue = value;
                     best = i;
@@ -72,10 +82,23 @@ public final class MemoryMmr {
         return List.copyOf(selected);
     }
 
-    private static double maxSimilarity(Set<String> candidate, List<Set<String>> selected) {
+    /**
+     * Redundancy against what is already chosen, counted only above {@code floor}.
+     *
+     * <p>The floor is what makes this target duplicates rather than topics. A plain
+     * linear penalty punishes every candidate in proportion to its overlap, so the ones
+     * it actually displaces are the cheap ones at the tail — measured on a live store, a
+     * query about film preferences kept all three restatements of one genre list (they
+     * score too high to displace) and instead evicted "loves animated movies" and "avoids
+     * family films" in favour of memories unrelated to the query. Those distinct facts sat
+     * at 0.09-0.14 similarity to what was already shown while the true paraphrases sat at
+     * 0.27-0.53, so ignoring everything below the floor separates them cleanly.
+     */
+    private static double maxSimilarity(Set<String> candidate, List<Set<String>> selected, double floor) {
         double max = 0;
         for (var s : selected) {
-            max = Math.max(max, MemorySimilarity.jaccard(candidate, s));
+            double sim = MemorySimilarity.jaccard(candidate, s);
+            if (sim >= floor) max = Math.max(max, sim);
         }
         return max;
     }

@@ -665,7 +665,7 @@ public class SystemPromptAssembler {
     public record RecallResult(List<MemoryStore.MemoryEntry> selected,
                                List<RecallCandidate> candidates,
                                int limit, double relevanceWeight, double importanceWeight,
-                               double mmrLambda) {}
+                               double mmrLambda, double redundancyFloor) {}
 
     /**
      * Run the recall pipeline for {@code query} — the retrieval, the blend, the decay and
@@ -695,10 +695,19 @@ public class SystemPromptAssembler {
         var now = Instant.now();
         // JCLAW-923: λ<1 spends part of the budget on novelty rather than on a
         // fourth phrasing of a fact already in the block. 1.0 restores pure relevance.
-        double mmrLambda = ConfigService.getDouble("memory.recall.mmr.lambda", 0.7);
+        // 0.5 measured against the live pipeline (JCLAW-937): across eight real queries it
+        // removes every duplicate pair among the selected memories for a 1.8% drop in mean
+        // selected score, where 0.7 removed only one of five. The redundancy floor is what
+        // makes a λ this low safe — without it, low λ evicts distinct facts instead.
+        double mmrLambda = ConfigService.getDouble("memory.recall.mmr.lambda", 0.5);
+        // Below this two memories are treated as carrying different information, so no
+        // diversity penalty applies — see MemoryMmr.maxSimilarity for why a floorless
+        // penalty evicts distinct facts instead of duplicates.
+        double redundancyFloor = ConfigService.getDouble("memory.recall.mmr.redundancyFloor", 0.25);
+        var mmr = new MemoryMmr.Settings(mmrLambda, redundancyFloor);
 
         var selected = rankRecall(hits, excludeIds, relWeight, impWeight, recallLimit,
-                e -> MemoryDecay.factorFor(e, now), mmrLambda);
+                e -> MemoryDecay.factorFor(e, now), mmr);
 
         var selectedIds = selected.stream().map(MemoryStore.MemoryEntry::id).collect(Collectors.toSet());
         var candidates = new ArrayList<RecallCandidate>(hits.size());
@@ -711,7 +720,7 @@ public class SystemPromptAssembler {
         }
         candidates.sort((a, b) -> Double.compare(b.score(), a.score()));
         return new RecallResult(selected, List.copyOf(candidates), recallLimit,
-                relWeight, impWeight, mmrLambda);
+                relWeight, impWeight, mmrLambda, redundancyFloor);
     }
 
     private static void appendMemories(StringBuilder sb, Agent agent, String userMessage, Set<String> excludeIds) {
@@ -769,7 +778,8 @@ public class SystemPromptAssembler {
     public static List<MemoryStore.MemoryEntry> rankRecall(List<MemoryStore.MemoryEntry> hits,
             Set<String> excludeIds, double relWeight, double impWeight, int limit,
             ToDoubleFunction<MemoryStore.MemoryEntry> decay) {
-        return rankRecall(hits, excludeIds, relWeight, impWeight, limit, decay, 1.0);
+        return rankRecall(hits, excludeIds, relWeight, impWeight, limit, decay,
+                new MemoryMmr.Settings(1.0, 1.0));
     }
 
     /**
@@ -785,7 +795,7 @@ public class SystemPromptAssembler {
      */
     public static List<MemoryStore.MemoryEntry> rankRecall(List<MemoryStore.MemoryEntry> hits,
             Set<String> excludeIds, double relWeight, double impWeight, int limit,
-            ToDoubleFunction<MemoryStore.MemoryEntry> decay, double mmrLambda) {
+            ToDoubleFunction<MemoryStore.MemoryEntry> decay, MemoryMmr.Settings mmr) {
         var scored = new ArrayList<ScoredMemory>();
         for (var e : hits) {
             if (excludeIds.contains(e.id())) continue;  // already shown as a core memory
@@ -797,7 +807,7 @@ public class SystemPromptAssembler {
         var byScore = new HashMap<String, Double>();
         for (var s : scored) byScore.put(s.entry().id(), s.score());
         return MemoryMmr.select(scored.stream().map(ScoredMemory::entry).toList(),
-                e -> byScore.getOrDefault(e.id(), 0.0), mmrLambda, limit);
+                e -> byScore.getOrDefault(e.id(), 0.0), mmr, limit);
     }
 
     private record ScoredMemory(MemoryStore.MemoryEntry entry, double score) {}

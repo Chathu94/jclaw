@@ -48,8 +48,14 @@ class MemoryMmrTest extends UnitTest {
         return got.stream().map(MemoryEntry::id).toList();
     }
 
+    /**
+     * Floor 0.25 is the production default: above the distinct-fact band (0.09-0.14 on the
+     * live corpus), below the paraphrase band (0.27-0.53). It is what stops the penalty
+     * from displacing merely topical neighbours.
+     */
     private static List<MemoryEntry> select(double lambda, int limit) {
-        return MemoryMmr.select(CANDIDATES, x -> SCORES.get(x.id()), lambda, limit);
+        return MemoryMmr.select(CANDIDATES, x -> SCORES.get(x.id()),
+                new MemoryMmr.Settings(lambda, 0.25), limit);
     }
 
     @Test
@@ -112,7 +118,8 @@ class MemoryMmrTest extends UnitTest {
     void unrelatedMemoriesKeepTheirRelevanceOrder() {
         // Diversity must not reshuffle things that were never redundant.
         var distinct = List.of(e("a", NAS), e("b", RADARR));
-        var got = MemoryMmr.select(distinct, x -> "a".equals(x.id()) ? 0.9 : 0.5, 0.7, 2);
+        var got = MemoryMmr.select(distinct, x -> "a".equals(x.id()) ? 0.9 : 0.5,
+                new MemoryMmr.Settings(0.7, 0.25), 2);
         assertEquals(List.of("a", "b"), ids(got));
     }
 
@@ -125,7 +132,7 @@ class MemoryMmrTest extends UnitTest {
 
     @Test
     void degenerateInputsReturnEmptyRatherThanThrow() {
-        assertTrue(MemoryMmr.select(List.of(), x -> 1.0, 0.7, 5).isEmpty());
+        assertTrue(MemoryMmr.select(List.of(), x -> 1.0, new MemoryMmr.Settings(0.7, 0.25), 5).isEmpty());
         assertTrue(select(0.7, 0).isEmpty());
         assertTrue(select(0.7, -1).isEmpty());
     }
@@ -134,7 +141,7 @@ class MemoryMmrTest extends UnitTest {
     void aZeroTopScoreDoesNotDivideByZero() {
         // Every candidate scored 0 — possible when decay floors and relevance are both
         // degenerate. Selection must still terminate and respect the limit.
-        var got = MemoryMmr.select(CANDIDATES, x -> 0.0, 0.7, 2);
+        var got = MemoryMmr.select(CANDIDATES, x -> 0.0, new MemoryMmr.Settings(0.7, 0.25), 2);
         assertEquals(2, got.size());
     }
 }
