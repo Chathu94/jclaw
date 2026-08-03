@@ -79,6 +79,58 @@ class JpaMemoryStoreVectorTest extends UnitTest {
         return String.valueOf(a.id);
     }
 
+    // --- JCLAW-921: a metadata edit must not evict the vector ---
+
+    /**
+     * NONSENSE_QUERY shares no words with any stored memory, so it can only be recalled
+     * through the KNN leg. If an edit strips the vector, this recall goes empty while
+     * FTS keeps working — which is precisely why the loss was invisible in production.
+     */
+    private boolean knnStillFinds(String agent, String text) {
+        return store.search(agent, NONSENSE_QUERY, 10).stream().anyMatch(e -> e.text().equals(text));
+    }
+
+    @Test
+    void adjustingImportanceKeepsTheMemoryInKnnRecall() {
+        var agent = agentId("vec-importance-edit");
+        var id = store.store(agent, BERLIN, "fact", 0.6);
+        assertTrue(knnStillFinds(agent, BERLIN), "precondition: the vector is indexed");
+
+        // What the Memories page does when an operator nudges importance.
+        var m = (models.Memory) models.Memory.findById(Long.valueOf(id));
+        m.importance = 0.95;
+        m.save();
+
+        assertTrue(knnStillFinds(agent, BERLIN),
+                "an importance edit must not strip the vector — the document does not even carry importance");
+    }
+
+    @Test
+    void changingCategoryKeepsTheMemoryInKnnRecall() {
+        var agent = agentId("vec-category-edit");
+        var id = store.store(agent, BERLIN, "fact", 0.6);
+
+        var m = (models.Memory) models.Memory.findById(Long.valueOf(id));
+        m.category = "core";
+        m.save();
+
+        assertTrue(knnStillFinds(agent, BERLIN), "category is not an indexed field either");
+    }
+
+    @Test
+    void supersessionStillRemovesTheMemoryFromRecall() {
+        // The skip must not swallow the one update that genuinely has to touch the index.
+        var agent = agentId("vec-supersede");
+        var id = store.store(agent, BERLIN, "fact", 0.6);
+        assertTrue(knnStillFinds(agent, BERLIN));
+
+        var m = (models.Memory) models.Memory.findById(Long.valueOf(id));
+        m.supersede(999_999L);
+
+        assertFalse(knnStillFinds(agent, BERLIN),
+                "a superseded memory must leave the index even though its text never changed");
+    }
+
     @Test
     void knnRecallsSemanticMatchWithZeroLexicalOverlap() {
         var agent = agentId("vec-knn");
