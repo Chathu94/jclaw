@@ -3,8 +3,9 @@ package memory;
 import services.EventLogger;
 
 /**
- * Creates the appropriate MemoryStore based on application.conf settings.
- * Caches the singleton instance.
+ * Supplies the process-wide {@link MemoryStore} singleton. There is no selection to
+ * make: one implementation, whose vector backend is chosen inside the store by JDBC
+ * dialect rather than by any setting read here.
  */
 public class MemoryStoreFactory {
 
