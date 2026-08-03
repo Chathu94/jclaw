@@ -19,6 +19,10 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
 import services.MemoryService;
+import services.evals.MemoryEvalGenerator;
+import services.evals.MemoryEvalPaths;
+import services.evals.MemoryEvalScorer;
+import services.evals.MemoryEvalSuite;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import utils.ApiResponses;
@@ -26,6 +30,7 @@ import utils.JpqlFilter;
 import utils.JsonArgs;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -240,6 +245,103 @@ public class ApiMemoryController extends Controller {
         }
         memory.save();
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
+    }
+
+    /** Summary of a generated suite. Never returns the cases: they are personal data. */
+    public record EvalGenerateView(String suiteId, String fingerprint, int cases, String path) {}
+
+    /**
+     * POST /api/memories/evals/generate — build a recall eval suite from an agent's own
+     * memories (JCLAW-529).
+     *
+     * <p>Writes through {@link MemoryEvalPaths}, which refuses any destination outside the
+     * git-ignored local directory. The response deliberately carries counts and a
+     * fingerprint but not the cases: a generated case is personal data by construction,
+     * and there is no reason for it to travel anywhere it does not have to.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = EvalGenerateView.class)))
+    @Operation(summary = "Generate a memory-recall eval suite from the corpus")
+    public static void evalGenerate() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
+        var agent = requireEvalAgent(body);
+        var suiteId = JsonArgs.optString(body, "suiteId", "recall");
+        int sampleSize = JsonArgs.optInt(body, "sampleSize", 25);
+
+        var writer = MemoryEvalGenerator.writerFor(agent);
+        if (writer == null) {
+            ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "Agent '%s' has no usable provider for question generation".formatted(agent.name));
+        }
+        var suite = MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
+        try {
+            MemoryEvalPaths.ensureLocalDir();
+            var file = MemoryEvalPaths.suiteFile(suiteId);
+            java.nio.file.Files.writeString(file, gson.toJson(suite));
+            renderJSON(gson.toJson(new EvalGenerateView(suite.id(), suite.fingerprint(),
+                    suite.cases().size(), MemoryEvalPaths.LOCAL_DIR + "/" + suiteId + ".json")));
+        } catch (play.mvc.results.Result r) {
+            throw r;
+        } catch (IllegalArgumentException e) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+        } catch (IOException e) {
+            ApiResponses.error(500, "io_error", "Could not write suite: " + e.getMessage());
+        }
+    }
+
+    /**
+     * POST /api/memories/evals/run — score a generated suite against live recall.
+     *
+     * <p>Each case is retrieved through {@link SystemPromptAssembler#recall}, the same
+     * pipeline the system prompt uses, so a score describes production rather than a
+     * reimplementation of it. Candidates are read in scored order rather than only the
+     * selected ones, so recall at 10 measures retrieval instead of the recall limit.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryEvalScorer.Report.class)))
+    @Operation(summary = "Score a memory-recall eval suite against live recall")
+    public static void evalRun() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
+        var agent = requireEvalAgent(body);
+        var suiteId = JsonArgs.optString(body, "suiteId", "recall");
+        MemoryEvalSuite suite;
+        try {
+            suite = gson.fromJson(
+                    java.nio.file.Files.readString(MemoryEvalPaths.suiteFile(suiteId)), MemoryEvalSuite.class);
+        } catch (IllegalArgumentException e) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            throw new AssertionError("unreachable");
+        } catch (IOException e) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND,
+                    "No generated suite '%s' — generate one first".formatted(suiteId));
+            throw new AssertionError("unreachable");
+        }
+
+        var retrievals = new ArrayList<List<Long>>(suite.cases().size());
+        for (var c : suite.cases()) {
+            retrievals.add(SystemPromptAssembler.recall(String.valueOf(agent.id), c.query(), Set.of())
+                    .candidates().stream().map(x -> Long.parseLong(x.entry().id())).toList());
+        }
+        renderJSON(gson.toJson(MemoryEvalScorer.score(suite, retrievals)));
+    }
+
+    /** 400/404 unless the body names an agent that exists. */
+    private static Agent requireEvalAgent(JsonObject body) {
+        var agentId = JsonArgs.optString(body, "agentId", "");
+        if (agentId.isBlank()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
+        }
+        Agent agent = Agent.findById(Long.valueOf(agentId));
+        if (agent == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent with id " + agentId);
+        }
+        return agent;
     }
 
     /** One scored candidate as recall saw it (JCLAW-937). */

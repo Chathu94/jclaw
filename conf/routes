@@ -112,6 +112,8 @@ PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspac
 # Agent memories API (JCLAW-40) — cross-agent admin, addressed by memory id
 GET     /api/memories                           ApiMemoryController.list
 POST    /api/memories/recall                    ApiMemoryController.recall
+POST    /api/memories/evals/generate            ApiMemoryController.evalGenerate
+POST    /api/memories/evals/run                 ApiMemoryController.evalRun
 GET     /api/memories/reembed                   ApiMemoryController.reembedStatus
 POST    /api/memories/reembed                   ApiMemoryController.reembedStart
 PUT     /api/memories/{memoryId}                ApiMemoryController.update

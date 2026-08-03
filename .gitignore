@@ -51,6 +51,14 @@ javadoc/
 # want to compare against out of band, not in the history.
 evals/reports/
 
+# Memory-quality eval suites (JCLAW-529). Unlike evals/suites/, these are
+# GENERATED FROM THE OPERATOR'S OWN MEMORY CORPUS, so a case's query and its gold
+# answers are personal data by construction — "what is my NAS IP" is the secret,
+# not just a pointer to it. This repository is mirrored publicly, so they must
+# never be tracked. MemoryEvalPaths refuses to write outside this directory
+# rather than relying on the ignore rule alone.
+evals/local/
+
 # Claude Code and OpenAI Codex config.
 # Note: `.claude/*` (contents) instead of `.claude/` (directory) so git can
 # still descend into .claude/ and apply the negations below — git can't
