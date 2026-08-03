@@ -1,5 +1,6 @@
 package memory;
 
+import llm.LlmProvider;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Memory;
@@ -54,6 +55,7 @@ public class JpaMemoryStore implements MemoryStore {
 
     private final boolean vectorEnabled;
     private final boolean isPostgres;
+    private final String vectorProvider;
     private final String vectorModel;
     private final int vectorDimensions;
 
@@ -108,6 +110,7 @@ public class JpaMemoryStore implements MemoryStore {
     public JpaMemoryStore(boolean vectorEnabled, boolean isPostgres) {
         this.isPostgres = isPostgres;
         this.vectorEnabled = vectorEnabled;
+        this.vectorProvider = Play.configuration.getProperty("memory.jpa.vector.provider", "").trim();
         this.vectorModel = Play.configuration.getProperty("memory.jpa.vector.model", "text-embedding-3-small");
         this.vectorDimensions = Integer.parseInt(
                 Play.configuration.getProperty("memory.jpa.vector.dimensions", "1536"));
@@ -194,6 +197,62 @@ public class JpaMemoryStore implements MemoryStore {
             return fullTextSearch(agentId, query, limit);
         }
         return likeSearch(agentId, query, limit);
+    }
+
+    /**
+     * JCLAW-922: the semantic leg of capture-time dedup. Embeds {@code text} (no
+     * transaction held — see the interface contract), then asks the vector backend
+     * for its nearest stored memories and keeps those at or above {@code minCosine}.
+     *
+     * <p>Lucene reports a {@code COSINE} KNN hit as {@code (1 + cosine) / 2}, so the
+     * raw score is rescaled before comparison. Postgres orders by the cosine-distance
+     * operator without returning the distance, so its leg re-reads the stored vector
+     * to score; both dialects therefore threshold on a real cosine rather than on a
+     * rank-derived or RRF-fused number, neither of which is a similarity.
+     */
+    @Override
+    public List<Long> semanticNeighbours(String agentId, String text, int limit, double minCosine) {
+        if (!vectorEnabled || text == null || text.isBlank()) return List.of();
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
+        var embedding = generateEmbedding(text);
+        if (embedding == null) return List.of();
+        try {
+            return isPostgres
+                    ? pgSemanticNeighbours(pk, embedding, limit, minCosine)
+                    : luceneSemanticNeighbours(agentId, embedding, limit, minCosine);
+        } catch (Exception e) {
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "Semantic dedup lookup failed, falling back to lexical only: %s".formatted(e.getMessage()));
+            return List.of();
+        }
+    }
+
+    private List<Long> luceneSemanticNeighbours(String agentId, float[] embedding, int limit, double minCosine)
+            throws IOException {
+        var out = new ArrayList<Long>();
+        for (var hit : DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit)) {
+            if (2 * hit.score() - 1 >= minCosine) out.add(hit.id());
+        }
+        return out;
+    }
+
+    private List<Long> pgSemanticNeighbours(Long pk, float[] embedding, int limit, double minCosine) {
+        var sql = """
+                SELECT m.id FROM memory m
+                WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL
+                AND 1 - (m.embedding <=> ?2::text::vector) >= ?3
+                ORDER BY m.embedding <=> ?2::text::vector
+                """;
+        List<?> rows = Tx.run(() -> JPA.em().createNativeQuery(sql)
+                .setParameter(1, pk)
+                .setParameter(2, toVectorLiteral(embedding))
+                .setParameter(3, minCosine)
+                .setMaxResults(limit)
+                .getResultList());
+        var ids = new ArrayList<Long>(rows.size());
+        for (Object r : rows) ids.add(((Number) r).longValue());
+        return ids;
     }
 
     @Override
@@ -575,7 +634,38 @@ public class JpaMemoryStore implements MemoryStore {
      * window. SHA-256 (256-bit) makes a collision — which would silently return
      * the wrong embedding for a different text — astronomically unlikely.
      */
-    private record EmbeddingKey(String model, String textHash) {}
+    private record EmbeddingKey(String provider, String model, String textHash) {}
+
+    /**
+     * The provider that serves embeddings: {@code memory.jpa.vector.provider} when
+     * set, otherwise the registry primary.
+     *
+     * <p>The explicit key matters because {@code getPrimary()} is just the first
+     * provider in alphabetical order unless {@code llm.primaryProvider} pins one — so
+     * on a host with several providers configured it can easily resolve to a local
+     * chat endpoint that serves no embedding model at all, and every embedding call
+     * fails with nothing but a warning to show for it. Embedding models and chat
+     * models are chosen independently; this lets them be.
+     */
+    private LlmProvider embeddingProvider() {
+        if (vectorProvider.isBlank()) {
+            return ProviderRegistry.getPrimary();
+        }
+        var named = ProviderRegistry.get(vectorProvider);
+        if (named == null) {
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "memory.jpa.vector.provider=%s is not a configured provider — falling back to the primary"
+                            .formatted(vectorProvider));
+            return ProviderRegistry.getPrimary();
+        }
+        return named;
+    }
+
+    /** Cache-key component: the resolved provider's name, or a marker when none. */
+    private String embeddingProviderName() {
+        var p = embeddingProvider();
+        return p == null ? "none" : p.config().name();
+    }
 
     private static String hashText(String text) {
         try {
@@ -596,9 +686,9 @@ public class JpaMemoryStore implements MemoryStore {
         if (override != null) {
             return override.apply(text);
         }
-        return cachedEmbedding(new EmbeddingKey(vectorModel, hashText(text)), () -> {
+        return cachedEmbedding(new EmbeddingKey(embeddingProviderName(), vectorModel, hashText(text)), () -> {
             try {
-                var provider = ProviderRegistry.getPrimary();
+                var provider = embeddingProvider();
                 if (provider == null) return null;
                 // Embeddings are computed lazily on a cache miss — the
                 // chat-channel context that triggered the lookup isn't

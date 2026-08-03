@@ -313,8 +313,11 @@ public final class MemoryAutoCapture {
 
         // JCLAW-525 split the old single-Tx persist into plan (Tx) → judge
         // (LLM, no Tx) → apply (Tx), preserving the "no Tx held during an LLM
-        // call" invariant the pipeline is built around.
-        var plan = Tx.run(() -> plan(agentKey, candidates, maxPerTurn, dupThreshold, dedupScan));
+        // call" invariant the pipeline is built around. JCLAW-922 adds the
+        // semantic pass ahead of plan for the same reason: it embeds each
+        // candidate, and that round-trip must not run inside the plan Tx.
+        var semanticDupes = semanticDuplicateIndices(agentKey, agentName, candidates);
+        var plan = Tx.run(() -> plan(agentKey, candidates, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
         var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
         // Persist the survivor rows inside the apply Tx (capturing their ids), then
         // generate + write their embeddings AFTER it commits — the embedding HTTP
@@ -347,8 +350,39 @@ public final class MemoryAutoCapture {
      * would embed the query, and this method runs inside the plan transaction where
      * a blocking HTTP call must never happen.
      */
+    /**
+     * Semantic dedup phase (no Tx): which candidate indices already have a
+     * near-identical memory stored, judged by embedding cosine rather than shared
+     * wording (JCLAW-922). This is the tier the lexical rule cannot reach — a
+     * restatement like "scheduled for the last Friday" against "recurring ... on the
+     * last Friday" shares too few tokens for any safe lexical threshold.
+     *
+     * <p>Runs before {@link #plan} and outside its transaction because
+     * {@link MemoryStore#semanticNeighbours} embeds each candidate. Fail-open at
+     * every level: disabled by config, vector memory off, no embedding provider, or
+     * a lookup error all yield no semantic drops and the lexical rule stands alone.
+     */
+    private static Set<Integer> semanticDuplicateIndices(String agentKey, String agentName,
+                                                         List<Candidate> candidates) {
+        if (!ConfigService.getBoolean("memory.autocapture.dedup.semantic.enabled", true)) return Set.of();
+        double minCosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
+        int limit = ConfigService.getInt("memory.autocapture.dedup.semanticLimit", 5);
+        var store = MemoryStoreFactory.get();
+        var out = new HashSet<Integer>();
+        for (int i = 0; i < candidates.size(); i++) {
+            var matches = store.semanticNeighbours(agentKey, candidates.get(i).text(), limit, minCosine);
+            if (matches.isEmpty()) continue;
+            out.add(i);
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Memory candidate dropped as a semantic duplicate of %s: \"%s\""
+                            .formatted(matches, snippet(candidates.get(i).text())));
+        }
+        return out;
+    }
+
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
-                                          int maxPerTurn, double dupThreshold, int dedupScan) {
+                                          int maxPerTurn, double dupThreshold, int dedupScan,
+                                          Set<Integer> semanticDupes) {
         double shortlistMin = ConfigService.getDouble("memory.consolidation.shortlist.minJaccard", 0.2);
         int shortlistCap = ConfigService.getInt("memory.consolidation.shortlist.maxPerCandidate", 5);
         // 0.82, not 0.85: swept against a 1248-row store, 0.82 catches 10 restatement
@@ -375,8 +409,10 @@ public final class MemoryAutoCapture {
         var survivorTokens = new ArrayList<MemorySimilarity.Tokens>();
         var shortlist = new ArrayList<Existing>();
         var shortlisted = new HashSet<Long>();
-        for (var c : candidates) {
+        for (int idx = 0; idx < candidates.size(); idx++) {
             if (survivors.size() >= maxPerTurn) break;
+            if (semanticDupes.contains(idx)) continue;
+            var c = candidates.get(idx);
             var toks = MemorySimilarity.Tokens.of(c.text());
             if (hasDuplicate(toks, poolTokens, dupThreshold, containment, minLengthRatio)
                     || hasDuplicate(toks, survivorTokens, dupThreshold, containment, minLengthRatio)) continue;

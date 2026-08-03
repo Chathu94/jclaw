@@ -41,6 +41,17 @@ class LlmCallCountTest extends UnitTest {
         return hist == null ? -1L : hist.get("sum_ms").getAsLong();
     }
 
+    /**
+     * Per-run unique channel suffix, bounded so the channel fits {@code CHANNEL
+     * VARCHAR(32)}. Raw {@code System.nanoTime()} is 15 digits once the host has been
+     * up ~28 hours, which pushed the longest prefixes here to 33-35 characters; the
+     * oversized insert then surfaced as a failure in whatever test shared the
+     * connection, not in this class.
+     */
+    private static String uniqueSuffix() {
+        return Long.toString(System.nanoTime() % 10_000_000_000L);
+    }
+
     private static LatencyTrace startedTrace(String channel) {
         var trace = LatencyTrace.forTurn(channel, null);
         // end() skips early-exit traces; PROLOGUE_DONE is what marks a turn as real.
@@ -50,7 +61,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void syncProviderDispatchIsCountedEvenWhenTheCallFails() {
-        var channel = "llm-calls-sync-" + System.nanoTime();
+        var channel = "llm-calls-sync-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         try (var _ = LatencyTrace.bind(trace)) {
@@ -69,7 +80,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void streamingProviderDispatchIsCounted() throws Exception {
-        var channel = "llm-calls-stream-" + System.nanoTime();
+        var channel = "llm-calls-stream-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         try (var _ = LatencyTrace.bind(trace)) {
@@ -87,7 +98,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void everyRoundOfATurnAccumulatesOnTheSameTrace() {
-        var channel = "llm-calls-rounds-" + System.nanoTime();
+        var channel = "llm-calls-rounds-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         try (var _ = LatencyTrace.bind(trace)) {
@@ -105,7 +116,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void cacheServedCallsAreCountedAlongsideTheTotal() {
-        var channel = "llm-calls-cached-" + System.nanoTime();
+        var channel = "llm-calls-cached-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         try (var _ = LatencyTrace.bind(trace)) {
@@ -123,7 +134,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void aTurnWithNoCacheHitsOmitsTheCachedSegment() {
-        var channel = "llm-calls-uncached-" + System.nanoTime();
+        var channel = "llm-calls-uncached-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         try (var _ = LatencyTrace.bind(trace)) {
@@ -141,7 +152,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void dispatchOutsideATurnIsNotBilledToTheLastTurn() {
-        var channel = "llm-calls-unbound-" + System.nanoTime();
+        var channel = "llm-calls-unbound-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         try (var _ = LatencyTrace.bind(trace)) {
@@ -182,7 +193,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void aTurnHandedToAWorkerThreadStillCollectsItsCalls() throws Exception {
-        var channel = "llm-calls-worker-" + System.nanoTime();
+        var channel = "llm-calls-worker-" + uniqueSuffix();
         var trace = startedTrace(channel);
 
         // The contract ParallelToolExecutor relies on when it hands each tool
@@ -202,7 +213,7 @@ class LlmCallCountTest extends UnitTest {
 
     @Test
     void aWorkerThreadNotHandedTheTurnSeesNothing() {
-        var channel = "llm-calls-noinherit-" + System.nanoTime();
+        var channel = "llm-calls-noinherit-" + uniqueSuffix();
         var trace = startedTrace(channel);
         var sawTurn = new AtomicBoolean(true);
 

@@ -82,6 +82,21 @@ public interface MemoryStore {
 
     List<MemoryEntry> search(String agentId, String query, int limit);
 
+    /**
+     * JCLAW-922: ids of the agent's memories whose embedding is at least
+     * {@code minCosine} similar to {@code text} — the semantic leg of capture-time
+     * dedup, catching a restatement that shares no wording with what it restates.
+     * Empty when vector memory is disabled, when no provider can embed, or for a
+     * backend with no vector leg.
+     *
+     * <p><b>Must be called outside a transaction.</b> Implementations embed
+     * {@code text}, which is a blocking HTTP round-trip; the capture pipeline calls
+     * this in its own phase precisely so the plan transaction never spans it.
+     */
+    default List<Long> semanticNeighbours(String agentId, String text, int limit, double minCosine) {
+        return List.of();
+    }
+
     void delete(String id);
 
     List<MemoryEntry> list(String agentId);

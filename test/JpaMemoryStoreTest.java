@@ -68,13 +68,17 @@ class JpaMemoryStoreTest extends UnitTest {
         // Load the private nested record by binary name — avoids matching on
         // getSimpleName(), which Sonar flags as a brittle class-name comparison.
         var c = Class.forName("memory.JpaMemoryStore$EmbeddingKey")
-                .getDeclaredConstructor(String.class, String.class);
+                .getDeclaredConstructor(String.class, String.class, String.class);
         c.setAccessible(true);
         return c;
     }
 
     private static Object key(String model, String text) throws Exception {
-        return embeddingKeyCtor().newInstance(model, hash(text));
+        return key("openai", model, text);
+    }
+
+    private static Object key(String provider, String model, String text) throws Exception {
+        return embeddingKeyCtor().newInstance(provider, model, hash(text));
     }
 
     @Test
@@ -117,6 +121,16 @@ class JpaMemoryStoreTest extends UnitTest {
     void differentModelSameTextProduceDistinctKeys() throws Exception {
         var k1 = key("text-embedding-3-small", "shared memory text");
         var k2 = key("text-embedding-3-large", "shared memory text");
+        assertNotEquals(k1, k2);
+    }
+
+    @Test
+    void differentProviderSameModelProduceDistinctKeys() throws Exception {
+        // JCLAW-922: the same model name is served by more than one provider
+        // (an OpenAI-compatible local server and OpenAI itself), so a
+        // provider-blind key would hand one provider's vectors to the other.
+        var k1 = key("openai", "text-embedding-3-small", "shared memory text");
+        var k2 = key("lm-studio", "text-embedding-3-small", "shared memory text");
         assertNotEquals(k1, k2);
     }
 
