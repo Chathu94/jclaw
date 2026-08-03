@@ -1,6 +1,7 @@
 package memory;
 
 import services.ConfigService;
+import services.search.LuceneIndexer;
 
 /**
  * The vector-memory settings, read from the config store (JCLAW-930).
@@ -55,5 +56,25 @@ public final class MemoryVectorSettings {
      */
     public static int dimensions() {
         return ConfigService.getInt(KEY_DIMENSIONS, 1536);
+    }
+
+    /**
+     * Largest embedding dimension the active vector backend can index (JCLAW-935), or
+     * {@code 0} when there is no limit worth enforcing.
+     *
+     * <p>Only the Lucene backend has a cap low enough to hit by accident: it rejects
+     * anything above {@link LuceneIndexer#maxVectorDimensions()} (1024 on
+     * lucene-core 10.5.0), while text-embedding-3-small — this class's own default
+     * model — is 1536. pgvector's ceiling is far higher and is not asserted here,
+     * since it has not been verified against a live Postgres.
+     */
+    public static int maxDimensions(boolean isPostgres) {
+        return isPostgres ? 0 : LuceneIndexer.maxVectorDimensions();
+    }
+
+    /** Whether {@code dimensions} is indexable by the active backend. */
+    public static boolean dimensionsSupported(int dimensions, boolean isPostgres) {
+        int max = maxDimensions(isPostgres);
+        return max <= 0 || dimensions <= max;
     }
 }

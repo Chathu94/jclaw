@@ -484,6 +484,24 @@ public final class LuceneIndexer {
         }
     }
 
+    /**
+     * Largest KNN vector dimension this index will accept (JCLAW-935).
+     *
+     * <p>Read from the codec rather than hardcoded, so a later codec override or a
+     * Lucene upgrade that raises the cap is picked up without editing a constant.
+     * lucene-core 10.5.0 defaults to 1024, which is below several common embedding
+     * models — text-embedding-3-small is 1536 — so this is a limit operators hit
+     * with an ordinary choice, not an exotic one.
+     *
+     * <p>Callers must check before storing a model selection. {@link #upsert} cannot:
+     * its no-throw contract turns an oversized vector into a logged warning that
+     * discards the whole document, keyword text included, leaving the memory absent
+     * from every recall path with nothing surfaced to the operator.
+     */
+    public static int maxVectorDimensions() {
+        return org.apache.lucene.codecs.KnnVectorsFormat.DEFAULT_MAX_DIMENSIONS;
+    }
+
     /** Whether the indexes have been opened. */
     public static boolean isOpen() {
         return !writers.isEmpty();

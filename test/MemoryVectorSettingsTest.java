@@ -86,6 +86,33 @@ class MemoryVectorSettingsTest extends UnitTest {
                 "clearing a key changes the effective setting exactly as writing one does");
     }
 
+    // --- JCLAW-935: the vector backend's dimension ceiling ---
+
+    @Test
+    void luceneRejectsDimensionsAboveItsCodecLimit() {
+        int max = services.search.LuceneIndexer.maxVectorDimensions();
+
+        assertTrue(MemoryVectorSettings.dimensionsSupported(max, false),
+                "a model exactly at the limit must remain usable");
+        assertFalse(MemoryVectorSettings.dimensionsSupported(max + 1, false));
+        // text-embedding-3-small is this class's own default model and is 1536-dim,
+        // so on lucene-core 10.5.0 (limit 1024) the default is unusable on the default
+        // backend — the case that makes this guard worth having.
+        assertFalse(MemoryVectorSettings.dimensionsSupported(1536, false),
+                "1536 exceeds the Lucene limit; accepting it would silently drop documents");
+        assertTrue(MemoryVectorSettings.dimensionsSupported(768, false),
+                "the nomic-embed-text dimension in use today must not be caught by the guard");
+    }
+
+    @Test
+    void postgresIsNotConstrainedByTheLuceneLimit() {
+        // pgvector's ceiling is far higher and has not been verified against a live
+        // Postgres, so no limit is asserted for that backend rather than guessing one.
+        assertEquals(0, MemoryVectorSettings.maxDimensions(true));
+        assertTrue(MemoryVectorSettings.dimensionsSupported(1536, true));
+        assertTrue(MemoryVectorSettings.dimensionsSupported(3072, true));
+    }
+
     @Test
     void unrelatedConfigKeysDoNotRebuildTheStore() {
         var before = MemoryStoreFactory.get();

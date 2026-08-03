@@ -12,6 +12,8 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import llm.PaymentModality;
 import llm.ProviderRegistry;
+import memory.JpaMemoryStore;
+import memory.MemoryVectorSettings;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -320,6 +322,15 @@ public class ApiProvidersController extends Controller {
                 renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, 0,
                         "Provider served '%s' instead of '%s' — it ignores the requested model on this endpoint, so this selection would not be honoured"
                                 .formatted(result.servedModel(), model))));
+            }
+            // JCLAW-935: an oversized vector is discarded by LuceneIndexer.upsert with only
+            // a warning, taking the document's keyword text with it, so a model accepted
+            // here would silently remove memories from every recall path.
+            if (!MemoryVectorSettings.dimensionsSupported(vector.length, JpaMemoryStore.isPostgresDialect())) {
+                int max = MemoryVectorSettings.maxDimensions(JpaMemoryStore.isPostgresDialect());
+                renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, vector.length,
+                        "This model returns %d dimensions, above the %d the search index supports — memories embedded with it could not be indexed"
+                                .formatted(vector.length, max))));
             }
             renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, true, vector.length, null)));
         } catch (play.mvc.results.Result r) {

@@ -128,6 +128,15 @@ public class JpaMemoryStore implements MemoryStore {
      * all land on the same JDBC product name. Falls back to the configured
      * {@code db.url} when no connection is available yet (very early boot).
      */
+    /**
+     * The active dialect, for callers that need to know which vector backend applies
+     * without constructing a store — construction re-runs pgvector provisioning
+     * (JCLAW-935).
+     */
+    public static boolean isPostgresDialect() {
+        return detectPostgres();
+    }
+
     private static boolean detectPostgres() {
         try (var conn = DB.getDataSource().getConnection()) {
             return conn.getMetaData().getDatabaseProductName()
