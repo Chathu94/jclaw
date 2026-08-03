@@ -249,7 +249,8 @@ public class ApiMemoryController extends Controller {
 
     /** Summary of a generated suite. Never returns the cases: they are personal data. */
     /** Cluster structure only: sizes, never texts — a stats call must not leak the corpus. */
-    public record EvalClusterView(double clusterThreshold, List<Integer> distinctFactsPerCluster) {}
+    public record EvalClusterView(String clusterBy, double clusterThreshold,
+                                 List<Integer> distinctFactsPerCluster) {}
 
     public record EvalGenerateView(String suiteId, String fingerprint, int cases, String path) {}
 
@@ -275,10 +276,17 @@ public class ApiMemoryController extends Controller {
         int sampleSize = JsonArgs.optInt(body, "sampleSize", 25);
 
         var mode = JsonArgs.optString(body, "mode", "single");
-        double clusterThreshold = JsonArgs.optDouble(body, "clusterThreshold", 0.10);
+        // Semantic by default: the first comparison this suite is for is MMR, and MMR
+        // penalises token Jaccard, so lexical gold groups would be penalised by
+        // construction. See MemoryEvalGenerator#generateCoverage.
+        var clustering = new MemoryEvalGenerator.Clustering(
+                JsonArgs.optString(body, "clusterBy", "semantic"),
+                JsonArgs.optDouble(body, "clusterThreshold", 0.62),
+                JsonArgs.optInt(body, "minFacts", 3),
+                JsonArgs.optInt(body, "maxFacts", 8));
         if (JsonArgs.optBool(body, "dryRun")) {
-            renderJSON(gson.toJson(new EvalClusterView(clusterThreshold,
-                    MemoryEvalGenerator.clusterSizes(agent, clusterThreshold))));
+            renderJSON(gson.toJson(new EvalClusterView(clustering.by(), clustering.threshold(),
+                    MemoryEvalGenerator.clusterSizes(agent, clustering))));
         }
 
         var writer = MemoryEvalGenerator.writerFor(agent);
@@ -290,7 +298,7 @@ public class ApiMemoryController extends Controller {
         // mode that can measure a diversity pass, since a single-fact question scores a
         // block of three paraphrases exactly as it scores three different facts.
         var suite = "coverage".equals(mode)
-                ? MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clusterThreshold, writer)
+                ? MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clustering, writer)
                 : MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
         try {
             MemoryEvalPaths.ensureLocalDir();

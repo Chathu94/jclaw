@@ -3,6 +3,7 @@ package services.evals;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import memory.MemorySimilarity;
+import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Memory;
 import services.EventLogger;
@@ -30,6 +31,9 @@ public final class MemoryEvalGenerator {
 
     private static final String EVENT_CATEGORY = "memory";
 
+    /** Generous: the maxFacts ceiling, not this, is what decides a cluster is too broad. */
+    private static final int MAX_SEMANTIC_NEIGHBOURS = 50;
+
     private static final String INSTRUCTIONS = """
             You write evaluation questions for a memory-retrieval system. Given one stored \
             fact about a user, write the single most natural question that user might ask \
@@ -50,6 +54,23 @@ public final class MemoryEvalGenerator {
 
     /** A memory lifted out of its transaction, so the model calls hold no connection. */
     private record Row(Long id, String text) {}
+
+    /**
+     * How a coverage question's set of distinct facts is decided.
+     *
+     * @param by        {@code "lexical"} groups on shared content tokens; {@code "semantic"}
+     *                  groups on embedding neighbours. This choice decides what the A/B can
+     *                  conclude — see {@link #generateCoverage}
+     * @param threshold lexical: minimum token Jaccard. semantic: minimum cosine
+     * @param maxFacts  ceiling on distinct facts per question; past it the cluster is a
+     *                  topic rather than a question and its retrieval is too diffuse to
+     *                  compare rankers with
+     */
+    public record Clustering(String by, double threshold, int minFacts, int maxFacts) {
+        public boolean semantic() {
+            return "semantic".equals(by);
+        }
+    }
 
     /**
      * Generate a suite of at most {@code sampleSize} cases for {@code agent}.
@@ -107,15 +128,24 @@ public final class MemoryEvalGenerator {
      * holding one fact three times and a block holding three different facts score
      * identically on recall, because both contain "the" answer.
      *
-     * <p>Clusters are built on content-token overlap rather than on embeddings, so the
-     * vector pipeline under test does not get to define the groups it will then be scored
-     * on retrieving. That independence is partial, not clean: recall is hybrid, and
-     * lexical clustering does correlate with its keyword leg, which inflates absolute
-     * coverage. It biases both arms of an A/B equally, so the suite is fit for comparing
-     * two rankers and not for claiming an absolute coverage number.
+     * <p><b>The clustering signal decides what the suite can conclude, so pick it against
+     * the comparison being run.</b> Lexical clustering must not be used to evaluate
+     * {@link memory.MemoryMmr}: MMR penalises a candidate by its token Jaccard to what is
+     * already selected, so gold facts grouped by token Jaccard are penalised by
+     * construction and coverage falls as lambda falls whatever MMR is worth. Measured that
+     * way here, coverage@k ran 0.635 / 0.619 / 0.575 / 0.530 at lambda 1.0 / 0.7 / 0.5 /
+     * 0.3 — a monotone decline that is a restatement of the clustering choice, not a
+     * finding. Semantic clustering groups on embedding cosine, which MMR does not penalise
+     * on, and is the honest setting for that A/B.
+     *
+     * <p>Neither signal is fully independent of retrieval, because recall is hybrid: the
+     * lexical one correlates with its keyword leg and the semantic one with its vector leg,
+     * and each inflates absolute coverage accordingly. That bias applies to both arms of an
+     * A/B equally, so a suite compares two rankers honestly while an absolute coverage
+     * number from it means little.
      */
     public static MemoryEvalSuite generateCoverage(Agent agent, String suiteId, int maxCases,
-                                                   double clusterThreshold, QuestionWriter writer) {
+                                                   Clustering clustering, QuestionWriter writer) {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         "agent.id = ?1 AND supersededAt IS NULL ORDER BY id", agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text)).toList());
@@ -125,11 +155,14 @@ public final class MemoryEvalGenerator {
         for (var seed : rows) {
             if (cases.size() >= maxCases) break;
             if (used.contains(seed.id())) continue;
-            var cluster = clusterAround(seed, rows, clusterThreshold);
+            var cluster = clusterAround(agent, seed, rows, clustering);
             var groups = distinctFacts(cluster);
             // Fewer than three distinct facts is not a coverage question — there is
-            // nothing for a diversity pass to trade off.
-            if (groups.size() < 3) continue;
+            // nothing for a diversity pass to trade off. Past a ceiling it stops being a
+            // question too: measured on this corpus, clusters of 13 and 21 facts produced
+            // "what is JClaw and how do I use it in my work?" — a topic, whose retrieval is
+            // diffuse enough to add noise to a comparison rather than signal.
+            if (groups.size() < clustering.minFacts() || groups.size() > clustering.maxFacts()) continue;
 
             String question;
             try {
@@ -163,7 +196,7 @@ public final class MemoryEvalGenerator {
      * question. Sweeping it through the full generator would spend a model call per
      * surviving cluster per sweep point.
      */
-    public static List<Integer> clusterSizes(Agent agent, double threshold) {
+    public static List<Integer> clusterSizes(Agent agent, Clustering clustering) {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         "agent.id = ?1 AND supersededAt IS NULL ORDER BY id", agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text)).toList());
@@ -171,15 +204,21 @@ public final class MemoryEvalGenerator {
         var used = new java.util.HashSet<Long>();
         for (var seed : rows) {
             if (used.contains(seed.id())) continue;
-            var cluster = clusterAround(seed, rows, threshold);
+            var cluster = clusterAround(agent, seed, rows, clustering);
             sizes.add(distinctFacts(cluster).size());
             cluster.forEach(r -> used.add(r.id()));
         }
         return sizes;
     }
 
-    /** Memories topically related to the seed, by boilerplate-stripped token overlap. */
-    private static List<Row> clusterAround(Row seed, List<Row> all, double threshold) {
+    /** Memories related to the seed, by whichever signal {@code clustering} names. */
+    private static List<Row> clusterAround(Agent agent, Row seed, List<Row> all, Clustering clustering) {
+        return clustering.semantic()
+                ? semanticCluster(agent, seed, all, clustering.threshold())
+                : lexicalCluster(seed, all, clustering.threshold());
+    }
+
+    private static List<Row> lexicalCluster(Row seed, List<Row> all, double threshold) {
         var seedTokens = MemorySimilarity.contentTokens(seed.text());
         var cluster = new ArrayList<Row>();
         cluster.add(seed);
@@ -188,6 +227,20 @@ public final class MemoryEvalGenerator {
             if (MemorySimilarity.jaccard(seedTokens, MemorySimilarity.contentTokens(other.text())) >= threshold) {
                 cluster.add(other);
             }
+        }
+        return cluster;
+    }
+
+    /** Embedding neighbours of the seed, restricted to the corpus rows already in hand. */
+    private static List<Row> semanticCluster(Agent agent, Row seed, List<Row> all, double minCosine) {
+        var byId = all.stream().collect(java.util.stream.Collectors.toMap(Row::id, r -> r, (a, b) -> a));
+        var ids = MemoryStoreFactory.get().semanticNeighbours(
+                String.valueOf(agent.id), seed.text(), MAX_SEMANTIC_NEIGHBOURS, minCosine);
+        var cluster = new ArrayList<Row>();
+        cluster.add(seed);
+        for (var id : ids) {
+            var row = byId.get(id);
+            if (row != null && !id.equals(seed.id())) cluster.add(row);
         }
         return cluster;
     }
