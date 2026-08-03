@@ -323,10 +323,20 @@ public class ApiMemoryController extends Controller {
             throw new AssertionError("unreachable");
         }
 
+        // Which ranking to score. "selected" is what the model actually sees, so it is
+        // the only scope that can see the diversity pass — MMR reorders and truncates the
+        // selection, never the candidate pool. "candidates" scores retrieval before
+        // selection, which is the right scope for asking whether the store can find a
+        // memory at all, independently of how many the budget admits.
+        var scope = JsonArgs.optString(body, "scope", "selected");
+        boolean selectedOnly = !"candidates".equals(scope);
+
         var retrievals = new ArrayList<List<Long>>(suite.cases().size());
         for (var c : suite.cases()) {
-            retrievals.add(SystemPromptAssembler.recall(String.valueOf(agent.id), c.query(), Set.of())
-                    .candidates().stream().map(x -> Long.parseLong(x.entry().id())).toList());
+            var result = SystemPromptAssembler.recall(String.valueOf(agent.id), c.query(), Set.of());
+            retrievals.add(selectedOnly
+                    ? result.selected().stream().map(x -> Long.parseLong(x.id())).toList()
+                    : result.candidates().stream().map(x -> Long.parseLong(x.entry().id())).toList());
         }
         renderJSON(gson.toJson(MemoryEvalScorer.score(suite, retrievals)));
     }
