@@ -276,9 +276,9 @@ public class ApiMemoryController extends Controller {
         int sampleSize = JsonArgs.optInt(body, "sampleSize", 25);
 
         var mode = JsonArgs.optString(body, "mode", "single");
-        // Semantic by default: the first comparison this suite is for is MMR, and MMR
-        // penalises token Jaccard, so lexical gold groups would be penalised by
-        // construction. See MemoryEvalGenerator#generateCoverage.
+        // Semantic by default: lexical gold groups share their signal with any ranker
+        // that penalises token overlap, which decides the comparison in advance.
+        // See MemoryEvalGenerator#generateCoverage.
         var clustering = new MemoryEvalGenerator.Clustering(
                 JsonArgs.optString(body, "clusterBy", "semantic"),
                 JsonArgs.optDouble(body, "clusterThreshold", 0.62),
@@ -295,8 +295,8 @@ public class ApiMemoryController extends Controller {
                     "Agent '%s' has no usable provider for question generation".formatted(agent.name));
         }
         // "coverage" builds broad questions needing several distinct facts — the only
-        // mode that can measure a diversity pass, since a single-fact question scores a
-        // block of three paraphrases exactly as it scores three different facts.
+        // mode that can measure how well a block covers a question, since a single-fact
+        // question scores three paraphrases exactly as it scores three different facts.
         var suite = "coverage".equals(mode)
                 ? MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clustering, writer)
                 : MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
@@ -346,10 +346,9 @@ public class ApiMemoryController extends Controller {
             throw new AssertionError("unreachable");
         }
 
-        // Which ranking to score. "selected" is what the model actually sees, so it is
-        // the only scope that can see the diversity pass — MMR reorders and truncates the
-        // selection, never the candidate pool. "candidates" scores retrieval before
-        // selection, which is the right scope for asking whether the store can find a
+        // Which ranking to score. "selected" is what the model actually sees — the
+        // ranking truncated to the recall budget. "candidates" scores retrieval before
+        // that cut, which is the right scope for asking whether the store can find a
         // memory at all, independently of how many the budget admits.
         var scope = JsonArgs.optString(body, "scope", "selected");
         boolean selectedOnly = !"candidates".equals(scope);
@@ -383,8 +382,8 @@ public class ApiMemoryController extends Controller {
 
     /** A recall, the settings that shaped it, and every candidate it considered. */
     public record RecallView(String agentId, String query, int limit,
-                             double relevanceWeight, double importanceWeight, double mmrLambda,
-                             double redundancyFloor, String vectorBackend, List<Long> selectedIds,
+                             double relevanceWeight, double importanceWeight,
+                             String vectorBackend, List<Long> selectedIds,
                              List<RecallCandidateView> candidates) {}
 
     /**
@@ -431,8 +430,7 @@ public class ApiMemoryController extends Controller {
                         c.decay(), c.score(), c.selected()))
                 .toList();
         renderJSON(gson.toJson(new RecallView(agentId, query, result.limit(),
-                result.relevanceWeight(), result.importanceWeight(), result.mmrLambda(),
-                result.redundancyFloor(), vectorBackendLabel(),
+                result.relevanceWeight(), result.importanceWeight(), vectorBackendLabel(),
                 result.selected().stream().map(e -> Long.parseLong(e.id())).toList(),
                 candidates)));
     }

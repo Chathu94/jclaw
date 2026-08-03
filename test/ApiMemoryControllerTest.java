@@ -116,7 +116,7 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertTrue(body.contains("dark mode in every editor"), body);
         assertTrue(body.contains("\"selected\":true"), "the match must be marked selected: " + body);
         // The settings that shaped the result travel with it, so a run is attributable.
-        assertTrue(body.contains("\"mmrLambda\""), body);
+        assertTrue(body.contains("\"relevanceWeight\""), body);
         assertTrue(body.contains("\"vectorBackend\""), body);
         assertTrue(body.contains("\"score\""), body);
     }

@@ -2,7 +2,6 @@ package agents;
 
 import com.google.gson.Gson;
 import memory.MemoryDecay;
-import memory.MemoryMmr;
 import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import models.Agent;
@@ -16,7 +15,6 @@ import utils.GsonHolder;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -651,7 +649,7 @@ public class SystemPromptAssembler {
      * One candidate as recall scored it, for {@link #recall} callers that want to see the
      * reasoning rather than only the outcome (JCLAW-937).
      *
-     * @param selected whether it survived the limit and the diversity pass
+     * @param selected whether it survived the limit
      */
     public record RecallCandidate(MemoryStore.MemoryEntry entry, double decay,
                                   double score, boolean selected) {}
@@ -664,12 +662,11 @@ public class SystemPromptAssembler {
      */
     public record RecallResult(List<MemoryStore.MemoryEntry> selected,
                                List<RecallCandidate> candidates,
-                               int limit, double relevanceWeight, double importanceWeight,
-                               double mmrLambda, double redundancyFloor) {}
+                               int limit, double relevanceWeight, double importanceWeight) {}
 
     /**
      * Run the recall pipeline for {@code query} — the retrieval, the blend, the decay and
-     * the diversity selection — and report both the outcome and the reasoning.
+     * the selection — and report both the outcome and the reasoning.
      *
      * <p>Single-sourced deliberately. {@link #appendMemories} renders this and the
      * introspection endpoint serialises it, so the two cannot disagree; an introspection
@@ -693,21 +690,8 @@ public class SystemPromptAssembler {
         // JCLAW-526: the blend is multiplied by a half-life time decay, so
         // stale facts fade in ranking (never vanish — the factor is floored).
         var now = Instant.now();
-        // JCLAW-923: λ<1 spends part of the budget on novelty rather than on a
-        // fourth phrasing of a fact already in the block. 1.0 restores pure relevance.
-        // 0.5 measured against the live pipeline (JCLAW-937): across eight real queries it
-        // removes every duplicate pair among the selected memories for a 1.8% drop in mean
-        // selected score, where 0.7 removed only one of five. The redundancy floor is what
-        // makes a λ this low safe — without it, low λ evicts distinct facts instead.
-        double mmrLambda = ConfigService.getDouble("memory.recall.mmr.lambda", 0.5);
-        // Below this two memories are treated as carrying different information, so no
-        // diversity penalty applies — see MemoryMmr.maxSimilarity for why a floorless
-        // penalty evicts distinct facts instead of duplicates.
-        double redundancyFloor = ConfigService.getDouble("memory.recall.mmr.redundancyFloor", 0.25);
-        var mmr = new MemoryMmr.Settings(mmrLambda, redundancyFloor);
-
         var selected = rankRecall(hits, excludeIds, relWeight, impWeight, recallLimit,
-                e -> MemoryDecay.factorFor(e, now), mmr);
+                e -> MemoryDecay.factorFor(e, now));
 
         var selectedIds = selected.stream().map(MemoryStore.MemoryEntry::id).collect(Collectors.toSet());
         var candidates = new ArrayList<RecallCandidate>(hits.size());
@@ -720,7 +704,7 @@ public class SystemPromptAssembler {
         }
         candidates.sort((a, b) -> Double.compare(b.score(), a.score()));
         return new RecallResult(selected, List.copyOf(candidates), recallLimit,
-                relWeight, impWeight, mmrLambda, redundancyFloor);
+                relWeight, impWeight);
     }
 
     private static void appendMemories(StringBuilder sb, Agent agent, String userMessage, Set<String> excludeIds) {
@@ -778,24 +762,6 @@ public class SystemPromptAssembler {
     public static List<MemoryStore.MemoryEntry> rankRecall(List<MemoryStore.MemoryEntry> hits,
             Set<String> excludeIds, double relWeight, double impWeight, int limit,
             ToDoubleFunction<MemoryStore.MemoryEntry> decay) {
-        return rankRecall(hits, excludeIds, relWeight, impWeight, limit, decay,
-                new MemoryMmr.Settings(1.0, 1.0));
-    }
-
-    /**
-     * As above, selecting the final set by Maximal Marginal Relevance (JCLAW-923).
-     * {@code mmrLambda} of 1.0 is pure relevance and reproduces the ordering the other
-     * overloads give, so the diversity pass is additive rather than a different
-     * algorithm; lower values trade relevance for novelty.
-     *
-     * <p>Diversity belongs at this cut, not inside the store's fusion. This is where the
-     * {@code memory.recall.limit} budget is actually spent, and the score MMR balances
-     * against is the fully blended one — relevance, importance and decay together.
-     * Diversifying earlier would be undone by the sort below it.
-     */
-    public static List<MemoryStore.MemoryEntry> rankRecall(List<MemoryStore.MemoryEntry> hits,
-            Set<String> excludeIds, double relWeight, double impWeight, int limit,
-            ToDoubleFunction<MemoryStore.MemoryEntry> decay, MemoryMmr.Settings mmr) {
         var scored = new ArrayList<ScoredMemory>();
         for (var e : hits) {
             if (excludeIds.contains(e.id())) continue;  // already shown as a core memory
@@ -803,11 +769,7 @@ public class SystemPromptAssembler {
                     (relWeight * e.relevance() + impWeight * e.importance()) * decay.applyAsDouble(e)));
         }
         scored.sort((a, b) -> Double.compare(b.score(), a.score()));
-
-        var byScore = new HashMap<String, Double>();
-        for (var s : scored) byScore.put(s.entry().id(), s.score());
-        return MemoryMmr.select(scored.stream().map(ScoredMemory::entry).toList(),
-                e -> byScore.getOrDefault(e.id(), 0.0), mmr, limit);
+        return scored.stream().limit(limit).map(ScoredMemory::entry).toList();
     }
 
     private record ScoredMemory(MemoryStore.MemoryEntry entry, double score) {}

@@ -124,19 +124,18 @@ public final class MemoryEvalGenerator {
     /**
      * Generate coverage cases: broad questions whose answer needs several distinct facts.
      *
-     * <p>This is what measures a diversity pass. A single-fact suite cannot: a block
-     * holding one fact three times and a block holding three different facts score
-     * identically on recall, because both contain "the" answer.
+     * <p>This is what measures whether a block answers a question rather than merely
+     * containing a hit. A single-fact suite cannot: a block holding one fact three times
+     * and a block holding three different facts score identically on recall, because both
+     * contain "the" answer.
      *
      * <p><b>The clustering signal decides what the suite can conclude, so pick it against
-     * the comparison being run.</b> Lexical clustering must not be used to evaluate
-     * {@link memory.MemoryMmr}: MMR penalises a candidate by its token Jaccard to what is
-     * already selected, so gold facts grouped by token Jaccard are penalised by
-     * construction and coverage falls as lambda falls whatever MMR is worth. Measured that
-     * way here, coverage@k ran 0.635 / 0.619 / 0.575 / 0.530 at lambda 1.0 / 0.7 / 0.5 /
-     * 0.3 — a monotone decline that is a restatement of the clustering choice, not a
-     * finding. Semantic clustering groups on embedding cosine, which MMR does not penalise
-     * on, and is the honest setting for that A/B.
+     * the comparison being run.</b> A gold grouping built on the same signal a ranker
+     * scores on settles the comparison before it runs. Grouping on token Jaccard to
+     * evaluate a ranker that penalises token Jaccard produced exactly that: a clean
+     * monotone decline that restated the clustering choice rather than measuring anything.
+     * Semantic clustering groups on embedding cosine, so use it against any lexical
+     * ranker, and lexical clustering against a purely semantic one.
      *
      * <p>Neither signal is fully independent of retrieval, because recall is hybrid: the
      * lexical one correlates with its keyword leg and the semantic one with its vector leg,
@@ -158,7 +157,7 @@ public final class MemoryEvalGenerator {
             var cluster = clusterAround(agent, seed, rows, clustering);
             var groups = distinctFacts(cluster);
             // Fewer than three distinct facts is not a coverage question — there is
-            // nothing for a diversity pass to trade off. Past a ceiling it stops being a
+            // nothing for the budget to have to choose between. Past a ceiling it stops being a
             // question too: measured on this corpus, clusters of 13 and 21 facts produced
             // "what is JClaw and how do I use it in my work?" — a topic, whose retrieval is
             // diffuse enough to add noise to a comparison rather than signal.
@@ -272,9 +271,9 @@ public final class MemoryEvalGenerator {
      * any near-duplicate of it.
      *
      * <p>Without this the harness would score a correct retrieval as a miss whenever the
-     * corpus holds a fact more than once, penalising exactly what dedup and diversity
-     * selection are for. Uses the same duplicate test capture uses, so what counts as the
-     * same fact here is what counts as the same fact there.
+     * corpus holds a fact more than once, penalising exactly what dedup is for. Uses the
+     * same duplicate test capture uses, so what counts as the same fact here is what
+     * counts as the same fact there.
      */
     private static List<Long> goldFor(Row source, List<Row> all) {
         var gold = new ArrayList<Long>();

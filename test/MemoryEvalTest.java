@@ -93,7 +93,7 @@ class MemoryEvalTest extends UnitTest {
                 () -> MemoryEvalScorer.score(suite(c("a", 1L), c("b", 2L)), List.of(List.of(1L))));
     }
 
-    // --- coverage (JCLAW-529: what a diversity pass is measured on) ---
+    // --- coverage (JCLAW-529: what recall structurally cannot see) ---
 
     @Test
     void coverageSeesTheDifferenceRecallCannot() {

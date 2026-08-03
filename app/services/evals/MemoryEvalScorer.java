@@ -13,9 +13,9 @@ import java.util.List;
  *
  * <p>Two metrics, because they answer different questions. <b>Recall</b> asks whether the
  * answer was found at all, which is retrieval quality. <b>Coverage</b> asks what fraction
- * of the distinct facts a question needs actually reached the block, which is what a
- * diversity pass is for and what recall structurally cannot see: a block holding one fact
- * three times and a block holding three different facts score identically on recall.
+ * of the distinct facts a question needs actually reached the block — which recall
+ * structurally cannot see, since a block holding one fact three times and a block holding
+ * three different facts score identically on it.
  */
 public final class MemoryEvalScorer {
 
