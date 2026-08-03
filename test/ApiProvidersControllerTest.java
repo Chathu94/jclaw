@@ -572,4 +572,47 @@ class ApiProvidersControllerTest extends FunctionalTest {
         assertFalse(saved.contains("promptPrice"),
                 "a non-numeric price must be stripped, not persisted: " + saved);
     }
+
+    // --- embedding probe (JCLAW-931) ---
+    //
+    // The guards are deterministic and covered here. The two paths that depend on a
+    // live provider — a real embedding model returning its dimension, and a chat-only
+    // model being reported as not serving embeddings — are covered by UAT against the
+    // running instance, because ProviderRegistry caches its snapshot for 60s with no
+    // reset seam, so a provider configured mid-test is not reliably visible to it.
+
+    @Test
+    void embeddingProbeRequiresAuth() {
+        var response = POST("/api/providers/openai/embedding-probe",
+                "application/json", "{\"model\":\"text-embedding-3-small\"}");
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    void embeddingProbeReturns404ForUnconfiguredProvider() {
+        login();
+        var response = POST("/api/providers/test-provider/embedding-probe",
+                "application/json", "{\"model\":\"whatever\"}");
+        assertEquals(404, response.status.intValue());
+    }
+
+    @Test
+    void embeddingProbeReturns400WhenModelMissing() {
+        login();
+        configureProvider();
+        var response = POST("/api/providers/test-provider/embedding-probe",
+                "application/json", "{}");
+        assertEquals(400, response.status.intValue());
+        assertTrue(getContent(response).toLowerCase().contains("model"),
+                "error should name the missing field: " + getContent(response));
+    }
+
+    @Test
+    void embeddingProbeReturns400WhenModelIsBlank() {
+        login();
+        configureProvider();
+        var response = POST("/api/providers/test-provider/embedding-probe",
+                "application/json", "{\"model\":\"   \"}");
+        assertEquals(400, response.status.intValue());
+    }
 }

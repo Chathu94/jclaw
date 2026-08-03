@@ -63,6 +63,12 @@ public class ApiProvidersController extends Controller {
     public record ReachableResponse(String provider, boolean reachable, int modelCount, String reason) {}
 
     /**
+     * Result of embedding-probing one model (JCLAW-931). {@code dimensions} is the length
+     * of the vector the model actually returned, and is 0 when {@code ok} is false.
+     */
+    public record EmbeddingProbeResponse(String provider, String model, boolean ok, int dimensions, String error) {}
+
+    /**
      * GET /api/providers — billing-shape projection of each configured
      * provider. Returns name, selected modality, subscription monthly
      * price, and the supported-modality set so the Settings UI knows
@@ -275,6 +281,52 @@ public class ApiProvidersController extends Controller {
     private static String modelsKey(String name) {
         return PROVIDER_CONFIG_PREFIX + name + ".models";
     }
+
+    /**
+     * POST /api/providers/{name}/embedding-probe — ask the provider to embed a throwaway
+     * string with {@code model}, and report whether it worked and at what dimension.
+     *
+     * <p>JCLAW-931: this is the only authoritative answer available. {@code ModelInfo}
+     * carries no embedding flag and no dimension, and neither OpenAI's nor LM Studio's
+     * {@code /v1/models} marks which models serve embeddings — so calling the endpoint is
+     * what distinguishes an embedding model from a chat model, and the returned vector's
+     * length is what the dimension actually is rather than what someone typed.
+     *
+     * <p>Read-only with respect to memory: it calls the provider directly, so nothing is
+     * written to the store, the Lucene index, or the store's embedding cache.
+     */
+    @ApiResponse(responseCode = "200")
+    @Operation(summary = "Check whether a model serves embeddings, and at what dimension")
+    public static void embeddingProbe(String name) {
+        requireConfiguredProvider(name);
+        var body = JsonBodyReader.readJsonBody();
+        var model = body == null ? "" : JsonArgs.optString(body, "model", "");
+        if (model.isBlank()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "model is required");
+        }
+        var provider = ProviderRegistry.get(name);
+        if (provider == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND,
+                    "Provider '%s' is not available".formatted(name));
+        }
+        try {
+            var vector = provider.embeddings(model, EMBEDDING_PROBE_INPUT, null);
+            if (vector == null || vector.length == 0) {
+                renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, 0,
+                        "Provider returned no embedding for this model")));
+            }
+            renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, true, vector.length, null)));
+        } catch (play.mvc.results.Result r) {
+            throw r;   // renderJSON above signals success by throwing — never swallow it
+        } catch (Exception e) {
+            // The provider's own message is the useful one: a chat-only model reports as
+            // such rather than as a generic failure, and a quota or auth problem is named.
+            renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, 0, e.getMessage())));
+        }
+    }
+
+    /** Short and content-free: the probe pays for one embedding call on a metered provider. */
+    private static final String EMBEDDING_PROBE_INPUT = "probe";
 
     /** 404s unless {@code name} is a configured provider (has a base URL). */
     private static void requireConfiguredProvider(String name) {
