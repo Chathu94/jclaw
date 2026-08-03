@@ -87,6 +87,28 @@ class MemorySemanticDedupTest extends UnitTest {
     }
 
     @Test
+    void aSupersededMemoryDoesNotNoopANewOneAsASemanticDuplicate() {
+        // JCLAW-525's invariant, on the semantic tier. The pgvector leg filters
+        // superseded rows in SQL; the Lucene leg gets its ids from the index, which can
+        // still hold a document for a row superseded since it was written — during a
+        // re-embed, for instance. Without the filter that stale vector would NOOP a
+        // re-emerging fact, which is exactly what supersession is meant to allow.
+        var agent = agentId();
+        var store = MemoryStoreFactory.get();
+        var id = store.store(agent, STORED, "core", 0.9);
+
+        var superseded = (models.Memory) models.Memory.findById(Long.valueOf(id));
+        superseded.supersede(999_999L);
+        // Put the vector back, simulating an index that has not caught up with the
+        // supersession — supersede() removes the document via @PostUpdate.
+        services.search.LuceneIndexer.upsert(services.search.LuceneIndexer.Scope.MEMORY,
+                superseded.id, STORED, String.valueOf(superseded.agent.id), EMBEDDINGS.get(STORED));
+
+        assertEquals(1, captureOne(agent, PARAPHRASE),
+                "a superseded memory must not block a re-emerging fact");
+    }
+
+    @Test
     void unrelatedFactIsStillStoredWithSemanticDedupActive() {
         var agent = agentId();
         MemoryStoreFactory.get().store(agent, STORED, "core", 0.9);

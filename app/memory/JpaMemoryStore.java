@@ -121,14 +121,6 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     /**
-     * Dialect sniff (JCLAW-555): ask the live connection what it actually is —
-     * the {@code MessageSearch.chooseRepository} pattern — rather than
-     * string-matching config. The commented-out {@code %prod.db.*} PostgreSQL
-     * block in application.conf, a {@code -Ddb.url} override, or an edited conf
-     * all land on the same JDBC product name. Falls back to the configured
-     * {@code db.url} when no connection is available yet (very early boot).
-     */
-    /**
      * The active dialect, for callers that need to know which vector backend applies
      * without constructing a store — construction re-runs pgvector provisioning
      * (JCLAW-935).
@@ -137,6 +129,14 @@ public class JpaMemoryStore implements MemoryStore {
         return detectPostgres();
     }
 
+    /**
+     * Dialect sniff (JCLAW-555): ask the live connection what it actually is —
+     * the {@code MessageSearch.chooseRepository} pattern — rather than
+     * string-matching config. The commented-out {@code %prod.db.*} PostgreSQL
+     * block in application.conf, a {@code -Ddb.url} override, or an edited conf
+     * all land on the same JDBC product name. Falls back to the configured
+     * {@code db.url} when no connection is available yet (very early boot).
+     */
     private static boolean detectPostgres() {
         try (var conn = DB.getDataSource().getConnection()) {
             return conn.getMetaData().getDatabaseProductName()
@@ -241,7 +241,25 @@ public class JpaMemoryStore implements MemoryStore {
         for (var hit : DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit)) {
             if (2 * hit.score() - 1 >= minCosine) out.add(hit.id());
         }
-        return out;
+        return activeOnly(agentId, out);
+    }
+
+    /**
+     * Drop ids whose row is superseded or gone. The pgvector leg filters
+     * {@code superseded_at IS NULL} in SQL; the Lucene leg gets its ids from the index,
+     * which can briefly hold a document for a row superseded since it was written. Without
+     * this a superseded fact could NOOP a re-emerging new one as a semantic duplicate —
+     * the exact thing JCLAW-525 exists to prevent. Runs in its own short read transaction:
+     * the caller is outside one by contract, because it just embedded.
+     */
+    private List<Long> activeOnly(String agentId, List<Long> ids) {
+        if (ids.isEmpty()) return ids;
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
+        List<Memory> rows = Tx.run(() -> Memory.find(
+                "agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL", pk, ids).fetch());
+        var alive = rows.stream().map(m -> m.id).collect(java.util.stream.Collectors.toSet());
+        return ids.stream().filter(alive::contains).toList();
     }
 
     private List<Long> pgSemanticNeighbours(Long pk, float[] embedding, int limit, double minCosine) {

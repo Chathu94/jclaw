@@ -104,13 +104,22 @@ public final class MemoryReembedService {
     }
 
     private static void rebuild() {
+        // Wipe BEFORE snapshotting, not after. A memory stored between a snapshot and a
+        // later wipe is absent from the snapshot but has already written its own index
+        // document via @PostPersist, so the wipe deletes it and neither pass below puts
+        // it back — it survives in the database but is permanently invisible to recall
+        // and to dedup's retrieval leg. Wiping first makes every case safe: anything
+        // written before the wipe is in the database and therefore in the snapshot,
+        // anything written after it indexes itself, and a row caught in between is
+        // covered twice, which is harmless because the upsert is idempotent.
+        LuceneIndexer.clear(LuceneIndexer.Scope.MEMORY);
+
         var rows = Tx.run(() -> Memory.<Memory>find("supersededAt IS NULL ORDER BY id").<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text, String.valueOf(m.agent.id))).toList());
         total.set(rows.size());
         EventLogger.info(EVENT_CATEGORY,
                 "Memory re-embed starting: %d memories, model %s".formatted(rows.size(), activeModel));
 
-        LuceneIndexer.clear(LuceneIndexer.Scope.MEMORY);
         for (var r : rows) {
             LuceneIndexer.upsert(LuceneIndexer.Scope.MEMORY, r.id(), r.text(), r.agentId());
         }
