@@ -615,4 +615,42 @@ class ApiProvidersControllerTest extends FunctionalTest {
                 "application/json", "{\"model\":\"   \"}");
         assertEquals(400, response.status.intValue());
     }
+
+    private static boolean substituted(String requested, String served) throws Exception {
+        var m = controllers.ApiProvidersController.class.getDeclaredMethod("substituted", String.class, String.class);
+        m.setAccessible(true);
+        return (boolean) m.invoke(null, requested, served);
+    }
+
+    @Test
+    void probeRejectsAModelTheProviderSilentlySwapped() throws Exception {
+        // Verified against LM Studio: /v1/embeddings ignores the requested model and
+        // serves whichever embedding model is loaded, so a chat model id returns a
+        // perfectly good 768-dim vector. Only the echoed name reveals the swap.
+        assertTrue(substituted("qwen3.5-4b-mlx", "text-embedding-nomic-embed-text-v1.5"));
+        assertTrue(substituted("totally-made-up-model-xyz", "text-embedding-nomic-embed-text-v1.5"));
+    }
+
+    @Test
+    void probeAcceptsTheModelItAskedFor() throws Exception {
+        assertFalse(substituted("text-embedding-3-small", "text-embedding-3-small"));
+        assertFalse(substituted("Text-Embedding-3-Small", "text-embedding-3-small"),
+                "case alone is not a substitution");
+    }
+
+    @Test
+    void probeToleratesProviderSideIdNormalisation() throws Exception {
+        // A provider that drops or adds a vendor prefix is still serving what was asked
+        // for; rejecting that would make legitimate models unselectable.
+        assertFalse(substituted("openai/text-embedding-3-small", "text-embedding-3-small"));
+        assertFalse(substituted("text-embedding-3-small", "openai/text-embedding-3-small"));
+    }
+
+    @Test
+    void probeTreatsASilentProviderAsNoEvidenceOfSubstitution() throws Exception {
+        // No model field in the response means the provider did not say, which is not
+        // the same as saying something different.
+        assertFalse(substituted("some-model", null));
+        assertFalse(substituted("some-model", "   "));
+    }
 }

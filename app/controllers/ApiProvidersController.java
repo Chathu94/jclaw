@@ -310,10 +310,16 @@ public class ApiProvidersController extends Controller {
                     "Provider '%s' is not available".formatted(name));
         }
         try {
-            var vector = provider.embeddings(model, EMBEDDING_PROBE_INPUT, null);
+            var result = provider.embeddingsDetailed(model, EMBEDDING_PROBE_INPUT, null);
+            var vector = result.vector();
             if (vector == null || vector.length == 0) {
                 renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, 0,
                         "Provider returned no embedding for this model")));
+            }
+            if (substituted(model, result.servedModel())) {
+                renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, false, 0,
+                        "Provider served '%s' instead of '%s' — it ignores the requested model on this endpoint, so this selection would not be honoured"
+                                .formatted(result.servedModel(), model))));
             }
             renderJSON(gson.toJson(new EmbeddingProbeResponse(name, model, true, vector.length, null)));
         } catch (play.mvc.results.Result r) {
@@ -327,6 +333,26 @@ public class ApiProvidersController extends Controller {
 
     /** Short and content-free: the probe pays for one embedding call on a metered provider. */
     private static final String EMBEDDING_PROBE_INPUT = "probe";
+
+    /**
+     * Whether the provider answered with a different model than the one requested.
+     *
+     * <p>Verified against LM Studio 2026-08-03: {@code /v1/embeddings} ignores the
+     * requested model entirely and serves whichever embedding model is loaded, echoing
+     * that name back — a chat model id and an invented one both return 200 with a valid
+     * 768-dim vector. Without this check the probe would greenlight any string.
+     *
+     * <p>Lenient on shape, strict on identity: a provider that merely normalises an id
+     * (dropping a vendor prefix, say) still counts as a match, because one name contains
+     * the other. A blank echo means the provider did not say, which cannot be treated as
+     * a mismatch. Comparison is case-insensitive.
+     */
+    private static boolean substituted(String requested, String served) {
+        if (served == null || served.isBlank()) return false;
+        var a = requested.trim().toLowerCase(java.util.Locale.ROOT);
+        var b = served.trim().toLowerCase(java.util.Locale.ROOT);
+        return !a.contains(b) && !b.contains(a);
+    }
 
     /** 404s unless {@code name} is a configured provider (has a base URL). */
     private static void requireConfiguredProvider(String name) {

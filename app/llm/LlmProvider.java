@@ -597,7 +597,20 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     // ─── Embeddings ──────────────────────────────────────────────────────
 
+    /** An embedding plus the model the provider reports having served it with. */
+    public record EmbeddingResult(float[] vector, String servedModel) {}
+
     public float[] embeddings(String model, String input, String channel) {
+        return embeddingsDetailed(model, input, channel).vector();
+    }
+
+    /**
+     * As {@link #embeddings}, but also surfacing the model named in the response
+     * (JCLAW-931). Only the probe needs it: a provider that silently substitutes a
+     * different embedding model answers 200 with a perfectly good vector, so the vector
+     * alone cannot tell an operator whether the model they picked is the one being used.
+     */
+    public EmbeddingResult embeddingsDetailed(String model, String input, String channel) {
         var request = new EmbeddingRequest(model, input);
         var json = gson.toJson(request);
         var responseBody = executeWithRetry("/embeddings", json, null, channel);
@@ -612,7 +625,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         if (response == null || response.data() == null || response.data().isEmpty()) {
             throw new LlmException("Empty embedding response");
         }
-        return response.data().getFirst().embedding();
+        return new EmbeddingResult(response.data().getFirst().embedding(), response.model());
     }
 
     // ─── Failover (static utility) ───────────────────────────────────────

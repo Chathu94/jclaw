@@ -210,9 +210,17 @@ public final class LlmTypes {
             Object input
     ) {}
 
+    /**
+     * @param model the model the provider says it actually served. Not always the one
+     *              asked for: LM Studio ignores the requested model on /v1/embeddings and
+     *              serves whichever embedding model is loaded, echoing that name back — so
+     *              this field is what distinguishes "the model works" from "something
+     *              answered" (JCLAW-931).
+     */
     public record EmbeddingResponse(
             List<EmbeddingData> data,
-            Usage usage
+            Usage usage,
+            String model
     ) {}
 
     public record EmbeddingData(
