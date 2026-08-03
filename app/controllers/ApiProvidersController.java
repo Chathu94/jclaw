@@ -17,6 +17,7 @@ import memory.MemoryVectorSettings;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
+import services.LoadTestRunner;
 import services.LocalProviderProbeSupport;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
@@ -81,6 +82,7 @@ public class ApiProvidersController extends Controller {
     @Operation(summary = "List configured LLM providers")
     public static void list() {
         var infos = ProviderRegistry.listAll().stream()
+                .filter(p -> !isInternalProvider(p.config().name()))
                 .map(p -> {
                     var cfg = p.config();
                     var supported = PaymentModality.supportedFor(cfg.name()).stream()
@@ -387,6 +389,28 @@ public class ApiProvidersController extends Controller {
         var a = requested.trim().toLowerCase(java.util.Locale.ROOT);
         var b = served.trim().toLowerCase(java.util.Locale.ROOT);
         return !a.contains(b) && !b.contains(a);
+    }
+
+    /**
+     * Providers that exist for a harness, not for the operator to choose (JCLAW-936).
+     *
+     * <p>{@code loadtest-mock} is already declared a reserved name by
+     * {@link LoadTestRunner#LOADTEST_PROVIDER} and its config keys are hidden from
+     * {@code /api/config}, but this projection was never given the same treatment — so
+     * it surfaced in every picker fed by {@code /api/providers}, including the Settings
+     * provider list and the memory embedding picker.
+     *
+     * <p>Filtered by name rather than by {@code provider.<name>.enabled}: the harness
+     * flips that flag to true for the duration of a run, so an enabled-based rule would
+     * make the entry appear precisely while a load test is in flight. It is never an
+     * operator choice in either state.
+     *
+     * <p>{@code ProviderRegistry} deliberately still sees it — the harness resolves the
+     * provider through the registry, so hiding it there would break the load test rather
+     * than tidy the UI.
+     */
+    private static boolean isInternalProvider(String name) {
+        return LoadTestRunner.LOADTEST_PROVIDER.equalsIgnoreCase(name);
     }
 
     /** 404s unless {@code name} is a configured provider (has a base URL). */

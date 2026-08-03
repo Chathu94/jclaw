@@ -573,6 +573,48 @@ class ApiProvidersControllerTest extends FunctionalTest {
                 "a non-numeric price must be stripped, not persisted: " + saved);
     }
 
+    // --- internal providers (JCLAW-936) ---
+
+    @Test
+    void listHidesTheLoadTestHarnessProvider() {
+        login();
+        // Configured exactly as the harness leaves it, including the disabled flag it
+        // carries between runs.
+        ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
+        ConfigService.set("provider.loadtest-mock.apiKey", "mock");
+        ConfigService.set("provider.loadtest-mock.enabled", "false");
+        try {
+            var body = getContent(GET("/api/providers"));
+            assertFalse(body.contains("loadtest-mock"),
+                    "the harness provider is not an operator choice: " + body);
+        }
+        finally {
+            ConfigService.delete("provider.loadtest-mock.baseUrl");
+            ConfigService.delete("provider.loadtest-mock.apiKey");
+            ConfigService.delete("provider.loadtest-mock.enabled");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
+    void listStillHidesTheHarnessProviderWhileALoadTestIsRunning() {
+        login();
+        // enabled=true is exactly the state a run leaves it in, which is why the filter
+        // keys on the reserved name rather than on the enabled flag.
+        ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
+        ConfigService.set("provider.loadtest-mock.apiKey", "mock");
+        ConfigService.set("provider.loadtest-mock.enabled", "true");
+        try {
+            assertFalse(getContent(GET("/api/providers")).contains("loadtest-mock"));
+        }
+        finally {
+            ConfigService.delete("provider.loadtest-mock.baseUrl");
+            ConfigService.delete("provider.loadtest-mock.apiKey");
+            ConfigService.delete("provider.loadtest-mock.enabled");
+            ConfigService.clearCache();
+        }
+    }
+
     // --- embedding probe (JCLAW-931) ---
     //
     // The guards are deterministic and covered here. The two paths that depend on a
