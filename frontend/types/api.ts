@@ -843,3 +843,13 @@ export interface EmbeddingProbeResponse {
   dimensions: number
   error: string | null
 }
+
+/** Progress of a memory re-embed (JCLAW-933). `upToDate` is false after a model switch. */
+export interface MemoryReembedStatus {
+  running: boolean
+  processed: number
+  total: number
+  model: string
+  error: string | null
+  upToDate: boolean
+}

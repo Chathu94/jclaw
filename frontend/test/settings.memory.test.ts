@@ -189,6 +189,51 @@ describe('Settings page — Memory Embeddings', () => {
     expect(component.find('[data-testid="memory-embedding-save"]').attributes('disabled')).toBeDefined()
   })
 
+  it('offers a re-embed and reports progress while one runs', async () => {
+    baseEndpoints([...vectorEnabledConfig(), { key: 'memory.jpa.vector.provider', value: 'lm-studio' }])
+    registerEndpoint('/api/memories/reembed', () => ({
+      running: true, processed: 312, total: 616, model: EMBED_MODEL, error: null, upToDate: false,
+    }))
+    const component = await mountSettingsSection('memory')
+    await flushPromises()
+
+    const progress = component.find('[data-testid="memory-reembed-progress"]')
+    expect(progress.exists()).toBe(true)
+    expect(progress.text()).toContain('312 / 616')
+    // The wording the operator acts on: capture keeps working, only recall degrades.
+    expect(progress.text()).toContain('still being saved')
+    expect(component.find('[data-testid="memory-reembed-start"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('surfaces a refusal rather than leaving the button looking inert', async () => {
+    baseEndpoints([...vectorEnabledConfig(), { key: 'memory.jpa.vector.provider', value: 'lm-studio' }])
+    let started = false
+    registerEndpoint('/api/memories/reembed', (event) => {
+      if (event.method === 'POST') {
+        started = true
+        // Mirror ApiResponses.error's real body — {type, code, message} with a 409
+        // status — so the panel's extraction is tested against what it will meet.
+        throw createError({
+          statusCode: 409,
+          data: {
+            type: 'error',
+            code: 'conflict',
+            message: 'The configured model is 1536-dimensional, above the 1024 the search index supports.',
+          },
+        })
+      }
+      return { running: false, processed: 0, total: 0, model: EMBED_MODEL, error: null, upToDate: false }
+    })
+    const component = await mountSettingsSection('memory')
+    await flushPromises()
+
+    await component.find('[data-testid="memory-reembed-start"]').trigger('click')
+    await flushPromises()
+
+    expect(started).toBe(true)
+    expect(component.find('[data-testid="memory-reembed-error"]').text()).toContain('1536-dimensional')
+  })
+
   it('warns that changing the model strands existing vectors', async () => {
     baseEndpoints([...vectorEnabledConfig(),
       { key: 'memory.jpa.vector.provider', value: 'lm-studio' },

@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import memory.MemoryCategory;
+import memory.MemoryReembedService;
 import models.Agent;
 import models.Memory;
 import play.mvc.Controller;
@@ -234,6 +235,35 @@ public class ApiMemoryController extends Controller {
         }
         memory.save();
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
+    }
+
+    /**
+     * GET /api/memories/reembed — whether a rebuild is in flight and how far along.
+     * Polled by the Settings panel and the chat notice; safe to call at any cadence.
+     */
+    @ApiResponse(responseCode = "200")
+    @Operation(summary = "Re-embed progress")
+    public static void reembedStatus() {
+        renderJSON(gson.toJson(MemoryReembedService.status()));
+    }
+
+    /**
+     * POST /api/memories/reembed — rebuild every memory's embedding against the model
+     * currently configured (JCLAW-933).
+     *
+     * <p>Returns 409 with the reason when it cannot start: vector memory disabled, a
+     * rebuild already in flight, or a configured dimension the index cannot store. That
+     * last one is a refusal rather than a warning because the rebuild wipes the index
+     * before writing, so starting it with an unusable model would leave nothing behind.
+     */
+    @ApiResponse(responseCode = "202")
+    @Operation(summary = "Start re-embedding stored memories")
+    public static void reembedStart() {
+        var refusal = MemoryReembedService.start();
+        if (refusal != null) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, refusal);
+        }
+        renderJSON(gson.toJson(MemoryReembedService.status()));
     }
 
     /**

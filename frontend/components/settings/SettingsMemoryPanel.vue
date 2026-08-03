@@ -10,7 +10,7 @@
  * probing (JCLAW-931) — the probe is what accepts a model and where the read-only
  * dimension comes from.
  */
-import type { DiscoverModelsResponse, EmbeddingProbeResponse, ProviderModelDef } from '~/types/api'
+import type { DiscoverModelsResponse, EmbeddingProbeResponse, MemoryReembedStatus, ProviderModelDef } from '~/types/api'
 import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
 
 const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
@@ -132,6 +132,46 @@ async function runProbe() {
     probing.value = false
   }
 }
+
+// --- re-embed (JCLAW-933) ---
+const reembed = ref<MemoryReembedStatus | null>(null)
+const reembedError = ref('')
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+async function refreshReembed() {
+  try {
+    reembed.value = await $fetch<MemoryReembedStatus>('/api/memories/reembed')
+  }
+  catch { /* transient — the next poll retries */ }
+}
+
+async function startReembed() {
+  reembedError.value = ''
+  try {
+    reembed.value = await $fetch<MemoryReembedStatus>('/api/memories/reembed', { method: 'POST' })
+  }
+  catch (e) {
+    // 409 carries the refusal reason: disabled, already running, or a dimension the
+    // index cannot store. Surfacing it matters — the button otherwise looks inert.
+    // Two shapes reach here: the backend's own {type, code, message} body, and the
+    // Nitro-wrapped {data: {...}} when the proxy layer generates the error.
+    const d = (e as { data?: { message?: string, data?: { message?: string } } })?.data
+    reembedError.value = d?.message ?? d?.data?.message ?? 'Could not start re-embedding.'
+  }
+}
+
+// Poll only while a run is in flight; the status is otherwise static.
+watch(() => reembed.value?.running, (isRunning) => {
+  if (isRunning && !pollTimer) pollTimer = setInterval(refreshReembed, 1500)
+  if (!isRunning && pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+})
+onMounted(refreshReembed)
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
 
 async function toggleEnabled() {
   await saveField(MemoryVectorKeys.enabled, enabled.value ? 'false' : 'true')
@@ -337,6 +377,69 @@ async function saveSelection() {
             class="text-[11px] text-fg-muted"
           >Check the model before saving.</span>
         </div>
+      </div>
+    </div>
+
+    <!-- Re-embed: the action that resolves a model switch -->
+    <div
+      v-if="enabled"
+      class="bg-surface-elevated border border-border"
+    >
+      <div class="px-4 py-3 space-y-2">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <span class="text-sm font-medium text-fg-strong">Stored memories</span>
+            <span
+              v-if="reembed?.running"
+              class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+            >re-embedding</span>
+            <span
+              v-else-if="reembed && !reembed.upToDate"
+              class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+            >needs re-embedding</span>
+            <span
+              v-else-if="reembed"
+              class="ml-2 text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+            >up to date</span>
+          </div>
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50 shrink-0"
+            :disabled="reembed?.running"
+            data-testid="memory-reembed-start"
+            @click="startReembed"
+          >
+            {{ reembed?.running ? 'Re-embedding…' : 'Re-embed now' }}
+          </button>
+        </div>
+        <p
+          v-if="reembed?.running"
+          class="text-xs text-fg-muted"
+          data-testid="memory-reembed-progress"
+        >
+          {{ reembed.processed }} / {{ reembed.total }} — new memories are still being saved;
+          duplicate detection and semantic recall are reduced until this finishes.
+        </p>
+        <p
+          v-else-if="reembed && !reembed.upToDate"
+          class="text-xs text-fg-muted"
+        >
+          Existing memories were embedded with a different model, so semantic recall and
+          duplicate detection will not work correctly until they are rebuilt.
+        </p>
+        <p
+          v-if="reembedError"
+          class="text-xs text-red-700 dark:text-red-400"
+          data-testid="memory-reembed-error"
+        >
+          {{ reembedError }}
+        </p>
+        <p
+          v-else-if="reembed?.error"
+          class="text-xs text-red-700 dark:text-red-400"
+        >
+          Last run failed: {{ reembed.error }}
+        </p>
       </div>
     </div>
   </div>
