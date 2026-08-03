@@ -71,6 +71,20 @@ public final class JsonArgs {
     }
 
     /**
+     * The value at {@code key} as a {@code double}, or {@code fallback} when the key
+     * is absent, JSON-null, or not coercible to a double.
+     */
+    public static double optDouble(@NonNull JsonObject obj, @NonNull String key, double fallback) {
+        var el = obj.get(key);
+        if (el == null || el.isJsonNull()) return fallback;
+        try {
+            return el.getAsDouble();
+        } catch (NumberFormatException | UnsupportedOperationException | IllegalStateException _) {
+            return fallback;
+        }
+    }
+
+    /**
      * The value at {@code key} as an {@link Integer}, or {@code null} when the key
      * is absent, JSON-null, or not coercible to an int.
      */

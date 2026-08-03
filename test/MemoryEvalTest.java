@@ -26,10 +26,16 @@ class MemoryEvalTest extends UnitTest {
         return new MemoryEvalSuite("recall", "fixture", "3:0000000a", List.of(cases));
     }
 
+    /** A single-fact case: one gold group holding every memory that states that fact. */
     private static MemoryEvalCase c(String id, long... gold) {
         var g = new java.util.ArrayList<Long>();
         for (var x : gold) g.add(x);
-        return new MemoryEvalCase(id, "question for " + id, g);
+        return new MemoryEvalCase(id, "question for " + id, List.of(g));
+    }
+
+    /** A coverage case: one group per distinct fact the question needs. */
+    private static MemoryEvalCase cov(String id, List<List<Long>> groups) {
+        return new MemoryEvalCase(id, "broad question for " + id, groups);
     }
 
     // --- scoring ---
@@ -87,6 +93,55 @@ class MemoryEvalTest extends UnitTest {
                 () -> MemoryEvalScorer.score(suite(c("a", 1L), c("b", 2L)), List.of(List.of(1L))));
     }
 
+    // --- coverage (JCLAW-529: what a diversity pass is measured on) ---
+
+    @Test
+    void coverageSeesTheDifferenceRecallCannot() {
+        // The whole reason coverage exists. Both retrievals put a gold memory first, so
+        // recall and MRR are identical and perfect for each. Only one of them actually
+        // answers a question that needs three facts.
+        var suite = suite(cov("a", List.of(List.of(1L), List.of(2L), List.of(3L))));
+        var duplicates = MemoryEvalScorer.score(suite, List.of(List.of(1L, 91L, 92L)));
+        var distinct = MemoryEvalScorer.score(suite, List.of(List.of(1L, 2L, 3L)));
+
+        assertEquals(duplicates.recallAt1(), distinct.recallAt1(), 1e-9);
+        assertEquals(duplicates.mrr(), distinct.mrr(), 1e-9);
+
+        assertEquals(1.0 / 3, duplicates.coverageAtK(), 1e-9);
+        assertEquals(1.0, distinct.coverageAtK(), 1e-9);
+    }
+
+    @Test
+    void aParaphraseCoversItsFactOnceRatherThanTwice() {
+        // Memories 1 and 2 state the same fact. Retrieving both must not score as
+        // covering two facts, or a corpus that repeats itself would look well-covered
+        // while answering half the question.
+        var suite = suite(cov("a", List.of(List.of(1L, 2L), List.of(3L))));
+        var r = MemoryEvalScorer.score(suite, List.of(List.of(1L, 2L)));
+
+        assertEquals(1, r.perCase().getFirst().groupsCovered());
+        assertEquals(0.5, r.coverageAtK(), 1e-9);
+    }
+
+    @Test
+    void groupsCoveredCountsGroupsNotMemories() {
+        assertEquals(2, MemoryEvalScorer.groupsCovered(
+                List.of(5L, 6L, 7L), List.of(List.of(5L, 6L), List.of(7L), List.of(8L))));
+        assertEquals(0, MemoryEvalScorer.groupsCovered(List.of(1L), List.of(List.of(2L))));
+    }
+
+    @Test
+    void meanGoldGroupsReportsHowDemandingTheSuiteIs() {
+        // Without this a coverage number is unreadable: 0.5 across two-fact questions and
+        // 0.5 across ten-fact questions describe very different retrievals.
+        var r = MemoryEvalScorer.score(
+                suite(cov("a", List.of(List.of(1L), List.of(2L))),
+                        cov("b", List.of(List.of(3L), List.of(4L), List.of(5L), List.of(6L)))),
+                List.of(List.of(1L), List.of(3L)));
+
+        assertEquals(3.0, r.meanGoldGroups(), 1e-9);
+    }
+
     // --- fingerprint ---
 
     @Test
@@ -98,6 +153,13 @@ class MemoryEvalTest extends UnitTest {
 
         assertNotEquals(base.fingerprint(), suite(c("a", 2L)).fingerprint(),
                 "changing a gold answer changes how the suite scores");
+
+        // Same ids, different grouping: one fact stated twice versus two facts. Coverage
+        // reads those differently, so a baseline taken under one must not appear to apply
+        // to the other.
+        assertNotEquals(
+                suite(cov("a", List.of(List.of(1L, 2L)))).fingerprint(),
+                suite(cov("a", List.of(List.of(1L), List.of(2L)))).fingerprint());
     }
 
     // --- the containment guard (JCLAW-529 privacy constraint) ---

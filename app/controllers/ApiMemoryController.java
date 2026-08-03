@@ -248,6 +248,9 @@ public class ApiMemoryController extends Controller {
     }
 
     /** Summary of a generated suite. Never returns the cases: they are personal data. */
+    /** Cluster structure only: sizes, never texts — a stats call must not leak the corpus. */
+    public record EvalClusterView(double clusterThreshold, List<Integer> distinctFactsPerCluster) {}
+
     public record EvalGenerateView(String suiteId, String fingerprint, int cases, String path) {}
 
     /**
@@ -271,12 +274,24 @@ public class ApiMemoryController extends Controller {
         var suiteId = JsonArgs.optString(body, "suiteId", "recall");
         int sampleSize = JsonArgs.optInt(body, "sampleSize", 25);
 
+        var mode = JsonArgs.optString(body, "mode", "single");
+        double clusterThreshold = JsonArgs.optDouble(body, "clusterThreshold", 0.10);
+        if (JsonArgs.optBool(body, "dryRun")) {
+            renderJSON(gson.toJson(new EvalClusterView(clusterThreshold,
+                    MemoryEvalGenerator.clusterSizes(agent, clusterThreshold))));
+        }
+
         var writer = MemoryEvalGenerator.writerFor(agent);
         if (writer == null) {
             ApiResponses.error(409, ApiResponses.CONFLICT,
                     "Agent '%s' has no usable provider for question generation".formatted(agent.name));
         }
-        var suite = MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
+        // "coverage" builds broad questions needing several distinct facts — the only
+        // mode that can measure a diversity pass, since a single-fact question scores a
+        // block of three paraphrases exactly as it scores three different facts.
+        var suite = "coverage".equals(mode)
+                ? MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clusterThreshold, writer)
+                : MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
         try {
             MemoryEvalPaths.ensureLocalDir();
             var file = MemoryEvalPaths.suiteFile(suiteId);

@@ -37,7 +37,10 @@ public record MemoryEvalSuite(String id, String description, String corpusFinger
         for (var c : cases) {
             canonical.append(FIELD_SEP).append(c.id())
                     .append(FIELD_SEP).append(c.query());
-            for (var g : c.goldMemoryIds()) canonical.append(FIELD_SEP).append(g);
+            for (var group : c.goldGroups()) {
+                canonical.append(FIELD_SEP);
+                for (var g : group) canonical.append(g).append(',');
+            }
         }
         try {
             var digest = MessageDigest.getInstance("SHA-256")
