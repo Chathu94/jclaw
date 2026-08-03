@@ -1,6 +1,5 @@
 package memory;
 
-import play.Play;
 import play.db.DB;
 import services.EventLogger;
 
@@ -94,7 +93,6 @@ public final class PgVectorProvisioner {
     }
 
     private static int configuredDimensions() {
-        return Integer.parseInt(
-                Play.configuration.getProperty("memory.jpa.vector.dimensions", "1536"));
+        return MemoryVectorSettings.dimensions();
     }
 }

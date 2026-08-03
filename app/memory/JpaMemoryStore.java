@@ -92,8 +92,7 @@ public class JpaMemoryStore implements MemoryStore {
      * provisioning: their vector leg is the Lucene HNSW backend (JCLAW-555).
      */
     private static boolean resolveVectorEnabled(boolean isPostgres) {
-        boolean enabled = "true".equals(
-                Play.configuration.getProperty("memory.jpa.vector.enabled", "false"));
+        boolean enabled = MemoryVectorSettings.enabled();
         if (!enabled || !isPostgres) {
             return enabled;
         }
@@ -110,10 +109,9 @@ public class JpaMemoryStore implements MemoryStore {
     public JpaMemoryStore(boolean vectorEnabled, boolean isPostgres) {
         this.isPostgres = isPostgres;
         this.vectorEnabled = vectorEnabled;
-        this.vectorProvider = Play.configuration.getProperty("memory.jpa.vector.provider", "").trim();
-        this.vectorModel = Play.configuration.getProperty("memory.jpa.vector.model", "text-embedding-3-small");
-        this.vectorDimensions = Integer.parseInt(
-                Play.configuration.getProperty("memory.jpa.vector.dimensions", "1536"));
+        this.vectorProvider = MemoryVectorSettings.provider();
+        this.vectorModel = MemoryVectorSettings.model();
+        this.vectorDimensions = MemoryVectorSettings.dimensions();
 
         if (vectorEnabled) {
             EventLogger.info(EVENT_CATEGORY_MEMORY,

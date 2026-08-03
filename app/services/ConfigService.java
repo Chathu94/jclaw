@@ -4,6 +4,8 @@ import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
+import memory.MemoryStoreFactory;
+import memory.MemoryVectorSettings;
 import models.Agent;
 import models.Config;
 import org.hibernate.Session;
@@ -208,6 +210,14 @@ public class ConfigService {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
+        // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
+        // MemoryStoreFactory caches the instance, so without this the singleton serves the
+        // old provider/model for the life of the process and the settings change looks
+        // like it did nothing. reset() only clears the reference — the rebuild happens on
+        // next use, keeping pgvector re-provisioning off the settings-save path.
+        if (key.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
+            MemoryStoreFactory.reset();
+        }
         // JCLAW-172: shell.enabled / playwright.enabled are gone — the tools
         // register unconditionally now. Only the loadtest mock provider still
         // toggles a tool registration via this side effect.
@@ -275,6 +285,11 @@ public class ConfigService {
         delete(key);
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
+        }
+        // JCLAW-930: see setWithSideEffects — clearing a vector key changes the
+        // effective setting just as writing one does, so the store must rebuild too.
+        if (key.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
+            MemoryStoreFactory.reset();
         }
         // JCLAW-172: see setWithSideEffects for the rationale — only the
         // loadtest mock still triggers a tool re-registration on toggle.

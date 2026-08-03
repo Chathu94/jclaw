@@ -1,6 +1,7 @@
 package jobs;
 
 import memory.MemoryStoreFactory;
+import memory.MemoryVectorSettings;
 import models.Memory;
 import play.Play;
 import play.db.jpa.NoTransaction;
@@ -37,9 +38,9 @@ public class MemoryEmbeddingBackfillJob extends Job<Void> {
     @Override
     public void doJob() {
         if (Play.runningInTestMode()) return;
-        if (!"true".equals(Play.configuration.getProperty("memory.jpa.vector.enabled", "false"))) return;
+        if (!MemoryVectorSettings.enabled()) return;
 
-        var model = Play.configuration.getProperty("memory.jpa.vector.model", "text-embedding-3-small");
+        var model = MemoryVectorSettings.model();
         if (model.equals(ConfigService.get(MARKER, ""))) return;
 
         // Ids only, in a short read tx: embedStored re-reads each row itself, and the

@@ -1,5 +1,6 @@
 package jobs;
 
+import memory.MemoryVectorSettings;
 import memory.PgVectorProvisioner;
 import play.Play;
 import play.db.jpa.NoTransaction;
@@ -34,7 +35,7 @@ public class PgVectorSchemaInitJob extends Job<Void> {
         if (Play.runningInTestMode()) {
             return;
         }
-        if (!"true".equals(Play.configuration.getProperty("memory.jpa.vector.enabled", "false"))) {
+        if (!MemoryVectorSettings.enabled()) {
             return;
         }
         PgVectorProvisioner.ensureProvisioned();
