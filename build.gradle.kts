@@ -270,7 +270,7 @@ dependencies {
 
     // jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
-    implementation("org.jsoup:jsoup:1.22.2")
+    implementation("org.jsoup:jsoup:1.23.1")
 
     // Readability4J — Kotlin port of Mozilla Readability, drives WebFetchTool's
     // main-content extraction (JCLAW-775). Pins an old jsoup transitively; the
