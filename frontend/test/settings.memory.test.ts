@@ -89,7 +89,8 @@ describe('Settings page — Memory Embeddings', () => {
     // embedding models are never added to it — so on a real instance the picker
     // offered only chat models and the embedding model in use was unselectable.
     baseEndpoints([...vectorEnabledConfig(), { key: 'memory.jpa.vector.provider', value: 'lm-studio' }])
-    registerEndpoint('/api/providers/lm-studio/discover-models', () => ({
+    registerEndpoint('/api/providers/lm-studio/embedding-models', () => ({
+      provider: 'lm-studio',
       models: [{ id: EMBED_MODEL, name: EMBED_MODEL }, { id: CHAT_MODEL, name: CHAT_MODEL }],
       count: 2,
     }))

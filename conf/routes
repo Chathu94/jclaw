@@ -176,6 +176,7 @@ GET     /api/events                             ApiEventsController.stream
 GET     /api/providers                          ApiProvidersController.list
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
 GET     /api/providers/{name}/reachable         ApiProvidersController.reachable
+GET     /api/providers/{name}/embedding-models   ApiProvidersController.embeddingModels
 POST    /api/providers/{name}/embedding-probe   ApiProvidersController.embeddingProbe
 GET     /api/providers/{name}/video-models      ApiProvidersController.videoModels
 GET     /api/providers/{name}/models            ApiProvidersController.models

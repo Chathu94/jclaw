@@ -10,7 +10,7 @@
  * probing (JCLAW-931) — the probe is what accepts a model and where the read-only
  * dimension comes from.
  */
-import type { DiscoverModelsResponse, EmbeddingProbeResponse, MemoryReembedStatus, ProviderModelDef } from '~/types/api'
+import type { EmbeddingProbeResponse, MemoryReembedStatus, ProviderModelDef, ProviderModelsResponse } from '~/types/api'
 import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
 
 const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
@@ -33,7 +33,11 @@ const providerNames = computed(() => (providersData.value ?? []).map(p => p.name
  * actually live. {@code provider.<name>.models} is the operator's curated chat
  * catalog — embedding models are not added to it, so on a real instance it lists
  * only chat models and the embedding model in active use is not even selectable.
- * The stored list is the fallback for a provider whose discovery fails.
+ *
+ * Uses /embedding-models, not /discover-models: the latter drops embedding, TTS and STT
+ * models so a chat agent cannot be bound to one (JCLAW-183), which removes exactly what
+ * this picker needs — against a live ollama serving ten models it returned nine, and the
+ * one omitted was the embedding model. The stored list is the fallback.
  */
 const discovered = ref<ProviderModelDef[] | null>(null)
 const discovering = ref(false)
@@ -43,9 +47,8 @@ async function discoverModels() {
   discovering.value = true
   discovered.value = null
   try {
-    const r = await $fetch<DiscoverModelsResponse>(
-      `/api/providers/${encodeURIComponent(selectedProvider.value)}/discover-models`,
-      { method: 'POST', body: {} },
+    const r = await $fetch<ProviderModelsResponse>(
+      `/api/providers/${encodeURIComponent(selectedProvider.value)}/embedding-models`,
     )
     discovered.value = (r?.models ?? []) as unknown as ProviderModelDef[]
   }

@@ -231,6 +231,53 @@ public class ModelDiscoveryService {
     }
 
     @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
+    /**
+     * Every model id the provider's OpenAI-compatible {@code /models} advertises, with
+     * no capability filtering at all (JCLAW-932 follow-up).
+     *
+     * <p>{@link #discover} exists to populate <em>chat</em> pickers, so it deliberately
+     * drops embedding, TTS and STT models — JCLAW-183, so an operator cannot bind a chat
+     * agent to an embedding model. That is exactly backwards for the memory embedding
+     * picker, which needs the models the chat path throws away: on a live ollama serving
+     * ten models, discovery returned nine and the one omitted was the embedding model.
+     *
+     * <p>Unfiltered rather than embedding-filtered on purpose. There is no capability
+     * flag to filter on, so the caller shortlists by name and settles it by probing
+     * (JCLAW-931); filtering here would just relocate the guesswork and make a validly
+     * named model from an unfamiliar provider unreachable.
+     *
+     * @return the ids, or an empty list on any failure — the caller falls back to the
+     *         stored catalog rather than surfacing an error for a picker aid.
+     */
+    public static List<String> listAllModelIds(String baseUrl, String apiKey) {
+        if (baseUrl == null || baseUrl.isBlank()) return List.of();
+        try {
+            var url = baseUrl.endsWith("/") ? baseUrl + FIELD_MODELS : baseUrl + "/" + FIELD_MODELS;
+            var req = new Request.Builder()
+                    .url(url)
+                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
+                    .get()
+                    .build();
+            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
+            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            String responseBody;
+            try (var response = call.execute()) {
+                if (response.code() != 200) return List.of();
+                responseBody = response.body().string();
+            }
+            var out = new ArrayList<String>();
+            for (var m : parseModels(JsonParser.parseString(responseBody))) {
+                var id = (String) m.get(KEY_ID);
+                if (id != null && !id.isBlank()) out.add(id);
+            }
+            return out;
+        } catch (Exception e) {
+            Logger.warn("[discover] raw model listing failed: %s", e.getMessage());
+            return List.of();
+        }
+    }
+
     private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
         if (baseUrl == null || baseUrl.isBlank()) {
             return new DiscoveryResult.Error(400, "Provider base URL is required for discovery");

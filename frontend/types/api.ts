@@ -853,3 +853,20 @@ export interface MemoryReembedStatus {
   error: string | null
   upToDate: boolean
 }
+
+/** A provider model's id paired with its display name. */
+export interface ModelRef {
+  id: string
+  name: string
+}
+
+/**
+ * GET /api/providers/{name}/embedding-models — the provider's advertised catalog with
+ * no capability filtering, for the memory embedding picker. Distinct from
+ * discover-models, which drops embedding models so a chat agent cannot be bound to one.
+ */
+export interface ProviderModelsResponse {
+  provider: string
+  models: ModelRef[]
+  count: number
+}

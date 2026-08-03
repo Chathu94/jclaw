@@ -285,6 +285,30 @@ public class ApiProvidersController extends Controller {
     }
 
     /**
+     * GET /api/providers/{name}/embedding-models — the provider's advertised catalog with
+     * no capability filtering, for the memory embedding picker (JCLAW-932 follow-up).
+     *
+     * <p>Deliberately not {@code discover-models}: that path drops embedding, TTS and STT
+     * models (JCLAW-183) so a chat agent cannot be bound to one, which removes exactly
+     * the models this picker exists to choose from. Against a live ollama serving ten
+     * models it returned nine, omitting the embedding model.
+     *
+     * <p>Always 200, with an empty list when the provider is unreachable — the caller
+     * falls back to the stored catalog, and a picker aid should not surface as an error.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
+    @Operation(summary = "List a provider's models unfiltered, for the embedding picker")
+    public static void embeddingModels(String name) {
+        requireConfiguredProvider(name);
+        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
+        var refs = ModelDiscoveryService.listAllModelIds(Strings.trimTrailingSlash(baseUrl), apiKey).stream()
+                .map(id -> new ModelRef(id, deriveName(id)))
+                .toList();
+        renderJSON(gson.toJson(new ProviderModelsResponse(name, refs, refs.size())));
+    }
+
+    /**
      * POST /api/providers/{name}/embedding-probe — ask the provider to embed a throwaway
      * string with {@code model}, and report whether it worked and at what dimension.
      *
