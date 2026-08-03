@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,9 +44,10 @@ import java.util.Set;
  *       {@link CircuitBreaker}; when it trips, capture is suspended <em>and
  *       logged</em> (the turn is already durable as Message rows) rather than
  *       silently dropped.</li>
- *   <li><b>Consolidation, not append.</b> Each candidate is deduplicated against
- *       the agent's recent memories by a deterministic token-Jaccard test — a
- *       NOOP when a near-duplicate already exists. Beyond the NOOP, a batched
+ *   <li><b>Consolidation, not append.</b> Each candidate is deduplicated against a
+ *       pool of the agent's recent memories plus a retrieval neighbourhood, by the
+ *       deterministic {@link MemorySimilarity} test — a NOOP when a near-duplicate
+ *       already exists anywhere in the store. Beyond the NOOP, a batched
  *       {@link Consolidator} judge (JCLAW-525) marks same-subject older
  *       memories superseded — never hard-deleted — when a new write updates or
  *       contradicts them. The judge only pairs subjects; recency is resolved
@@ -328,47 +328,82 @@ public final class MemoryAutoCapture {
     }
 
     /**
-     * Plan phase (in Tx): scan the agent's recent <em>active</em> memories once,
-     * drop candidates with a near-duplicate (deterministic token-Jaccard NOOP —
-     * portable across H2/Postgres, no dialect-specific search backend), cap at
+     * Plan phase (in Tx): build the comparison pool, drop candidates that already
+     * have a near-duplicate stored ({@link MemorySimilarity} NOOP), cap at
      * {@code maxPerTurn}, and collect the consolidation shortlist for the judge.
-     * Superseded rows are excluded from the scan ({@code findByAgent} filters
-     * them), so a superseded old fact can never NOOP a re-emerging new one.
+     * Superseded rows are excluded from both legs of the pool, so a superseded old
+     * fact can never NOOP a re-emerging new one.
+     *
+     * <p>The pool is the agent's recency slice <em>plus</em> a per-candidate
+     * retrieval neighbourhood (JCLAW-920). The slice alone bounded dedup to the
+     * newest {@code dedupScan} rows, so a fact restated after the window had moved
+     * on was compared against nothing and stored again — two byte-identical pairs
+     * survived that way in a 1248-row store, 1312 and 5214 ids apart. Retrieval
+     * reaches the whole index, making the pool relevance-selected rather than
+     * recency-selected at a cost that does not grow with the store.
+     *
+     * <p>Retrieval here is the keyword leg only ({@link Memory#searchByTextScored}
+     * — Lucene FTS or the DB LIKE fallback). Deliberate: {@code MemoryStore.search}
+     * would embed the query, and this method runs inside the plan transaction where
+     * a blocking HTTP call must never happen.
      */
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
                                           int maxPerTurn, double dupThreshold, int dedupScan) {
         double shortlistMin = ConfigService.getDouble("memory.consolidation.shortlist.minJaccard", 0.2);
         int shortlistCap = ConfigService.getInt("memory.consolidation.shortlist.maxPerCandidate", 5);
+        // 0.82, not 0.85: swept against a 1248-row store, 0.82 catches 10 restatement
+        // pairs with no false positive, 0.85 catches 8. Below 0.80 unrelated facts
+        // sharing a sentence template start matching (two different hosted apps, two
+        // different providers), so this is the floor, not a tuning knob to lower.
+        double containment = ConfigService.getDouble("memory.autocapture.dedup.containmentThreshold", 0.82);
+        double minLengthRatio = ConfigService.getDouble("memory.autocapture.dedup.minLengthRatio", 0.5);
+        int retrievalLimit = ConfigService.getInt("memory.autocapture.dedup.retrievalLimit", 25);
 
-        var recent = Memory.findByAgent(agentKey, dedupScan);
-        var recentTokens = new ArrayList<Set<String>>();
-        for (var m : recent) {
-            recentTokens.add(tokenize(m.text));
+        var pool = new LinkedHashMap<Long, Memory>();
+        for (var m : Memory.findByAgent(agentKey, dedupScan)) {
+            pool.put(m.id, m);
         }
+        for (var c : candidates) {
+            for (var hit : Memory.searchByTextScored(agentKey, c.text(), retrievalLimit)) {
+                pool.putIfAbsent(hit.memory().id, hit.memory());
+            }
+        }
+        var poolRows = List.copyOf(pool.values());
+        var poolTokens = poolRows.stream().map(m -> MemorySimilarity.Tokens.of(m.text)).toList();
 
         var survivors = new ArrayList<Candidate>();
-        var survivorTokens = new ArrayList<Set<String>>();
+        var survivorTokens = new ArrayList<MemorySimilarity.Tokens>();
         var shortlist = new ArrayList<Existing>();
         var shortlisted = new HashSet<Long>();
         for (var c : candidates) {
             if (survivors.size() >= maxPerTurn) break;
-            var toks = tokenize(c.text());
-            if (isDuplicate(toks, recentTokens, dupThreshold)
-                    || isDuplicate(toks, survivorTokens, dupThreshold)) continue;
+            var toks = MemorySimilarity.Tokens.of(c.text());
+            if (hasDuplicate(toks, poolTokens, dupThreshold, containment, minLengthRatio)
+                    || hasDuplicate(toks, survivorTokens, dupThreshold, containment, minLengthRatio)) continue;
             survivors.add(c);
             survivorTokens.add(toks);
             // Same-subject shortlist: moderate overlap below the dup threshold
             // (at/above it the candidate would have been NOOPed as a duplicate).
             int added = 0;
-            for (int i = 0; i < recent.size() && added < shortlistCap; i++) {
-                double j = jaccard(toks, recentTokens.get(i));
-                if (j >= shortlistMin && j < dupThreshold && shortlisted.add(recent.get(i).id)) {
-                    shortlist.add(new Existing(recent.get(i).id, recent.get(i).text));
+            for (int i = 0; i < poolRows.size() && added < shortlistCap; i++) {
+                double j = jaccard(toks.raw(), poolTokens.get(i).raw());
+                if (j >= shortlistMin && j < dupThreshold && shortlisted.add(poolRows.get(i).id)) {
+                    shortlist.add(new Existing(poolRows.get(i).id, poolRows.get(i).text));
                     added++;
                 }
             }
         }
         return new ConsolidationPlan(survivors, shortlist);
+    }
+
+    private static boolean hasDuplicate(MemorySimilarity.Tokens toks,
+            List<MemorySimilarity.Tokens> against, double jaccardThreshold,
+            double containmentThreshold, double minLengthRatio) {
+        for (var other : against) {
+            if (MemorySimilarity.isDuplicate(toks, other, jaccardThreshold,
+                    containmentThreshold, minLengthRatio)) return true;
+        }
+        return false;
     }
 
     /**
@@ -582,21 +617,11 @@ public final class MemoryAutoCapture {
     }
 
     static Set<String> tokenize(String text) {
-        var set = new HashSet<String>();
-        if (text == null) return set;
-        for (var tok : text.toLowerCase(Locale.ROOT).split("[^a-z0-9]+")) {
-            if (!tok.isBlank()) set.add(tok);
-        }
-        return set;
+        return MemorySimilarity.tokenize(text);
     }
 
     static double jaccard(Set<String> a, Set<String> b) {
-        if (a.isEmpty() && b.isEmpty()) return 1.0;
-        if (a.isEmpty() || b.isEmpty()) return 0.0;
-        int inter = 0;
-        for (var x : a) if (b.contains(x)) inter++;
-        int union = a.size() + b.size() - inter;
-        return union == 0 ? 0.0 : (double) inter / union;
+        return MemorySimilarity.jaccard(a, b);
     }
 
     /** Package-visible: {@link MemoryReranker} parses LLM JSON the same way. */
