@@ -693,6 +693,13 @@ function exportConversation() {
         </Transition>
 
         <!--
+          JCLAW-934: re-embed progress. Started from Settings, so the chat has to
+          discover a run already in flight — the component polls rather than taking a
+          prop. Renders nothing when no run is active.
+        -->
+        <ChatReembedNotice />
+
+        <!--
           JCLAW-274: subagent-transcript banner. Surfaces above the message
           list when {@code subagentTranscript} is set — i.e. the user landed
           on this conversation via a "View transcript" link from /subagents
