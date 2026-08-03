@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.SystemPromptAssembler;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
@@ -8,8 +9,10 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import memory.JpaMemoryStore;
 import memory.MemoryCategory;
 import memory.MemoryReembedService;
+import memory.MemoryVectorSettings;
 import models.Agent;
 import models.Memory;
 import play.mvc.Controller;
@@ -20,12 +23,14 @@ import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import utils.ApiResponses;
 import utils.JpqlFilter;
+import utils.JsonArgs;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static utils.GsonHolder.GSON;
@@ -235,6 +240,72 @@ public class ApiMemoryController extends Controller {
         }
         memory.save();
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
+    }
+
+    /** One scored candidate as recall saw it (JCLAW-937). */
+    public record RecallCandidateView(long id, String text, String category, double importance,
+                                      double relevance, double decay, double score, boolean selected) {}
+
+    /** A recall, the settings that shaped it, and every candidate it considered. */
+    public record RecallView(String agentId, String query, int limit,
+                             double relevanceWeight, double importanceWeight, double mmrLambda,
+                             String vectorBackend, List<Long> selectedIds,
+                             List<RecallCandidateView> candidates) {}
+
+    /**
+     * POST /api/memories/recall — what recall would inject for a query, and why (JCLAW-937).
+     *
+     * <p>Recall is assembled per turn straight into the system prompt, and nothing else
+     * exposes it: {@code prompt-breakdown} passes a null user message, so the block never
+     * appears there. Every recall change to date has been verified against fixtures or an
+     * offline sweep rather than the live pipeline.
+     *
+     * <p>Runs {@link SystemPromptAssembler#recall}, the same method the prompt uses, so
+     * this cannot report on a pipeline that is no longer the real one. It returns the
+     * candidates the limit cut as well as the selected ones, which is what lets a
+     * memory-quality eval (JCLAW-529) compute recall at several k from a single call.
+     *
+     * <p>Read-only in the strict sense: no {@code lastAccessedAt} stamp, so inspecting
+     * recall cannot move the decay anchor it is inspecting or let a repeated eval measure
+     * its own earlier passes.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RecallView.class)))
+    @Operation(summary = "Inspect what memory recall returns for a query")
+    public static void recall() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw new AssertionError("unreachable: badRequest() throws");
+        }
+        var query = JsonArgs.optString(body, "query", "");
+        if (query.isBlank()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "query is required");
+        }
+        var agentId = JsonArgs.optString(body, "agentId", "");
+        if (agentId.isBlank()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
+        }
+        if (Agent.findById(Long.valueOf(agentId)) == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent with id " + agentId);
+        }
+
+        var result = SystemPromptAssembler.recall(agentId, query, Set.of());
+        var candidates = result.candidates().stream()
+                .map(c -> new RecallCandidateView(Long.parseLong(c.entry().id()), c.entry().text(),
+                        c.entry().category(), c.entry().importance(), c.entry().relevance(),
+                        c.decay(), c.score(), c.selected()))
+                .toList();
+        renderJSON(gson.toJson(new RecallView(agentId, query, result.limit(),
+                result.relevanceWeight(), result.importanceWeight(), result.mmrLambda(),
+                vectorBackendLabel(),
+                result.selected().stream().map(e -> Long.parseLong(e.id())).toList(),
+                candidates)));
+    }
+
+    /** Which vector leg served this recall, so a result is attributable to a backend. */
+    private static String vectorBackendLabel() {
+        if (!MemoryVectorSettings.enabled()) return "keyword-only";
+        return JpaMemoryStore.isPostgresDialect() ? "pgvector" : "lucene-hnsw";
     }
 
     /**

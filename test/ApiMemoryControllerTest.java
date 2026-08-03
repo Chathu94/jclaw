@@ -69,6 +69,77 @@ class ApiMemoryControllerTest extends FunctionalTest {
         });
     }
 
+    private long agentIdFor(String name) {
+        return fetchInFreshTx(() -> {
+            models.Agent a = models.Agent.find("name = ?1", name).first();
+            return a.id;
+        });
+    }
+
+    private String recall(long agentId, String query) {
+        return getContent(POST("/api/memories/recall", "application/json",
+                "{\"agentId\":\"%d\",\"query\":\"%s\"}".formatted(agentId, query)));
+    }
+
+    // ─── Recall introspection (JCLAW-937) ────────────────────────────────────
+
+    @Test
+    void recallRequiresAuth() {
+        assertEquals(401, POST("/api/memories/recall", "application/json",
+                "{\"agentId\":\"1\",\"query\":\"anything\"}").status.intValue());
+    }
+
+    @Test
+    void recallRejectsAMissingQueryOrAgent() {
+        login();
+        assertEquals(400, POST("/api/memories/recall", "application/json",
+                "{\"agentId\":\"1\"}").status.intValue());
+        assertEquals(400, POST("/api/memories/recall", "application/json",
+                "{\"query\":\"x\"}").status.intValue());
+    }
+
+    @Test
+    void recallReturns404ForAnUnknownAgent() {
+        login();
+        assertEquals(404, POST("/api/memories/recall", "application/json",
+                "{\"agentId\":\"999999\",\"query\":\"x\"}").status.intValue());
+    }
+
+    @Test
+    void recallReportsCandidatesTheirScoresAndWhatWasSelected() {
+        seedMemory("recall-agent", "The user prefers dark mode in every editor", "preference", 0.7);
+        var agent = agentIdFor("recall-agent");
+        login();
+
+        var body = recall(agent, "dark mode");
+
+        assertTrue(body.contains("dark mode in every editor"), body);
+        assertTrue(body.contains("\"selected\":true"), "the match must be marked selected: " + body);
+        // The settings that shaped the result travel with it, so a run is attributable.
+        assertTrue(body.contains("\"mmrLambda\""), body);
+        assertTrue(body.contains("\"vectorBackend\""), body);
+        assertTrue(body.contains("\"score\""), body);
+    }
+
+    @Test
+    void recallDoesNotStampLastAccessedAt() {
+        // The point of the endpoint is measurement. Stamping the decay anchor would let
+        // an eval move the very signal it is measuring, and make a repeated run score
+        // differently from the first.
+        var id = seedMemory("recall-notouch", "The user prefers dark mode in every editor", "preference", 0.7);
+        var agent = agentIdFor("recall-notouch");
+        login();
+        assertNull(fetchInFreshTx(() ->
+                ((models.Memory) models.Memory.findById(Long.parseLong(id))).lastAccessedAt),
+                "precondition: never recalled yet");
+
+        recall(agent, "dark mode");
+
+        assertNull(fetchInFreshTx(() ->
+                ((models.Memory) models.Memory.findById(Long.parseLong(id))).lastAccessedAt),
+                "inspecting recall must not count as an access");
+    }
+
     // ─── Auth gate ───────────────────────────────────────────────────────────
 
     @Test
