@@ -1,3 +1,4 @@
+import memory.JpaMemoryStore;
 import memory.ReciprocalRankFusion;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -6,8 +7,9 @@ import java.util.List;
 
 /**
  * JCLAW-555: pure unit coverage for the shared RRF helper. The fusion contract
- * (k = 60, rank-based, top-normalized) is what both vector backends rely on —
- * Lucene FTS + KNN here, ts_rank + pgvector on Postgres (JCLAW-527).
+ * (rank-based, top-normalized) is what both vector backends rely on — Lucene FTS + KNN
+ * here, ts_rank + pgvector on Postgres (JCLAW-527). Memory recall overrides k; JCLAW-938
+ * and {@code JpaMemoryStore.DEFAULT_RECALL_RRF_K} say why.
  */
 class ReciprocalRankFusionTest extends UnitTest {
 
@@ -51,5 +53,28 @@ class ReciprocalRankFusionTest extends UnitTest {
         var fused = ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, List.of(4L), List.of(2L));
         assertEquals(2L, fused.get(0).id(), "ties order by ascending id for stable output");
         assertEquals(4L, fused.get(1).id());
+    }
+
+    @Test
+    void kDecidesHowMuchRelevanceSpreadReachesTheBlend() {
+        // JCLAW-938. Memory recall feeds these normalized scores into
+        // (0.7 x relevance) + (0.3 x importance) as a magnitude. At the textbook k=60 the
+        // top two hits differ by under 2%, so relevance arrives flat and importance —
+        // which spans 0.2 to 0.9 on a real corpus — decides the order instead. The
+        // recall-tuned k has to leave a gap the blend can actually see.
+        var oneLeg = List.of(10L, 20L, 30L);
+        double gapAt60 = gapBetweenTopTwo(ReciprocalRankFusion.DEFAULT_K, oneLeg);
+        double gapAt5 = gapBetweenTopTwo(JpaMemoryStore.DEFAULT_RECALL_RRF_K, oneLeg);
+
+        assertTrue(gapAt60 < 0.02,
+                "k=60 compresses relevance to near-constant, which is the defect: " + gapAt60);
+        assertTrue(gapAt5 > 5 * gapAt60,
+                "the recall k must spread relevance materially more than k=60 does: "
+                        + gapAt5 + " vs " + gapAt60);
+    }
+
+    private static double gapBetweenTopTwo(int k, List<Long> ids) {
+        var fused = ReciprocalRankFusion.fuse(k, ids);
+        return fused.get(0).score() - fused.get(1).score();
     }
 }

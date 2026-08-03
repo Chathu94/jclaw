@@ -19,7 +19,13 @@ import java.util.List;
  */
 public final class ReciprocalRankFusion {
 
-    /** The conventional RRF constant; dampens the impact of top ranks. */
+    /**
+     * The conventional RRF constant; dampens the impact of top ranks.
+     *
+     * <p>Correct when a caller consumes the output as a <em>ranking</em>. Memory recall
+     * consumes the scores as magnitudes and deliberately overrides this — see
+     * {@link JpaMemoryStore#DEFAULT_RECALL_RRF_K} before restoring 60 there.
+     */
     public static final int DEFAULT_K = 60;
 
     /** One fused hit: the id and its top-normalized fused score in (0, 1]. */

@@ -10,6 +10,7 @@ import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.DB;
 import play.db.jpa.JPA;
+import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
 import services.search.DirectLuceneMessageSearchRepository;
@@ -448,7 +449,7 @@ public class JpaMemoryStore implements MemoryStore {
      * JCLAW-555: hybrid recall on the Lucene HNSW backend (H2 / any non-Postgres
      * dialect). Two legs — the existing scored FTS search and a KNN
      * cosine-similarity query over the MEMORY scope's vector field — fused by
-     * Reciprocal Rank Fusion (k = 60) through the same
+     * Reciprocal Rank Fusion (see {@link #DEFAULT_RECALL_RRF_K}) through the same
      * {@link #fuseHydrateRerank} path the Postgres backend runs (JCLAW-527).
      * Degrades to FTS-only when the query embedding is unavailable (no provider,
      * embeddings endpoint down) or the KNN leg fails.
@@ -496,10 +497,30 @@ public class JpaMemoryStore implements MemoryStore {
      * replaces the fused scores, otherwise downstream importance blending
      * (JCLAW-40) would re-sort on scores the rerank just overruled.
      */
+    public static final String KEY_RRF_K = "memory.recall.rrfK";
+
+    /**
+     * JCLAW-938: 5, not the textbook 60, because this pipeline consumes RRF's scores as
+     * magnitudes rather than as ranks.
+     *
+     * <p>{@link ReciprocalRankFusion#fuse} normalises against the top hit and that value
+     * becomes {@link MemoryEntry#relevance()}, which the recall blend weighs against
+     * importance. At k=60 consecutive fused scores differ by under 2%, so relevance
+     * arrives as a near-constant and importance — spanning 0.2 to 0.9 on a real corpus —
+     * decides the order instead. Low k restores the spread the blend was written to weigh.
+     *
+     * <p>Measured on a live 603-memory corpus over a 150-case suite: R@1 0.393 at k=60
+     * against 0.687 at k=5, MRR 0.599 against 0.797, with R@10 barely moving (0.913 to
+     * 0.973) — an ordering defect, not a retrieval one. Configurable because the optimum
+     * is a property of a corpus, and only the Lucene backend was measured.
+     */
+    public static final int DEFAULT_RECALL_RRF_K = 5;
+
     private List<MemoryEntry> fuseHydrateRerank(String agentId, String query,
             List<Long> keywordIds, List<Long> vectorIds,
             HashMap<Long, Memory> preloaded, int limit) {
-        var fused = ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, keywordIds, vectorIds);
+        var fused = ReciprocalRankFusion.fuse(
+                ConfigService.getInt(KEY_RRF_K, DEFAULT_RECALL_RRF_K), keywordIds, vectorIds);
         hydrateMissing(agentId, fused, preloaded);
 
         // The hydrated shortlist in fused order (stale index ids drop out here).
