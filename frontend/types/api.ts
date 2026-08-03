@@ -827,3 +827,19 @@ export interface McpTestResult {
   message: string
   toolNames: string[]
 }
+
+/**
+ * Result of POST /api/providers/{name}/embedding-probe (JCLAW-931).
+ *
+ * `ok` is false both when the model does not serve embeddings and when the
+ * provider served a *different* model than the one asked for — LM Studio ignores
+ * the requested model on /v1/embeddings, so a 200 with a valid vector does not on
+ * its own mean the selection would be honoured. `error` carries the reason.
+ */
+export interface EmbeddingProbeResponse {
+  provider: string
+  model: string
+  ok: boolean
+  dimensions: number
+  error: string | null
+}

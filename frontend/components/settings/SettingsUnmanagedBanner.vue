@@ -29,6 +29,10 @@ const MANAGED_PREFIXES = [
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
   'chat.', // Chat settings — Settings
+  'memory.', // JCLAW-930/932: vector embedding provider, model and dimensions — Settings
+  // (Memory Embeddings). Also covers memory.jpa.vector.backfilledForModel, written by
+  // the backfill job rather than by an operator, and the recall/decay/autocapture
+  // tuning keys, which are code defaults with no UI surface.
   'verification.', // JCLAW-836: tool-result check toggles — seeded by DefaultConfigJob, no UI surface
   'shell.', // Shell execution defaults — Settings (allowlist + timeout)
   'playwright.', // JCLAW-172: namespace retired but kept in the prefix list

@@ -22,6 +22,7 @@ import {
   ChatBubbleOvalLeftEllipsisIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
+  CircleStackIcon,
   CommandLineIcon,
   CpuChipIcon,
   DocumentMagnifyingGlassIcon,
@@ -45,6 +46,7 @@ import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
 import SettingsLoggingPanel from './SettingsLoggingPanel.vue'
 import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
+import SettingsMemoryPanel from './SettingsMemoryPanel.vue'
 import SettingsOcrPanel from './SettingsOcrPanel.vue'
 import SettingsPasswordPanel from './SettingsPasswordPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
@@ -137,6 +139,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
+      { id: 'memory', title: 'Memory Embeddings', icon: CircleStackIcon, component: SettingsMemoryPanel },
     ],
   },
   {

@@ -1,0 +1,288 @@
+<script setup lang="ts">
+/**
+ * Memory embedding settings (JCLAW-932).
+ *
+ * Vector memory needs a provider and a model, and the model's dimension has to
+ * match what the model actually returns. There is nothing to look these up from:
+ * ProviderModelDef carries supportsVision/Audio/Video but no embedding flag and no
+ * dimension, and no provider's /v1/models marks which models embed. So the panel
+ * shortlists by name to keep the dropdown usable and settles the question by
+ * probing (JCLAW-931) — the probe is what accepts a model and where the read-only
+ * dimension comes from.
+ */
+import type { EmbeddingProbeResponse } from '~/types/api'
+import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingModels'
+
+const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
+
+const enabled = computed(() => configValue(MemoryVectorKeys.enabled, 'false') === 'true')
+const savedProvider = computed(() => configValue(MemoryVectorKeys.provider))
+const savedModel = computed(() => configValue(MemoryVectorKeys.model))
+const savedDimensions = computed(() => configValue(MemoryVectorKeys.dimensions))
+
+const selectedProvider = ref(savedProvider.value)
+const selectedModel = ref(savedModel.value)
+const probe = ref<EmbeddingProbeResponse | null>(null)
+const probing = ref(false)
+const showAllModels = ref(false)
+
+const providerNames = computed(() => (providersData.value ?? []).map(p => p.name))
+
+/**
+ * The shortlist narrows; it never decides. A provider we have not seen may name a
+ * valid embedding model in a way the heuristic misses, so "show all" stays
+ * available and the probe is the only thing that accepts a model.
+ */
+const models = computed(() => {
+  const all = getProviderModels(selectedProvider.value)
+  if (showAllModels.value) return all
+  const shortlisted = all.filter(m => looksLikeEmbeddingModel(m.id, m.name))
+  return shortlisted.length > 0 ? shortlisted : all
+})
+
+const hiddenModelCount = computed(() =>
+  showAllModels.value ? 0 : getProviderModels(selectedProvider.value).length - models.value.length,
+)
+
+/** A change is only committable once the probe has confirmed the exact model. */
+const canSave = computed(() =>
+  !!selectedProvider.value && !!selectedModel.value && probe.value?.ok === true && !saving.value,
+)
+
+const isDirty = computed(() =>
+  selectedProvider.value !== savedProvider.value || selectedModel.value !== savedModel.value,
+)
+
+watch(selectedProvider, () => {
+  selectedModel.value = ''
+  probe.value = null
+})
+watch(selectedModel, () => {
+  probe.value = null
+})
+
+async function runProbe() {
+  if (!selectedProvider.value || !selectedModel.value) return
+  probing.value = true
+  probe.value = null
+  try {
+    probe.value = await $fetch<EmbeddingProbeResponse>(
+      `/api/providers/${encodeURIComponent(selectedProvider.value)}/embedding-probe`,
+      { method: 'POST', body: { model: selectedModel.value } },
+    )
+  }
+  catch (e) {
+    probe.value = {
+      provider: selectedProvider.value,
+      model: selectedModel.value,
+      ok: false,
+      dimensions: 0,
+      error: e instanceof Error ? e.message : 'Probe failed',
+    }
+  }
+  finally {
+    probing.value = false
+  }
+}
+
+async function toggleEnabled() {
+  await saveField(MemoryVectorKeys.enabled, enabled.value ? 'false' : 'true')
+}
+
+/**
+ * Dimensions are written from the probe, never from typing — a hand-entered value
+ * that disagrees with the model is undetectable at runtime on the Lucene backend,
+ * where the real dimension comes from the returned array.
+ */
+async function saveSelection() {
+  if (!canSave.value || !probe.value) return
+  await saveField(MemoryVectorKeys.provider, selectedProvider.value)
+  await saveField(MemoryVectorKeys.model, selectedModel.value)
+  await saveField(MemoryVectorKeys.dimensions, String(probe.value.dimensions))
+}
+</script>
+
+<template>
+  <div class="mb-6 space-y-4">
+    <h2 class="text-sm font-medium text-fg-muted">
+      Memory Embeddings
+    </h2>
+    <p class="text-xs text-fg-muted">
+      Vector memory lets recall find a memory by meaning rather than wording, and lets capture
+      recognise a fact you have already stored even when you phrase it differently. With it off,
+      memory still works — recall and duplicate detection fall back to keyword matching.
+    </p>
+
+    <!-- Enable toggle -->
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-2.5 flex items-center justify-between">
+        <div class="min-w-0">
+          <span class="text-sm font-medium text-fg-strong">Vector memory</span>
+          <span
+            v-if="enabled"
+            class="ml-2 text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+          >on</span>
+          <span
+            v-else
+            class="ml-2 text-[10px] text-fg-muted border border-input px-1"
+          >off</span>
+        </div>
+        <button
+          type="button"
+          class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+          :disabled="saving"
+          data-testid="memory-vector-toggle"
+          @click="toggleEnabled"
+        >
+          {{ enabled ? 'Disable' : 'Enable' }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Provider + model selection -->
+    <div
+      v-if="enabled"
+      class="bg-surface-elevated border border-border"
+    >
+      <div class="px-4 py-3 space-y-3">
+        <div>
+          <label
+            for="memory-embedding-provider"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Provider</span>
+            <select
+              id="memory-embedding-provider"
+              v-model="selectedProvider"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-embedding-provider"
+            >
+              <option value="">
+                Select a provider…
+              </option>
+              <option
+                v-for="p in providerNames"
+                :key="p"
+                :value="p"
+              >
+                {{ p }}
+              </option>
+            </select>
+          </label>
+        </div>
+
+        <div v-if="selectedProvider">
+          <label
+            for="memory-embedding-model"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Model</span>
+            <select
+              id="memory-embedding-model"
+              v-model="selectedModel"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-embedding-model"
+            >
+              <option value="">
+                Select a model…
+              </option>
+              <option
+                v-for="m in models"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.name || m.id }}
+              </option>
+            </select>
+          </label>
+          <button
+            v-if="hiddenModelCount > 0"
+            type="button"
+            class="mt-1 text-[11px] text-fg-muted underline hover:text-fg-strong"
+            data-testid="memory-embedding-show-all"
+            @click="showAllModels = true"
+          >
+            Show all {{ hiddenModelCount }} other model(s)
+          </button>
+        </div>
+
+        <!-- Probe -->
+        <div
+          v-if="selectedProvider && selectedModel"
+          class="flex items-center gap-2"
+        >
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+            :disabled="probing"
+            data-testid="memory-embedding-probe"
+            @click="runProbe"
+          >
+            {{ probing ? 'Checking…' : 'Check model' }}
+          </button>
+          <span
+            v-if="probe?.ok"
+            class="text-xs text-green-700 dark:text-green-400"
+            data-testid="memory-embedding-probe-ok"
+          >Serves embeddings at {{ probe.dimensions }} dimensions</span>
+          <span
+            v-else-if="probe && !probe.ok"
+            class="text-xs text-red-700 dark:text-red-400"
+            data-testid="memory-embedding-probe-error"
+          >{{ probe.error }}</span>
+        </div>
+
+        <!-- Dimensions: probe-derived, never typed -->
+        <div>
+          <label
+            for="memory-embedding-dimensions"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Dimensions</span>
+            <input
+              id="memory-embedding-dimensions"
+              :value="probe?.ok ? probe.dimensions : savedDimensions"
+              type="text"
+              readonly
+              class="w-full px-2 py-1.5 text-sm bg-muted/30 border border-input text-fg-muted"
+              data-testid="memory-embedding-dimensions"
+            >
+          </label>
+          <p class="mt-1 text-[11px] text-fg-muted">
+            Read from the model itself when you check it — a typed value that disagrees with the
+            model cannot be detected at runtime.
+          </p>
+        </div>
+
+        <!-- Re-embed warning -->
+        <div
+          v-if="isDirty && savedModel"
+          class="border border-amber-400/40 bg-amber-50/50 dark:bg-amber-900/10 px-3 py-2"
+          data-testid="memory-embedding-reembed-warning"
+        >
+          <p class="text-xs text-amber-800 dark:text-amber-300">
+            Changing the embedding model makes every existing memory's vector unusable — they were
+            produced by a different model and cannot be compared with the new one. Semantic recall
+            and duplicate detection stay degraded until the memories are re-embedded.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+            :disabled="!canSave || !isDirty"
+            data-testid="memory-embedding-save"
+            @click="saveSelection"
+          >
+            Save
+          </button>
+          <span
+            v-if="isDirty && !probe?.ok"
+            class="text-[11px] text-fg-muted"
+          >Check the model before saving.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
