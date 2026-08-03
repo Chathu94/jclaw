@@ -12,10 +12,15 @@ premise that does not hold in this codebase, targets a defect class that belongs
 tests rather than the request path, and costs materially more than "reuse the
 validator we already have."
 
-One adjacent gap *is* real and is a different piece of work: JClaw discards the MCP
-protocol's `outputSchema` and `structuredContent` entirely. That is a plumbing gap
-with an externally-defined contract, and it is the one place a runtime check has an
-argument. Scope it separately (§7).
+This document originally carved out one adjacent gap as worth building — JClaw discards
+the MCP protocol's `outputSchema` and `structuredContent` entirely — and it was raised as
+JCLAW-918. Validating that story before implementing it disproved both of its benefits:
+there is no generic renderer for the payload to reach, and the parse check it would feed
+is tautological on that path. **JCLAW-918 is withdrawn.** The gap is real, the fix at that
+layer is worthless, and the work that would unlock it is a different story nobody has
+justified yet. §7 records the reasoning.
+
+Net outcome of this spike: **build nothing.**
 
 ## 1. What the ticket assumed, and where it was wrong
 
@@ -185,25 +190,57 @@ the key is absent.
 The converged position: carry structure when the protocol offers it, do not validate
 it, do not treat it as an agent-quality lever.
 
-## 7. The one gap worth a story: MCP `outputSchema` / `structuredContent`
+## 7. The MCP structured-output gap — raised as JCLAW-918, then withdrawn
 
 JClaw drops both halves of the MCP structured-output feature (spec revision 2025-06-18):
 
 - `McpToolDef` parses `inputSchema` only (`McpToolDef.java:27`); a server-declared
   `outputSchema` is discarded at parse time.
 - `CallToolResult.fromResultObject` flattens the `content` array to a string and never
-  reads `structuredContent` (`CallToolResult.java:27-38`) — so an MCP tool's structured
-  result is lost even for UI rendering, which is the one thing `structuredJson` is for.
+  reads `structuredContent` (`CallToolResult.java:27-38`).
 
-This is a different proposition from §2's. The schema is *given to us* by the server, so
-there is no per-action declaration cost. The tool is not ours, so a test cannot cover it
-and a runtime check has an argument. And both reference harnesses already do the
-carrying half.
+That description is accurate. The two benefits this section originally claimed for
+closing the gap are **not**, and validating JCLAW-918 before implementing it disproved
+both. Recorded here rather than quietly deleted, because the reasoning error is the
+reusable part.
 
-**Scope it as plumbing, not validation:** parse `outputSchema` onto `McpToolDef`, carry
-`structuredContent` through `CallToolResult` into `ToolResult.structuredJson`. Decide
-whether to validate afterwards, gated on JCLAW-836's `tool_verify_failed` metric showing
-MCP results actually misbehave. Sized around 3 points.
+**Claimed: an MCP tool's structured result is lost "even for UI rendering, which is the
+one thing `structuredJson` is for." False — there is no generic renderer to lose it to.**
+`ChatToolCalls.vue:66` is the sole consumer, and it reads one key:
+
+```ts
+return tc.resultStructured?.results ?? []          // ChatToolCalls.vue:66
+ToolCallResultChipSchema = { title, url, snippet, faviconUrl }   // schemas.ts:44
+```
+
+`ToolCallResultStructuredSchema` is `.loose()`, so an arbitrary payload passes validation
+and then renders nothing, because it carries no `results` array of link chips. The proof
+is already in the codebase: `McpServerTool.java:211` emits a `structuredJson` payload
+today (`{server, actions[…]}`) and the UI has always ignored it. The renderer is the
+gate; plumbing more payloads to it changes nothing.
+
+**Claimed: "the `structuredJson` verification check gains real coverage." False, and it
+would corrupt the metric.** `McpClient.java:135` hands `CallToolResult` an
+already-parsed `JsonObject`, so a forwarded `structuredContent` re-serialised by Gson can
+never fail `ToolResultVerifier.parses()`. The `MALFORMED_JSON` check would be tautological
+on that path — every MCP result an automatic pass, inflating `tool_verify_count` with
+guaranteed successes and making JCLAW-836's failure rate read lower than reality. Coverage
+that cannot fire is not coverage.
+
+**And `outputSchema` on its own is dead data**, since §2 already ruled out both possible
+readers: do not send it to the model (it describes the result, not the call) and do not
+validate with it (unjustified until the metric says otherwise).
+
+So the gap is real and the fix is worthless *at this layer*. The work that would unlock
+it is a **generic structured-result renderer** — a way for the chat UI to display a
+payload whose shape it does not know in advance. That is a larger, frontend-shaped story,
+and it stays speculative until someone produces a real MCP payload worth rendering. Not
+raised.
+
+**Unverified:** whether any MCP server configured in this instance emits
+`structuredContent` or declares an `outputSchema`. The running app holds the H2 lock and
+stopping it to look was not warranted. That inventory would inform the renderer question;
+it does not change the two findings above, which are structural.
 
 ## 8. If coverage is wanted anyway: the proportionate version
 
@@ -225,4 +262,6 @@ breaks a tool's own tests first — that even this may not earn its keep.
 4. **Cost?** Higher than advertised: ~63 declarations, plus two subset extensions that weaken the eval validator's strictness.
 5. **Comparable harnesses?** OpenClaw and Hermes both declined. Both carry `structuredContent`; neither validates it.
 
-**Outcome:** close AC1. Optionally raise the MCP structured-output plumbing story (§7).
+**Outcome:** close AC1, and build nothing. The one carve-out this doc originally proposed
+(§7, raised as JCLAW-918) was validated before implementation and withdrawn — both of its
+benefits were disproven.
