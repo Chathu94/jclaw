@@ -125,7 +125,41 @@ public final class MemoryAutoCapture {
     // this process-global one (play1 runs unit + functional tests concurrently).
     private static final CircuitBreaker SHARED_BREAKER = new CircuitBreaker(20, 0.5, 5, 30_000L);
 
-    private record ExtractContext(LlmProvider provider, String modelId, String channelType) {}
+    public record ExtractContext(LlmProvider provider, String modelId, String channelType) {}
+
+    /**
+     * Resolve the provider, model and channel for a capture, or {@code null} when the
+     * turn cannot be captured.
+     *
+     * <p>JCLAW-928: logs the two anomalous reasons. Every other exit from this pipeline
+     * already logs — the gate, an open breaker, an extraction failure, and the terminal
+     * {@link #logged} call — so a bare {@code return} here was the one path that made
+     * "capture found only duplicates" and "capture never ran" produce identical
+     * evidence, which is none. An ineligible channel stays silent because that is by
+     * design (JCLAW-866) and would otherwise log on every voice turn.
+     *
+     * <p>Split out of the async plumbing for the same reason {@link #captureEligible}
+     * is: {@link #captureAsync} returns early in test mode, so anything left inside its
+     * virtual thread is unreachable from a unit test. Public because the test tree
+     * compiles into the default package. Must run inside a transaction — it reads the
+     * Conversation.
+     */
+    public static ExtractContext resolveExtractContext(Agent agent, Long conversationId, String agentName) {
+        var conv = ConversationService.findById(conversationId);
+        if (conv == null) {
+            EventLogger.warn(EVENT_CATEGORY, agentName, null,
+                    "Auto-capture skipped: conversation %d not found".formatted(conversationId));
+            return null;
+        }
+        if (!channelEligible(conv.channelType)) return null;
+        var provider = resolveProvider(agent);
+        if (provider == null) {
+            EventLogger.warn(EVENT_CATEGORY, agentName, conv.channelType,
+                    "Auto-capture skipped: no LLM provider available");
+            return null;
+        }
+        return new ExtractContext(provider, resolveModelId(agent), conv.channelType);
+    }
 
     // ─── Async entry point (hooked from AgentRunner) ─────────────────────────
 
@@ -155,14 +189,7 @@ public final class MemoryAutoCapture {
             try {
                 // Snapshot provider/model/channel under a short Tx — no Tx is held
                 // during the LLM call below.
-                var ctx = Tx.run(() -> {
-                    var conv = ConversationService.findById(conversationId);
-                    if (conv == null) return null;
-                    if (!channelEligible(conv.channelType)) return null;
-                    var provider = resolveProvider(agent);
-                    if (provider == null) return null;
-                    return new ExtractContext(provider, resolveModelId(agent), conv.channelType);
-                });
+                var ctx = Tx.run(() -> resolveExtractContext(agent, conversationId, agentName));
                 if (ctx == null) return;
 
                 int maxOutput = ConfigService.getInt("memory.autocapture.maxTokens", 1024);

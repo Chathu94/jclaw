@@ -349,4 +349,51 @@ class LlmProviderTest extends UnitTest {
         var tc = b.build();
         assertEquals("custom-type", tc.type());
     }
+
+    // --- JCLAW-929: which 429s are permanent and must not be retried ---
+
+    private static boolean permanentQuota(String body) throws Exception {
+        var m = LlmProvider.class.getDeclaredMethod("isPermanentQuotaError", String.class);
+        m.setAccessible(true);
+        return (boolean) m.invoke(null, body);
+    }
+
+    @Test
+    void exhaustedCreditBalanceIsPermanent() throws Exception {
+        // The live body observed from OpenAI on 2026-08-03, which the retry loop
+        // spent four attempts per call on before this fix.
+        assertTrue(permanentQuota("""
+                {"error":{"message":"You have no credits remaining. Add credits to continue using the API.",
+                "type":"insufficient_quota","param":null,"code":"credit_balance_exhausted"}}"""));
+    }
+
+    @Test
+    void insufficientQuotaTypeAloneIsPermanent() throws Exception {
+        assertTrue(permanentQuota(
+                "{\"error\":{\"message\":\"You exceeded your current quota\",\"type\":\"insufficient_quota\"}}"));
+    }
+
+    @Test
+    void ordinaryRateLimitStaysRetryable() throws Exception {
+        // Must stay retryable: classifying a transient limit as permanent turns a
+        // recoverable call into a hard failure.
+        assertFalse(permanentQuota("""
+                {"error":{"message":"Rate limit reached for gpt-4o in organization org-x on requests per min.",
+                "type":"requests","code":"rate_limit_exceeded"}}"""));
+    }
+
+    @Test
+    void quotaWordInProseDoesNotMakeARateLimitPermanent() throws Exception {
+        // The word "quota" appears in rate-limit copy; only the code position counts.
+        assertFalse(permanentQuota(
+                "{\"error\":{\"message\":\"You have exceeded your quota for this minute\",\"code\":\"rate_limit_exceeded\"}}"));
+    }
+
+    @Test
+    void unparseableOrEmptyBodyStaysRetryable() throws Exception {
+        assertFalse(permanentQuota(null));
+        assertFalse(permanentQuota(""));
+        assertFalse(permanentQuota("<html>502 Bad Gateway</html>"));
+        assertFalse(permanentQuota("{\"error\":\"just a string\"}"));
+    }
 }

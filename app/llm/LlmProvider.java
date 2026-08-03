@@ -800,6 +800,47 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     private record AttemptOutcome(String body, Exception error, boolean alreadyBackedOff) {}
 
     /**
+     * Error codes on a 429 that mean the balance is gone rather than the rate is too
+     * high (JCLAW-929). Waiting never clears these, so retrying only burns the
+     * remaining attempts and hammers the provider — one exhausted-balance backfill
+     * of 616 rows spent four attempts each, about 11 seconds per row, embedding none.
+     *
+     * <p>Matched against the error {@code code}/{@code type} field, never free text:
+     * OpenAI separates {@code rate_limit_exceeded} from {@code insufficient_quota} by
+     * code alone, and its rate-limit copy has itself used the word "quota". Misreading
+     * a transient limit as permanent turns a recoverable call into a hard failure, so
+     * this list stays narrow and additions need the same evidence.
+     */
+    private static final List<String> PERMANENT_QUOTA_CODES =
+            List.of("insufficient_quota", "credit_balance_exhausted");
+
+    /**
+     * Whether a 429 body identifies a permanently exhausted balance. Parsed rather
+     * than substring-matched so a code only counts in the {@code code}/{@code type}
+     * position; an unparseable body is treated as retryable, preserving today's
+     * behaviour when a provider returns something unexpected.
+     */
+    private static boolean isPermanentQuotaError(String body) {
+        if (body == null || body.isBlank()) return false;
+        try {
+            var root = JsonParser.parseString(body);
+            if (!root.isJsonObject()) return false;
+            var error = root.getAsJsonObject().getAsJsonObject("error");
+            if (error == null) return false;
+            for (var field : List.of("code", "type")) {
+                var el = error.get(field);
+                if (el != null && el.isJsonPrimitive()
+                        && PERMANENT_QUOTA_CODES.contains(el.getAsString())) {
+                    return true;
+                }
+            }
+        } catch (Exception _) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
      * Execute one request attempt. Returns a body on 200; on 429 parks for the
      * (clamped) Retry-After and returns an error outcome flagged already-backed-off so the
      * caller records a 429 {@link LlmException} without double-waiting; throws on 4xx; or
@@ -812,6 +853,10 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         if (reply.statusCode() == 200) return new AttemptOutcome(reply.body(), null, false);
 
         if (reply.statusCode() == 429) {
+            if (isPermanentQuotaError(reply.body())) {
+                throw new LlmException("HTTP 429 from %s (permanent, not retried): %s".formatted(
+                        config.name(), sanitizeErrorBody(reply.body(), config.apiKey())));
+            }
             var defaultBackoff = backoffMsFor(attempt) / 1000;
             var requested = reply.retryAfterSeconds().orElse(defaultBackoff);
             var retryAfter = Math.min(requested, RETRY_AFTER_MAX_SECONDS);
