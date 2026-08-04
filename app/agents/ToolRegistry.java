@@ -672,10 +672,12 @@ public class ToolRegistry {
      *  physical world — paper leaves a device in someone's room and no undo exists. If
      *  spending a few cents on an image warrants opt-in, so does that. */
     private static final String PRINTER_TOOL = "printer";
-    /** JCLAW-919: {@code memory} is default-OFF for every agent (opt-in). Same reasoning as
-     *  {@code printer} rather than the cost-gated entries above — its {@code forget} action
-     *  hard-deletes rows and no undo exists. Recall alone would not need a gate, but the
-     *  three actions ship as one tool. */
+    /** JCLAW-919: {@code memory} follows the {@code jclaw_api} main/non-main split rather
+     *  than the blanket opt-in above. Its {@code forget} action hard-deletes rows with no
+     *  undo, which is why a non-main agent has to be granted it — but main is the operator's
+     *  own agent, the one being asked to remember and forget things, and it already holds
+     *  broader authority than this. Gating it there would leave "forget that" unanswerable
+     *  in the conversation where it is actually said. An explicit disable row still wins. */
     private static final String MEMORY_TOOL = "memory";
     /** JCLAW-941: {@code jclaw_api} can drive JClaw's own admin API, so only the main agent
      *  gets it without being granted it. Computed here rather than seeded as a disable row at
@@ -723,8 +725,8 @@ public class ToolRegistry {
         if (!Boolean.TRUE.equals(explicitState.get(GENERATE_AUDIO_TOOL))) {
             disabled.add(GENERATE_AUDIO_TOOL);
         }
-        // JCLAW-919: forget deletes memories outright, so an agent opts in to the tool.
-        if (!Boolean.TRUE.equals(explicitState.get(MEMORY_TOOL))) {
+        // JCLAW-919: forget deletes memories outright, so a non-main agent opts in.
+        if (!agent.isMain() && !Boolean.TRUE.equals(explicitState.get(MEMORY_TOOL))) {
             disabled.add(MEMORY_TOOL);
         }
         // JCLAW-911: printing is physical and cannot be undone, so an agent opts in.

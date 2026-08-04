@@ -73,7 +73,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // JCLAW-919: recall is why this exists — prompt assembly queries memory once per
         // turn, so a fact the opening message missed is otherwise unreachable. Its store
         // and forget actions are for explicit operator instructions only; capture remains
-        // the automatic write path. Default-off per agent, like every tool that writes.
+        // the automatic write path. On for main, opt-in for every other agent.
         toolList.add(new MemoryTool());
         toolList.add(new FileSystemTools());
         toolList.add(new DocumentsTool());

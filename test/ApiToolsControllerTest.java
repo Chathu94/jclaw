@@ -178,6 +178,44 @@ class ApiToolsControllerTest extends FunctionalTest {
         }
     }
 
+    /** The enabled flag for {@code tool} in a per-agent tool listing body. */
+    private static boolean enabledIn(String body, String tool) {
+        var idx = body.indexOf("\"name\":\"" + tool + "\"");
+        assertTrue(idx >= 0, tool + " should appear in the listing: " + body);
+        var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
+        var at = entry.indexOf("\"enabled\":");
+        assertTrue(at >= 0, "no enabled flag for " + tool);
+        return entry.startsWith("\"enabled\":true", at);
+    }
+
+    @Test
+    void memoryIsOnForMainByDefaultAndOffForEveryOtherAgent() {
+        // JCLAW-919: forget hard-deletes, which is why a non-main agent has to be granted
+        // the tool — but main is the agent the operator actually talks to, and gating it
+        // there leaves "forget that" unanswerable in the conversation where it is said.
+        login();
+        var main = createAgent(models.Agent.MAIN_AGENT_NAME);
+        var other = createAgent("tools-memory-default-agent");
+
+        assertTrue(enabledIn(getContent(GET("/api/agents/" + main + "/tools")), "memory"),
+                "main must get the memory tool without being granted it");
+        assertFalse(enabledIn(getContent(GET("/api/agents/" + other + "/tools")), "memory"),
+                "a non-main agent must have to opt in");
+    }
+
+    @Test
+    void anExplicitDisableStillTurnsMemoryOffForMain() {
+        // Default-on must stay an operator default, not a fixture.
+        login();
+        var main = createAgent(models.Agent.MAIN_AGENT_NAME);
+
+        assertIsOk(PUT("/api/agents/" + main + "/tools/memory", "application/json",
+                "{\"enabled\":false}"));
+
+        assertFalse(enabledIn(getContent(GET("/api/agents/" + main + "/tools")), "memory"),
+                "an explicit disable row must win over the main default");
+    }
+
     @Test
     void jclawApiIsOffForANonMainAgentWithNoConfigRowAtAll() {
         // JCLAW-941: this used to be guaranteed by a disable row written at agent creation,
