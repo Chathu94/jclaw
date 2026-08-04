@@ -4,6 +4,7 @@ import jakarta.persistence.PersistenceException;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
+import llm.ProviderLocality;
 import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
 import models.Agent;
@@ -193,6 +194,17 @@ public class ConfigService {
                 return "Invalid IANA timezone id '" + value
                         + "'. Use a value from GET /api/timezones (e.g. 'Asia/Kuala_Lumpur').";
             }
+        }
+
+        // JCLAW-939: embedding a memory ships its full text to the provider, so the vector
+        // provider is restricted to one running on the operator's own machine. Enforced
+        // here rather than only in the Settings picker: this key is reachable through
+        // POST /api/config directly, and a hidden option is not a disabled one.
+        if (key.equals(MemoryVectorSettings.KEY_PREFIX + "provider")
+                && value != null && !value.isBlank()
+                && !ProviderLocality.isLocal(value)) {
+            return "Provider '" + value + "' is not local. Memory embeddings must use a "
+                    + "provider on this machine so memory text never leaves it.";
         }
 
         set(key, value);

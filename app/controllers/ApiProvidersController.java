@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import llm.PaymentModality;
+import llm.ProviderLocality;
 import llm.ProviderRegistry;
 import memory.JpaMemoryStore;
 import memory.MemoryVectorSettings;
@@ -53,7 +54,8 @@ public class ApiProvidersController extends Controller {
     public record ProviderInfo(String name,
                                String paymentModality,
                                BigDecimal subscriptionMonthlyUsd,
-                               List<String> supportedModalities) {}
+                               List<String> supportedModalities,
+                               boolean local) {}
 
     /** A model's canonical id paired with its human-readable display name. */
     public record ModelRef(String id, String name) {}
@@ -93,7 +95,8 @@ public class ApiProvidersController extends Controller {
                             cfg.name(),
                             cfg.paymentModality().name(),
                             cfg.subscriptionMonthlyUsd(),
-                            supported);
+                            supported,
+                            ProviderLocality.isLocal(cfg.name()));
                 })
                 .toList();
         renderJSON(gson.toJson(infos));
@@ -331,6 +334,15 @@ public class ApiProvidersController extends Controller {
         var model = body == null ? "" : JsonArgs.optString(body, "model", "");
         if (model.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "model is required");
+        }
+        // JCLAW-939: the probe is what accepts a model for vector memory, so a remote
+        // provider has to fail here too — otherwise the panel reports a usable model that
+        // the save would then reject. After existence and argument checks, so an unknown
+        // provider still reads as 404 rather than as a policy refusal.
+        if (!ProviderLocality.isLocal(name)) {
+            ApiResponses.error(403, "forbidden",
+                    "Provider '%s' is not local. Memory embeddings must use a provider on this "
+                            .formatted(name) + "machine so memory text never leaves it.");
         }
         var provider = ProviderRegistry.get(name);
         if (provider == null) {

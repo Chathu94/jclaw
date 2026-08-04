@@ -700,6 +700,8 @@ export interface ProviderInfo {
   paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
   subscriptionMonthlyUsd: number
   supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
+  /** Configured against a base URL on this machine or network (JCLAW-939). */
+  local: boolean
 }
 
 /** A single persisted model on a provider (stored inside provider.{name}.models JSON). */

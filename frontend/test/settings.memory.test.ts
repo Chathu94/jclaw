@@ -16,14 +16,21 @@ import { looksLikeEmbeddingModel } from '~/utils/embeddingModels'
 const EMBED_MODEL = 'text-embedding-nomic-embed-text-v1.5'
 const CHAT_MODEL = 'qwen3.5-4b-mlx'
 
-function baseEndpoints(configEntries: { key: string, value: string }[] = []) {
+function baseEndpoints(configEntries: { key: string, value: string }[] = [],
+  providers = [localProvider('lm-studio')]) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
   registerEndpoint('/api/config', () => ({ entries: configEntries }))
-  registerEndpoint('/api/providers', () => [
-    { name: 'lm-studio', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 0, supportedModalities: ['SUBSCRIPTION'] },
-  ])
+  registerEndpoint('/api/providers', () => providers)
+}
+
+function localProvider(name: string) {
+  return { name, paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 0, supportedModalities: ['SUBSCRIPTION'], local: true }
+}
+
+function cloudProvider(name: string) {
+  return { name, paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0, supportedModalities: ['PER_TOKEN'], local: false }
 }
 
 function vectorEnabledConfig() {
@@ -254,5 +261,28 @@ describe('Settings page — Memory Embeddings', () => {
     await flushPromises()
 
     expect(component.find('[data-testid="memory-embedding-reembed-warning"]').exists()).toBe(true)
+  })
+
+  it('offers only local providers for embeddings', async () => {
+    // JCLAW-939: embedding a memory sends its full text to the provider, so a cloud one
+    // would ship the whole corpus off the machine. The picker must not offer that.
+    baseEndpoints(vectorEnabledConfig(), [localProvider('lm-studio'), cloudProvider('openai')])
+    const component = await mountSettingsSection('memory')
+    await flushPromises()
+
+    const values = component.find('[data-testid="memory-embedding-provider"]')
+      .findAll('option').map(o => o.attributes('value'))
+    expect(values).toContain('lm-studio')
+    expect(values).not.toContain('openai')
+  })
+
+  it('explains why the provider list is empty when nothing local is configured', async () => {
+    // An empty dropdown with no reason reads as a bug. The operator has to learn that
+    // the requirement is local inference, not that vector memory is broken.
+    baseEndpoints(vectorEnabledConfig(), [cloudProvider('openai')])
+    const component = await mountSettingsSection('memory')
+    await flushPromises()
+
+    expect(component.find('[data-testid="memory-embedding-no-local-provider"]').exists()).toBe(true)
   })
 })

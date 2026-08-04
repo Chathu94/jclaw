@@ -26,7 +26,15 @@ const probe = ref<EmbeddingProbeResponse | null>(null)
 const probing = ref(false)
 const showAllModels = ref(false)
 
-const providerNames = computed(() => (providersData.value ?? []).map(p => p.name))
+/**
+ * Local providers only (JCLAW-939). Embedding a memory sends its full text to the
+ * provider, so a cloud one would ship the whole corpus off the machine. The backend
+ * decides which are local — from the configured base URL, not the name — and rejects a
+ * remote one on both probe and save, so this list narrows the choice rather than being
+ * the thing that enforces it.
+ */
+const providerNames = computed(() =>
+  (providersData.value ?? []).filter(p => p.local).map(p => p.name))
 
 /**
  * Models discovered live from the provider, which is where embedding models
@@ -260,6 +268,15 @@ async function saveSelection() {
               </option>
             </select>
           </label>
+          <p
+            v-if="!providerNames.length"
+            class="mt-1 text-xs text-fg-muted"
+            data-testid="memory-embedding-no-local-provider"
+          >
+            No local provider is configured. Memory embeddings must run on this machine so
+            memory text never leaves it — add a provider with a local base URL (for example
+            Ollama or LM Studio) to enable vector memory.
+          </p>
         </div>
 
         <div v-if="selectedProvider">

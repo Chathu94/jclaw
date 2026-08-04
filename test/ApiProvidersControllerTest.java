@@ -658,6 +658,32 @@ class ApiProvidersControllerTest extends FunctionalTest {
         assertEquals(400, response.status.intValue());
     }
 
+    @Test
+    void embeddingProbeRefusesARemoteProvider() {
+        // JCLAW-939: probing sends text to the provider and its answer is what unlocks
+        // saving the vector settings, so a remote provider has to be refused here and not
+        // only hidden in the Settings picker — this endpoint is reachable directly.
+        login();
+        configureProvider();   // https://example.invalid/v1
+        var response = POST("/api/providers/test-provider/embedding-probe",
+                "application/json", "{\"model\":\"text-embedding-3-small\"}");
+        assertEquals(403, response.status.intValue());
+        assertTrue(getContent(response).toLowerCase().contains("local"),
+                "the refusal should say why: " + getContent(response));
+    }
+
+    @Test
+    void embeddingProbeAllowsALocalProvider() {
+        // Guards against the refusal being unconditional: a local provider must get past
+        // the policy check and fail (if at all) on reachability instead.
+        login();
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:1/v1");
+        var response = POST("/api/providers/test-provider/embedding-probe",
+                "application/json", "{\"model\":\"nomic-embed-text\"}");
+        assertNotEquals(403, response.status.intValue(),
+                "a local provider must not be refused as remote: " + getContent(response));
+    }
+
     private static boolean substituted(String requested, String served) throws Exception {
         var m = controllers.ApiProvidersController.class.getDeclaredMethod("substituted", String.class, String.class);
         m.setAccessible(true);
