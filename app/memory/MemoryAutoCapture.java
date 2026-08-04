@@ -582,9 +582,19 @@ public final class MemoryAutoCapture {
                 if (!o.has(KEY_TEXT) || o.get(KEY_TEXT).isJsonNull()) continue;
                 var text = o.get(KEY_TEXT).getAsString().strip();
                 if (text.isEmpty()) continue;
-                var category = (o.has(KEY_CATEGORY) && !o.get(KEY_CATEGORY).isJsonNull())
+                // JCLAW-927: the prompt names six categories and says to pick exactly one;
+                // the model still returns others (opinion, belief, instruction, project).
+                // Storing those verbatim leaves rows the taxonomy does not describe, and
+                // silently drops them to BASELINE_IMPORTANCE whenever the extractor also
+                // omits importance.
+                var rawCategory = (o.has(KEY_CATEGORY) && !o.get(KEY_CATEGORY).isJsonNull())
                         ? MemoryCategory.normalize(o.get(KEY_CATEGORY).getAsString()) : null;
-                if (category == null) category = MemoryCategory.FACT.label;
+                var category = MemoryCategory.coerceForStorage(rawCategory);
+                if (rawCategory != null && !rawCategory.equals(category)) {
+                    EventLogger.warn(EVENT_CATEGORY,
+                            "Extractor returned category '%s', outside the six-bucket taxonomy; stored as '%s'"
+                                    .formatted(rawCategory, category));
+                }
                 double importance = (o.has(KEY_IMPORTANCE) && !o.get(KEY_IMPORTANCE).isJsonNull())
                         ? clamp01(safeDouble(o.get(KEY_IMPORTANCE)))
                         : MemoryCategory.defaultImportanceFor(category);

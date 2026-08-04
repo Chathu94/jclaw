@@ -241,6 +241,14 @@ public class ApiMemoryController extends Controller {
         }
         if (body.has(KEY_CATEGORY) && !body.get(KEY_CATEGORY).isJsonNull()) {
             var normalized = MemoryCategory.normalize(body.get(KEY_CATEGORY).getAsString());
+            // JCLAW-927: rejected rather than coerced. Capture coerces because the
+            // alternative is discarding a memory over a label, but this is an operator
+            // typing a category deliberately — silently storing something else would hide
+            // the mistake behind a 200.
+            if (normalized != null && MemoryCategory.from(normalized).isEmpty()) {
+                ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                        "category must be one of " + MemoryCategory.labels());
+            }
             if (normalized != null) memory.category = normalized;
         }
         memory.save();

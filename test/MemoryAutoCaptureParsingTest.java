@@ -170,4 +170,51 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
         assertEquals("no fence", stripFences("no fence"), "unfenced unchanged");
         assertEquals("abc", stripFences("```\nabc"), "opening fence only, no closing");
     }
+
+    // --- JCLAW-927: the extractor ignoring its closed set of six ---
+
+    @Test
+    void anInventedCategoryIsCoercedRatherThanStoredVerbatim() {
+        // Observed live: the prompt names six and says to pick exactly one, and the model
+        // returned opinion / belief / instruction / project anyway.
+        var got = MemoryAutoCapture.parseCandidates(
+                "{\"memories\":[{\"text\":\"The user prefers dark mode\",\"category\":\"opinion\","
+                        + "\"importance\":0.7}]}");
+
+        assertEquals(1, got.size());
+        assertEquals(MemoryCategory.FACT.label, got.getFirst().category(),
+                "an unrecognised label must not reach the database");
+        assertEquals(0.7, got.getFirst().importance(), 1e-9,
+                "coercing the label must not disturb an explicit importance");
+    }
+
+    @Test
+    void aCanonicalCategorySurvivesCoercionUnchanged() {
+        // Guards against the coercion being unconditional, which would flatten the whole
+        // taxonomy to fact and be invisible in a test that only checks invented labels.
+        for (var c : MemoryCategory.values()) {
+            var got = MemoryAutoCapture.parseCandidates(
+                    "{\"memories\":[{\"text\":\"t\",\"category\":\"" + c.label + "\"}]}");
+            assertEquals(c.label, got.getFirst().category(), "must preserve " + c.label);
+        }
+    }
+
+    @Test
+    void anInventedCategoryTakesTheCoercedBucketsDefaultImportance() {
+        // The latent half of this bug: with no explicit importance, an unrecognised label
+        // fell through defaultImportanceFor to BASELINE rather than to a bucket default.
+        var got = MemoryAutoCapture.parseCandidates(
+                "{\"memories\":[{\"text\":\"The user ships on Fridays\",\"category\":\"project\"}]}");
+
+        assertEquals(MemoryCategory.FACT.label, got.getFirst().category());
+        assertEquals(MemoryCategory.FACT.defaultImportance, got.getFirst().importance(), 1e-9);
+    }
+
+    @Test
+    void coercionIsAWritePathOnlyRuleAndReadsStillPassThrough() {
+        // Pre-existing rows hold labels outside the six. normalize() is what renders them,
+        // and tightening the write path must not make them disappear from the admin UI.
+        assertEquals("opinion", MemoryCategory.normalize("  Opinion  "));
+        assertEquals(MemoryCategory.FACT.label, MemoryCategory.coerceForStorage("opinion"));
+    }
 }

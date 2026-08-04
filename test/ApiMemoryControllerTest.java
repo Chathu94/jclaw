@@ -363,6 +363,36 @@ class ApiMemoryControllerTest extends FunctionalTest {
     }
 
     @Test
+    void rejectsACategoryOutsideTheTaxonomy() {
+        // JCLAW-927: capture coerces an invented label because the alternative is losing
+        // the memory, but an operator typing a category deliberately must be told, not
+        // silently given something else behind a 200.
+        var memId = seedMemory("alice", "Tweak me", "fact", 0.4);
+        login();
+
+        var resp = PUT("/api/memories/" + memId, "application/json", "{\"category\":\"opinion\"}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("category"), "the error should name the field: " + getContent(resp));
+
+        var stored = fetchInFreshTx(() ->
+                models.Memory.<models.Memory>findById(Long.parseLong(memId)).category);
+        assertEquals("fact", stored, "a rejected update must not have been applied");
+    }
+
+    @Test
+    void acceptsEveryCanonicalCategory() {
+        // Guards against the validation being over-tight — a rule that rejects the six it
+        // is meant to allow would make the category field unusable.
+        var memId = seedMemory("alice", "Tweak me", "fact", 0.4);
+        login();
+        for (var label : memory.MemoryCategory.labels()) {
+            var resp = PUT("/api/memories/" + memId, "application/json",
+                    "{\"category\":\"" + label + "\"}");
+            assertIsOk(resp);
+        }
+    }
+
+    @Test
     void unknownMemoryUpdateIs404() {
         login();
         var resp = PUT("/api/memories/999999", "application/json", "{\"importance\":0.9}");
