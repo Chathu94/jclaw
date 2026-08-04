@@ -100,7 +100,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
             "/api/channels/slack/",       // slack bindings carry bot tokens + signing secrets
             "/api/tailscale",             // network-funnel infra config
             "/api/logs",                  // raw app logs can leak secrets/PII
-            "/api/metrics/loadtest"       // load-test harness -- resource/cost abuse
+            "/api/metrics/loadtest",      // load-test harness -- resource/cost abuse
+            "/api/memories"               // cross-agent personal data; the scoped `memory` tool is the agent path
     );
 
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");

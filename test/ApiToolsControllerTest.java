@@ -178,6 +178,44 @@ class ApiToolsControllerTest extends FunctionalTest {
         }
     }
 
+    @Test
+    void jclawApiIsOffForANonMainAgentWithNoConfigRowAtAll() {
+        // JCLAW-941: this used to be guaranteed by a disable row written at agent creation,
+        // which cannot cover an agent that already existed, one created outside
+        // AgentService.create, or a row later deleted — the live instance had two agents
+        // holding no row and therefore full admin-API access. Deleting every row for the
+        // agent reproduces exactly that state.
+        login();
+        var id = createAgent("tools-jclaw-api-norow-agent");
+        fetchInFreshTx(() -> models.AgentToolConfig.delete("agent.id = ?1", id));
+        agents.ToolRegistry.clearDisabledToolsCache();
+
+        var body = getContent(GET("/api/agents/" + id + "/tools"));
+        var idx = body.indexOf("\"name\":\"jclaw_api\"");
+        assertTrue(idx >= 0, "jclaw_api should still be listed: " + body);
+        var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
+        var enabledAt = entry.indexOf("\"enabled\":");
+        assertTrue(entry.startsWith("\"enabled\":false", enabledAt),
+                "a non-main agent with no config row must not get jclaw_api: " + entry);
+    }
+
+    @Test
+    void anExplicitGrantStillEnablesJclawApiForANonMainAgent() {
+        // The default is opt-in, not a prohibition: granting it to a purpose-built agent
+        // stays one click, which is how this instance's cyber-concierge agent has it.
+        login();
+        var id = createAgent("tools-jclaw-api-granted-agent");
+
+        assertIsOk(PUT("/api/agents/" + id + "/tools/jclaw_api", "application/json",
+                "{\"enabled\":true}"));
+
+        var body = getContent(GET("/api/agents/" + id + "/tools"));
+        var idx = body.indexOf("\"name\":\"jclaw_api\"");
+        var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
+        assertTrue(entry.startsWith("\"enabled\":true", entry.indexOf("\"enabled\":")),
+                "an explicit grant must win over the default: " + entry);
+    }
+
     // --- PUT /api/agents/{id}/tools/{name} ---
 
     @Test

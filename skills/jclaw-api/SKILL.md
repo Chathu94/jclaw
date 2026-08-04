@@ -52,6 +52,7 @@ The following endpoints exist in JClaw's API but are **deliberately not callable
 - `/api/tailscale` — network-funnel infrastructure config.
 - `/api/logs` — raw application logs can leak secrets and PII.
 - `/api/metrics/loadtest*` — the load-test harness; an agent must not spawn load.
+- `/api/memories*` — the operator's cross-agent view of every agent's stored memories. An agent reaching it could read, edit or delete another agent's corpus. Use the `memory` tool instead, which is scoped to the calling agent's own memories.
 
 Individual destructive or secret-bearing actions inside otherwise-callable controllers are hidden the same way (marked `@ChatHidden` in the backend): bulk conversation deletes, channel-config writes, and the transcription model-download trigger. You won't see them in `discover`.
 

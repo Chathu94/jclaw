@@ -7,7 +7,6 @@ import models.Agent;
 import models.AgentToolConfig;
 import models.Config;
 import play.db.jpa.JPA;
-import tools.JClawApiTool;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -138,14 +137,6 @@ public class AgentService {
             browserConfig.enabled = false;
             browserConfig.save();
 
-            // JCLAW-282: jclaw_api can mutate JClaw's own config — only main
-            // is trusted with that authority today. Skill-creator can extend
-            // this later by promoting jclaw-api into another agent's workspace.
-            var jclawApiConfig = new AgentToolConfig();
-            jclawApiConfig.agent = agent;
-            jclawApiConfig.toolName = JClawApiTool.TOOL_NAME;
-            jclawApiConfig.enabled = false;
-            jclawApiConfig.save();
         }
 
         // JCLAW-32: backfill MCP allowlist grants for currently-connected

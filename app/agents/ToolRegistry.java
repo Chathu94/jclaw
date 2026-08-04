@@ -677,6 +677,14 @@ public class ToolRegistry {
      *  hard-deletes rows and no undo exists. Recall alone would not need a gate, but the
      *  three actions ship as one tool. */
     private static final String MEMORY_TOOL = "memory";
+    /** JCLAW-941: {@code jclaw_api} can drive JClaw's own admin API, so only the main agent
+     *  gets it without being granted it. Computed here rather than seeded as a disable row at
+     *  agent creation (JCLAW-282): a seeded row cannot cover an agent that already existed,
+     *  an agent created outside AgentService.create, or a row later deleted — this instance
+     *  had two agents holding no row and therefore full access. Same reasoning JCLAW-883
+     *  recorded for the eval agent. An explicit enable row still wins, so granting it to a
+     *  purpose-built agent stays a single click. */
+    private static final String JCLAW_API_TOOL = "jclaw_api";
 
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
@@ -722,6 +730,10 @@ public class ToolRegistry {
         // JCLAW-911: printing is physical and cannot be undone, so an agent opts in.
         if (!Boolean.TRUE.equals(explicitState.get(PRINTER_TOOL))) {
             disabled.add(PRINTER_TOOL);
+        }
+        // JCLAW-941: main keeps it without a row; every other agent has to be granted it.
+        if (!agent.isMain() && !Boolean.TRUE.equals(explicitState.get(JCLAW_API_TOOL))) {
+            disabled.add(JCLAW_API_TOOL);
         }
         if (!agent.isMain()) {
             addMcpDefaultDisabled(disabled, explicitState);

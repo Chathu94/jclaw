@@ -195,6 +195,15 @@ class JClawApiToolTest extends UnitTest {
                 "channels save is @ChatHidden");
         assertFalse(JClawApiTool.isCallable("GET", "/api/tailscale"),
                 "tailscale is deny-floored");
+        // JCLAW-941: memory is cross-agent personal data — /api/memories is the operator's
+        // admin view over every agent's corpus, so an agent reaching it could read, edit or
+        // delete another agent's memories. The scoped `memory` tool is the agent path.
+        assertFalse(JClawApiTool.isCallable("GET", "/api/memories"),
+                "listing memories across agents is deny-floored");
+        assertFalse(JClawApiTool.isCallable("DELETE", "/api/memories/7"),
+                "deleting a memory is deny-floored");
+        assertFalse(JClawApiTool.isCallable("POST", "/api/memories/recall"),
+                "recall for an arbitrary agentId is deny-floored");
         assertFalse(JClawApiTool.isCallable("GET", "/api/logs"),
                 "logs is deny-floored");
         assertFalse(JClawApiTool.isCallable("GET", "/api/no-such-endpoint-xyz"),
