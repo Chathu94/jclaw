@@ -404,7 +404,7 @@ dependencies {
         exclude(group = "biz.aQute.bnd")
     }
 
-    // Telegram Bot API SDK — exclude OkHttp 4.x graph (we use okhttp-jvm 5.3.2
+    // Telegram Bot API SDK — exclude OkHttp 4.x graph (we use okhttp-jvm 5.x
     // directly), logback (log4j path), and test artifacts.
     listOf(
         "telegrambots-client",
@@ -434,7 +434,7 @@ dependencies {
     // JCLAW-83: Slack SDK (official com.slack.api), a la carte — slack-api-client
     // (Web API + Block Kit) + slack-app-backend (SlackSignature.Verifier + event
     // parsers). NO Bolt. Exclude its bare OkHttp 4.x + Okio so it runs on
-    // okhttp-jvm 5.3.2 instead of clashing in the shared okhttp3 package
+    // okhttp-jvm 5.x instead of clashing in the shared okhttp3 package
     // (same treatment as the Telegram SDK above).
     listOf(
         "slack-api-client",
