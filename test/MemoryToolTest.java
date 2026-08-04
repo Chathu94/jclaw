@@ -219,4 +219,84 @@ class MemoryToolTest extends UnitTest {
                         "The user drives an Xpeng G6"),
                 "the window must not block capture of anything else");
     }
+
+    // --- tool dispatch carries no ambient JPA transaction ---
+
+    /**
+     * Every action, run the way the agent actually reaches it: on a thread with no JPA
+     * context. {@code ParallelToolExecutor} starts a fresh virtual thread per work unit
+     * (inheriting no ThreadLocal), and the streaming chat path is {@code @NoTransaction}
+     * (JCLAW-199). Before the fix each action threw {@code JPAException} on its first DB
+     * touch and {@code ToolRegistry} swallowed it into the tool's text — so store wrote
+     * nothing, and forget deleted nothing while never reaching the forget-log, letting
+     * capture re-learn the fact on the same turn.
+     *
+     * <p>The direct {@code tool.execute} calls every other test in this class makes run on
+     * the test thread, which Play's invocation always binds a context to — which is exactly
+     * why the whole class passed against the broken code.
+     */
+    @Test
+    void everyActionWorksOnADispatchThreadWithNoAmbientTransaction() {
+        var dispatchAgent = commitInFreshTx(() -> {
+            var a = new Agent();
+            a.name = "memtool-dispatch-agent";
+            a.modelProvider = "openrouter";
+            a.modelId = "gpt-4.1";
+            a.save();
+            return a;
+        });
+        var id = String.valueOf(dispatchAgent.id);
+
+        var stored = offDispatchThread(() -> tool.execute(
+                "{\"action\":\"store\",\"text\":\"The user keeps the NAS in the basement\"}", dispatchAgent));
+        assertTrue(stored.startsWith("Remembered"), stored);
+        assertEquals(1, committedCount(id), "store must actually write a row");
+
+        var recalled = offDispatchThread(() -> tool.execute(
+                "{\"action\":\"recall\",\"query\":\"where is the NAS\"}", dispatchAgent));
+        assertFalse(recalled.startsWith("Error"), recalled);
+
+        var forgotten = offDispatchThread(() -> tool.execute(
+                "{\"action\":\"forget\",\"query\":\"The user keeps the NAS in the basement\"}", dispatchAgent));
+        assertTrue(forgotten.startsWith("Forgot"), forgotten);
+        assertEquals(0, committedCount(id), "forget must actually delete the row");
+        assertTrue(MemoryForgetLog.recentlyForgotten(id, "The user keeps the NAS in the basement"),
+                "the forget-log is only reached if the delete did not throw");
+    }
+
+    private static long committedCount(String agentId) {
+        return commitInFreshTx(() -> models.Memory.count("agent.id = ?1", Long.valueOf(agentId)));
+    }
+
+    /** Runs {@code block} on a fresh platform thread that has no JPA context bound —
+     *  the dispatch-thread shape. Mirrors {@link #commitInFreshTx} without the {@code Tx}. */
+    private static <T> T offDispatchThread(java.util.function.Supplier<T> block) {
+        return onOwnThread(block, false);
+    }
+
+    /** Seeds data visible to other threads: a fresh platform thread inside its own
+     *  committed transaction (same shape as {@code ApiAttachmentsControllerTest}). */
+    private static <T> T commitInFreshTx(java.util.function.Supplier<T> block) {
+        return onOwnThread(block, true);
+    }
+
+    private static <T> T onOwnThread(java.util.function.Supplier<T> block, boolean inTx) {
+        var ref = new java.util.concurrent.atomic.AtomicReference<T>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(inTx ? services.Tx.run(block::get) : block.get());
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) throw new IllegalStateException(err.get());
+        return ref.get();
+    }
 }

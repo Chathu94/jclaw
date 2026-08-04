@@ -450,6 +450,64 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertEquals(400, resp.status.intValue());
     }
 
+    /**
+     * A failing free-text search must narrow to nothing, never to everything.
+     *
+     * <p>{@code resolveFtsIds} encodes "no id constraint" as {@code Optional.empty()} and
+     * "ran, matched nothing" as present-but-empty. Returning the former on {@code IOException}
+     * dropped the caller's {@code q} from the WHERE clause entirely, so this bulk delete
+     * paged over the whole corpus and removed every row the other predicates allowed.
+     */
+    @Test
+    void aFailedFreeTextSearchDeletesNothingRatherThanEverything() {
+        seedMemory("alice", "alice fact", "fact", 0.5);
+        seedMemory("bob", "bob core", "core", 0.9);
+        seedMemory("carol", "carol lesson", "lesson", 0.6);
+        login();
+
+        services.search.MessageSearchTestHooks.setRepository(new FailingSearchRepository());
+        try {
+            var resp = deleteWithJsonBody("/api/memories", "{\"filter\": {\"q\": \"anything\"}}");
+            assertIsOk(resp);
+            assertTrue(getContent(resp).contains("\"deleted\":0"), getContent(resp));
+            assertEquals(3L, fetchInFreshTx(() -> models.Memory.count()).longValue(),
+                    "a search failure must not be read as an empty filter");
+
+            var listed = GET("/api/memories?q=anything");
+            assertIsOk(listed);
+            assertFalse(getContent(listed).contains("alice fact"),
+                    "the list path must not render the whole corpus as search results");
+        } finally {
+            services.search.MessageSearchTestHooks.setRepository(null);
+        }
+    }
+
+    /** Stands in for a Lucene backend that is present but erroring — the only way to reach
+     *  the IOException arm, since a closed index reports dialect "none" and takes the LIKE
+     *  path instead. Safe to install: the class holds the LuceneTestSync lock throughout. */
+    private static final class FailingSearchRepository implements services.search.MessageSearchRepository {
+        @Override
+        public java.util.List<Long> searchIds(services.search.LuceneIndexer.Scope scope, String query, int limit)
+                throws java.io.IOException {
+            throw new java.io.IOException("index unavailable");
+        }
+
+        @Override
+        public java.util.List<models.TaskRunMessage> search(String query, int limit) throws java.io.IOException {
+            throw new java.io.IOException("index unavailable");
+        }
+
+        @Override
+        public void init() {
+            // Already "initialized" — this stub exists only to fail searches.
+        }
+
+        @Override
+        public String dialectName() {
+            return "h2";
+        }
+    }
+
     /** DELETE-with-body helper — same makeRequest workaround as
      *  ApiConversationsControllerTest (Play's DELETE helper drops the body). */
     private static play.mvc.Http.Response deleteWithJsonBody(String url, String json) {

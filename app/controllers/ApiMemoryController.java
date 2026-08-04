@@ -172,7 +172,10 @@ public class ApiMemoryController extends Controller {
         } catch (IOException e) {
             EventLogger.warn("search", null, null,
                     "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
-            return Optional.empty();
+            // Fail CLOSED. Optional.empty() means "no id constraint" — returning it here
+            // would drop the caller's q entirely, so a failed search reads as an unfiltered
+            // one: list renders the whole corpus, and bulkDelete(filter{q}) deletes it.
+            return Optional.of(List.of());
         }
     }
 

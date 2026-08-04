@@ -180,7 +180,10 @@ public class MemoryTool implements ToolRegistry.Tool {
         if (query.isBlank()) return "Error: `query` is required for recall.";
         int limit = Math.max(1, JsonArgs.optInt(args, FIELD_LIMIT, 10));
 
-        var selected = SystemPromptAssembler.recall(agentId, query, Set.of()).selected()
+        // Tool dispatch carries no ambient transaction — the streaming chat path is
+        // @NoTransaction (JCLAW-199) and multi-call batches run on fresh virtual threads
+        // that inherit no JPA context — so every DB touch here opens its own.
+        var selected = Tx.run(() -> SystemPromptAssembler.recall(agentId, query, Set.of()).selected())
                 .stream().limit(limit).toList();
         if (selected.isEmpty()) return "No memories matched \"%s\".".formatted(query);
 
@@ -231,7 +234,12 @@ public class MemoryTool implements ToolRegistry.Tool {
         // An explicit re-store inside the forget window must take effect, or "forget X"
         // followed by "actually, remember X" silently does nothing.
         memory.MemoryForgetLog.clearMatching(agentId, text);
-        MemoryStoreFactory.get().store(agentId, text, category, importance);
+        // storeDeferred + embedStored rather than store(): the embedding is a blocking
+        // HTTP call and store() would run it inside this transaction, pinning a pooled
+        // connection across the network (the JCLAW-807 shape). Same split as applyPlan.
+        var store = MemoryStoreFactory.get();
+        var storedId = Tx.run(() -> store.storeDeferred(agentId, text, category, importance));
+        store.embedStored(storedId);
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
                 "Memory stored on operator request: \"%s\"".formatted(snippet(text)));
         return "Remembered [%s]: %s".formatted(category, text);
@@ -248,11 +256,18 @@ public class MemoryTool implements ToolRegistry.Tool {
 
         var store = MemoryStoreFactory.get();
         var removed = new ArrayList<String>();
+        // One transaction for the whole set: a partial forget is worse than none, because
+        // the forget-log below would then suppress re-capture of a memory still on disk.
+        Tx.run(() -> {
+            for (var m : matches) {
+                store.delete(String.valueOf(m.id));
+                removed.add(snippet(m.text));
+            }
+        });
+        // Only after the deletes commit, and before capture runs on this turn — the turn
+        // that named the fact.
         for (var m : matches) {
-            store.delete(String.valueOf(m.id));
-            // Before capture runs on this turn — the turn that named the fact.
             memory.MemoryForgetLog.noteForgotten(agentId, m.text);
-            removed.add(snippet(m.text));
         }
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
                 "Forgot %d memory(ies) on operator request matching: \"%s\"".formatted(removed.size(), snippet(query)));
