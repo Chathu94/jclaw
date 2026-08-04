@@ -7,11 +7,6 @@ import services.evals.MemoryEvalSuite;
 
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-529: scoring, and the containment guard that keeps generated suites out of the
  * repository.

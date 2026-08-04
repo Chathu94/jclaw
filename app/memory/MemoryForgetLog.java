@@ -38,7 +38,7 @@ public final class MemoryForgetLog {
             .build();
 
     /** Note that {@code text} was just forgotten for {@code agentId}. */
-    public static void record(String agentId, String text) {
+    public static void noteForgotten(String agentId, String text) {
         if (agentId == null || text == null || text.isBlank()) return;
         FORGOTTEN.get(agentId, _ -> new CopyOnWriteArrayList<>()).add(text);
     }

@@ -251,7 +251,7 @@ public class MemoryTool implements ToolRegistry.Tool {
         for (var m : matches) {
             store.delete(String.valueOf(m.id));
             // Before capture runs on this turn — the turn that named the fact.
-            memory.MemoryForgetLog.record(agentId, m.text);
+            memory.MemoryForgetLog.noteForgotten(agentId, m.text);
             removed.add(snippet(m.text));
         }
         EventLogger.info(EVENT_CATEGORY, agent.name, null,

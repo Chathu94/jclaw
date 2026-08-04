@@ -45,6 +45,7 @@ public class ApiProvidersController extends Controller {
     private static final Gson gson = GSON;
     private static final String PROVIDER_CONFIG_PREFIX = "provider.";
     private static final String BASE_URL_SUFFIX = ".baseUrl";
+    private static final String API_KEY_SUFFIX = ".apiKey";
     private static final String SUPPORTS_VISION = "supportsVision";
 
     public record DiscoverModelsResponse(List<Map<String, Object>> models, int count) {}
@@ -112,7 +113,7 @@ public class ApiProvidersController extends Controller {
     @Operation(summary = "Discover a provider's available models from its live API")
     public static void discoverModels(String name) {
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
-        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
+        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
 
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
@@ -171,7 +172,7 @@ public class ApiProvidersController extends Controller {
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
         }
-        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
+        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
         // Page-load read (Settings video-model dropdown) — cached; the explicit
         // POST /discover-models refresh still hits the provider live.
         var result = ModelDiscoveryService.discoverCached(name, baseUrl, apiKey == null ? "" : apiKey);
@@ -306,7 +307,7 @@ public class ApiProvidersController extends Controller {
     public static void embeddingModels(String name) {
         requireConfiguredProvider(name);
         var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
-        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + ".apiKey");
+        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
         var refs = ModelDiscoveryService.listAllModelIds(Strings.trimTrailingSlash(baseUrl), apiKey).stream()
                 .map(id -> new ModelRef(id, deriveName(id)))
                 .toList();

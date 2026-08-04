@@ -3,9 +3,6 @@ import memory.MemorySimilarity.Tokens;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-922: the capture-time duplicate rule. Fixtures are real pairs taken from a
  * 1248-row production store — the eight that a Jaccard-only NOOP let through, and

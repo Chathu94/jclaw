@@ -491,7 +491,8 @@ public class JpaMemoryStore implements MemoryStore {
         List<ScoredId> knn;
         try {
             var hits = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit);
-            knn = vectorLegAboveFloor(hits.isEmpty() ? -1 : 2 * hits.getFirst().score() - 1) ? hits : List.of();
+            double bestCosine = hits.isEmpty() ? -1 : 2 * hits.getFirst().score() - 1;
+            knn = vectorLegAboveFloor(bestCosine) ? hits : List.of();
         } catch (IOException e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Lucene KNN search failed, falling back to FTS: %s".formatted(e.getMessage()));
