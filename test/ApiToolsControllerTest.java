@@ -166,7 +166,7 @@ class ApiToolsControllerTest extends FunctionalTest {
         // tools are on" and report them enabled. The agent editor then showed a
         // ticked box for a tool the agent could not call. Found in JCLAW-911 UAT.
         for (var optIn : java.util.List.of("printer", "generate_image",
-                "generate_video", "generate_audio")) {
+                "generate_video", "generate_audio", "memory")) {
             var idx = body.indexOf("\"name\":\"" + optIn + "\"");
             assertTrue(idx >= 0, optIn + " should appear in the listing: " + body);
             var entry = body.substring(idx, Math.min(body.length(), idx + 4000));

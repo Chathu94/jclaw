@@ -672,6 +672,11 @@ public class ToolRegistry {
      *  physical world — paper leaves a device in someone's room and no undo exists. If
      *  spending a few cents on an image warrants opt-in, so does that. */
     private static final String PRINTER_TOOL = "printer";
+    /** JCLAW-919: {@code memory} is default-OFF for every agent (opt-in). Same reasoning as
+     *  {@code printer} rather than the cost-gated entries above — its {@code forget} action
+     *  hard-deletes rows and no undo exists. Recall alone would not need a gate, but the
+     *  three actions ship as one tool. */
+    private static final String MEMORY_TOOL = "memory";
 
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
@@ -709,6 +714,10 @@ public class ToolRegistry {
         // load) and changes the shape of an answer, so an agent opts in to it.
         if (!Boolean.TRUE.equals(explicitState.get(GENERATE_AUDIO_TOOL))) {
             disabled.add(GENERATE_AUDIO_TOOL);
+        }
+        // JCLAW-919: forget deletes memories outright, so an agent opts in to the tool.
+        if (!Boolean.TRUE.equals(explicitState.get(MEMORY_TOOL))) {
+            disabled.add(MEMORY_TOOL);
         }
         // JCLAW-911: printing is physical and cannot be undone, so an agent opts in.
         if (!Boolean.TRUE.equals(explicitState.get(PRINTER_TOOL))) {

@@ -21,6 +21,7 @@ import tools.GenerateImageTool;
 import tools.GenerateVideoTool;
 import tools.JClawApiTool;
 import tools.LoadTestSleepTool;
+import tools.MemoryTool;
 import tools.MessageTool;
 import tools.PlaywrightBrowserTool;
 import tools.PrinterTool;
@@ -69,6 +70,11 @@ public class ToolRegistrationJob extends Job<Void> {
         // features/usage by searching the bundled docs/user-guide/ markdown.
         toolList.add(new UserGuideTool());
         toolList.add(new CheckListTool());
+        // JCLAW-919: recall is why this exists — prompt assembly queries memory once per
+        // turn, so a fact the opening message missed is otherwise unreachable. Its store
+        // and forget actions are for explicit operator instructions only; capture remains
+        // the automatic write path. Default-off per agent, like every tool that writes.
+        toolList.add(new MemoryTool());
         toolList.add(new FileSystemTools());
         toolList.add(new DocumentsTool());
         toolList.add(new AppInstallTool()); // JCLAW-768: sandbox-safe hosted-app stage/validate/install

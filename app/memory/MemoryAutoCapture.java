@@ -229,9 +229,9 @@ public final class MemoryAutoCapture {
      * would leave a permanent derivative of a transcript the operator was told
      * would vanish, shaping later answers from a source they can no longer inspect.
      *
-     * <p>Scoped to <em>auto</em>-capture only. The memory tool still works during a
-     * voice conversation: an explicit "remember this" is an instruction, not the
-     * passive distillation being withheld here.
+     * <p>Scoped to <em>auto</em>-capture only. The {@code memory} tool (JCLAW-919) still
+     * works during a voice conversation: an explicit "remember this" is an instruction,
+     * not the passive distillation being withheld here.
      *
      * <p>Split out rather than inlined at the call site because {@code captureAsync}
      * returns early in test mode, so anything buried in its virtual thread is
@@ -330,7 +330,17 @@ public final class MemoryAutoCapture {
                     "Dropped %d candidate memory(ies) containing apparent injection payloads".formatted(blocked));
         }
 
-        if (candidates.isEmpty()) {
+        // JCLAW-919: the turn that asks to forget a fact states it, so without this the
+        // capture running on that same turn re-learns what forget just deleted.
+        final List<Candidate> kept =
+                candidates.stream().filter(c -> !MemoryForgetLog.recentlyForgotten(agentKey, c.text())).toList();
+        int reforgotten = candidates.size() - kept.size();
+        if (reforgotten > 0) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) the operator just asked to forget".formatted(reforgotten));
+        }
+
+        if (kept.isEmpty()) {
             return logged(agentName, CaptureResult.skipped("no_candidates"));
         }
 
@@ -343,8 +353,8 @@ public final class MemoryAutoCapture {
         // call" invariant the pipeline is built around. JCLAW-922 adds the
         // semantic pass ahead of plan for the same reason: it embeds each
         // candidate, and that round-trip must not run inside the plan Tx.
-        var semanticDupes = semanticDuplicateIndices(agentKey, agentName, candidates);
-        var plan = Tx.run(() -> plan(agentKey, candidates, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
+        var semanticDupes = semanticDuplicateIndices(agentKey, agentName, kept);
+        var plan = Tx.run(() -> plan(agentKey, kept, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
         var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
         // Persist the survivor rows inside the apply Tx (capturing their ids), then
         // generate + write their embeddings AFTER it commits — the embedding HTTP
@@ -354,7 +364,7 @@ public final class MemoryAutoCapture {
         var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions));
         embedStored(storedIds);
         return logged(agentName, new CaptureResult(storedIds.size(),
-                candidates.size() - storedIds.size(), null));
+                kept.size() - storedIds.size(), null));
     }
 
     /**
