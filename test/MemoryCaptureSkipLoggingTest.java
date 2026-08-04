@@ -6,11 +6,6 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-928: a capture that cannot resolve its context must say so. Exercises
  * {@code resolveExtractContext} directly — {@code captureAsync} returns early in test

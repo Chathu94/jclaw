@@ -255,11 +255,11 @@ public class ApiMemoryController extends Controller {
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
     }
 
-    /** Summary of a generated suite. Never returns the cases: they are personal data. */
     /** Cluster structure only: sizes, never texts — a stats call must not leak the corpus. */
     public record EvalClusterView(String clusterBy, double clusterThreshold,
                                  List<Integer> distinctFactsPerCluster) {}
 
+    /** Summary of a generated suite. Never returns the cases: they are personal data. */
     public record EvalGenerateView(String suiteId, String fingerprint, int cases, String path) {}
 
     /**
@@ -348,7 +348,7 @@ public class ApiMemoryController extends Controller {
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
             throw new AssertionError("unreachable");
-        } catch (IOException e) {
+        } catch (IOException _) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
                     "No generated suite '%s' — generate one first".formatted(suiteId));
             throw new AssertionError("unreachable");

@@ -31,6 +31,10 @@ public final class MemoryEvalGenerator {
 
     private static final String EVENT_CATEGORY = "memory";
 
+    /** Every active memory of one agent, oldest first — the corpus a suite samples. */
+    private static final String ACTIVE_MEMORIES_JPQL =
+            "agent.id = ?1 AND supersededAt IS NULL ORDER BY id";
+
     /** Generous: the maxFacts ceiling, not this, is what decides a cluster is too broad. */
     private static final int MAX_SEMANTIC_NEIGHBOURS = 50;
 
@@ -82,7 +86,7 @@ public final class MemoryEvalGenerator {
     public static MemoryEvalSuite generate(Agent agent, String suiteId, int sampleSize,
                                            QuestionWriter writer) {
         var rows = Tx.run(() -> Memory.<Memory>find(
-                        "agent.id = ?1 AND supersededAt IS NULL ORDER BY id", agent.id).<Memory>fetch()
+                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text)).toList());
         if (rows.isEmpty()) {
             return new MemoryEvalSuite(suiteId, "No memories to sample.", corpusFingerprint(rows), List.of());
@@ -146,7 +150,7 @@ public final class MemoryEvalGenerator {
     public static MemoryEvalSuite generateCoverage(Agent agent, String suiteId, int maxCases,
                                                    Clustering clustering, QuestionWriter writer) {
         var rows = Tx.run(() -> Memory.<Memory>find(
-                        "agent.id = ?1 AND supersededAt IS NULL ORDER BY id", agent.id).<Memory>fetch()
+                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text)).toList());
         var cases = new ArrayList<MemoryEvalCase>();
         var used = new java.util.HashSet<Long>();
@@ -197,7 +201,7 @@ public final class MemoryEvalGenerator {
      */
     public static List<Integer> clusterSizes(Agent agent, Clustering clustering) {
         var rows = Tx.run(() -> Memory.<Memory>find(
-                        "agent.id = ?1 AND supersededAt IS NULL ORDER BY id", agent.id).<Memory>fetch()
+                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text)).toList());
         var sizes = new ArrayList<Integer>();
         var used = new java.util.HashSet<Long>();

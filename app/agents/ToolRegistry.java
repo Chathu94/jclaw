@@ -710,37 +710,36 @@ public class ToolRegistry {
             }
             return Collections.unmodifiableSet(disabled);
         }
-        // JCLAW-228: image generation can cost money / hit rate limits, so generate_image is hidden
-        // from every agent unless an explicit AgentToolConfig row turns it on (single-click in the
-        // agent editor). Distinct from the MCP default-disable below, which only affects non-main agents.
-        if (!Boolean.TRUE.equals(explicitState.get(GENERATE_IMAGE_TOOL))) {
-            disabled.add(GENERATE_IMAGE_TOOL);
-        }
-        // JCLAW-235: video generation is likewise default-off (costly / slow); opt-in per agent.
-        if (!Boolean.TRUE.equals(explicitState.get(GENERATE_VIDEO_TOOL))) {
-            disabled.add(GENERATE_VIDEO_TOOL);
-        }
-        // JCLAW-876: speaking a reply is slow (seconds, plus a possible sidecar model
-        // load) and changes the shape of an answer, so an agent opts in to it.
-        if (!Boolean.TRUE.equals(explicitState.get(GENERATE_AUDIO_TOOL))) {
-            disabled.add(GENERATE_AUDIO_TOOL);
-        }
-        // JCLAW-919: forget deletes memories outright, so a non-main agent opts in.
-        if (!agent.isMain() && !Boolean.TRUE.equals(explicitState.get(MEMORY_TOOL))) {
-            disabled.add(MEMORY_TOOL);
-        }
-        // JCLAW-911: printing is physical and cannot be undone, so an agent opts in.
-        if (!Boolean.TRUE.equals(explicitState.get(PRINTER_TOOL))) {
-            disabled.add(PRINTER_TOOL);
-        }
-        // JCLAW-941: main keeps it without a row; every other agent has to be granted it.
-        if (!agent.isMain() && !Boolean.TRUE.equals(explicitState.get(JCLAW_API_TOOL))) {
-            disabled.add(JCLAW_API_TOOL);
-        }
+        disableUnlessGranted(disabled, explicitState, OPT_IN_FOR_EVERY_AGENT);
         if (!agent.isMain()) {
+            disableUnlessGranted(disabled, explicitState, OPT_IN_FOR_NON_MAIN_AGENTS);
             addMcpDefaultDisabled(disabled, explicitState);
         }
         return Collections.unmodifiableSet(disabled);
+    }
+
+    /**
+     * Tools every agent has to be granted explicitly. Each constant above carries the
+     * reason it is on this list — cost, latency, or an action with no undo.
+     */
+    private static final List<String> OPT_IN_FOR_EVERY_AGENT = List.of(
+            GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL);
+
+    /**
+     * Tools main holds by default and every other agent has to be granted. The split is
+     * trust, not cost: both reach beyond the turn they run in — one into JClaw's own admin
+     * API, one into stored memory — and main is the operator's own agent.
+     */
+    private static final List<String> OPT_IN_FOR_NON_MAIN_AGENTS = List.of(
+            MEMORY_TOOL, JCLAW_API_TOOL);
+
+    /** Disables each named tool that carries no explicit enable row — the opt-in default. */
+    private static void disableUnlessGranted(Set<String> disabled,
+                                             Map<String, Boolean> explicitState,
+                                             List<String> optIn) {
+        for (var name : optIn) {
+            if (!Boolean.TRUE.equals(explicitState.get(name))) disabled.add(name);
+        }
     }
 
     /**

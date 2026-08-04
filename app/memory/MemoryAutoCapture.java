@@ -368,26 +368,6 @@ public final class MemoryAutoCapture {
     }
 
     /**
-     * Plan phase (in Tx): build the comparison pool, drop candidates that already
-     * have a near-duplicate stored ({@link MemorySimilarity} NOOP), cap at
-     * {@code maxPerTurn}, and collect the consolidation shortlist for the judge.
-     * Superseded rows are excluded from both legs of the pool, so a superseded old
-     * fact can never NOOP a re-emerging new one.
-     *
-     * <p>The pool is the agent's recency slice <em>plus</em> a per-candidate
-     * retrieval neighbourhood (JCLAW-920). The slice alone bounded dedup to the
-     * newest {@code dedupScan} rows, so a fact restated after the window had moved
-     * on was compared against nothing and stored again — two byte-identical pairs
-     * survived that way in a 1248-row store, 1312 and 5214 ids apart. Retrieval
-     * reaches the whole index, making the pool relevance-selected rather than
-     * recency-selected at a cost that does not grow with the store.
-     *
-     * <p>Retrieval here is the keyword leg only ({@link Memory#searchByTextScored}
-     * — Lucene FTS or the DB LIKE fallback). Deliberate: {@code MemoryStore.search}
-     * would embed the query, and this method runs inside the plan transaction where
-     * a blocking HTTP call must never happen.
-     */
-    /**
      * Semantic dedup phase (no Tx): which candidate indices already have a
      * near-identical memory stored, judged by embedding cosine rather than shared
      * wording (JCLAW-922). This is the tier the lexical rule cannot reach — a
@@ -417,6 +397,26 @@ public final class MemoryAutoCapture {
         return out;
     }
 
+    /**
+     * Plan phase (in Tx): build the comparison pool, drop candidates that already
+     * have a near-duplicate stored ({@link MemorySimilarity} NOOP), cap at
+     * {@code maxPerTurn}, and collect the consolidation shortlist for the judge.
+     * Superseded rows are excluded from both legs of the pool, so a superseded old
+     * fact can never NOOP a re-emerging new one.
+     *
+     * <p>The pool is the agent's recency slice <em>plus</em> a per-candidate
+     * retrieval neighbourhood (JCLAW-920). The slice alone bounded dedup to the
+     * newest {@code dedupScan} rows, so a fact restated after the window had moved
+     * on was compared against nothing and stored again — two byte-identical pairs
+     * survived that way in a 1248-row store, 1312 and 5214 ids apart. Retrieval
+     * reaches the whole index, making the pool relevance-selected rather than
+     * recency-selected at a cost that does not grow with the store.
+     *
+     * <p>Retrieval here is the keyword leg only ({@link Memory#searchByTextScored}
+     * — Lucene FTS or the DB LIKE fallback). Deliberate: {@code MemoryStore.search}
+     * would embed the query, and this method runs inside the plan transaction where
+     * a blocking HTTP call must never happen.
+     */
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
                                           int maxPerTurn, double dupThreshold, int dedupScan,
                                           Set<Integer> semanticDupes) {
