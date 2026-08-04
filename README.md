@@ -141,7 +141,7 @@ jclaw/
 │   ├── middleware/               # Global route middleware (auth guard)
 │   ├── public/                   # Static assets
 │   └── nuxt.config.ts            # Nuxt configuration
-├── evals/                        # Versioned agent-behaviour eval datasets
+├── evals/                        # Agent-behaviour eval datasets
 ├── lib/                          # Custom JARs (if needed)
 ├── modules/                      # Play modules (auto-managed)
 ├── public/                       # Static web assets
@@ -482,7 +482,7 @@ Each check writes its full output to `logs/test-<check>.log` (e.g. `logs/test-ba
 
 #### Evals
 
-Agent behaviour is measured against versioned datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
+Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
 
 ```bash
 ./jclaw.sh evals                                              # validate the dataset
@@ -490,11 +490,11 @@ Agent behaviour is measured against versioned datasets in `evals/suites/` — to
 ./jclaw.sh evals --responses run.json --baseline reports/last.json  # catch regressions
 ```
 
-Eval runs are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. See [evals/README.md](evals/README.md) for the format and for why a published suite is versioned rather than edited.
+Eval runs are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. See [evals/README.md](evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
 
-#### Pre-push hook (optional)
+#### Git hooks
 
-An in-repo `.githooks/pre-push` hook runs `./jclaw.sh test` before a push reaches the remote and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite. Enable once per clone:
+`./jclaw.sh setup` wires the three in-repo hooks from `.githooks/` once per clone. `pre-commit` runs lint-staged over staged `frontend/**` files; `pre-push` runs `./jclaw.sh test` before a push reaches the remote and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite; `post-checkout` seeds a new worktree via `./jclaw.sh init-worktree`. To wire them by hand instead:
 
 ```bash
 git config core.hooksPath .githooks
