@@ -302,4 +302,54 @@ class JpaMemoryStoreVectorTest extends UnitTest {
                 "embedStored must write the vector so the deferred row becomes KNN-recallable");
         assertEquals(BERLIN, results.getFirst().text());
     }
+
+    // --- JCLAW-940: the absolute relevance gate ---
+
+    @Test
+    void aQueryWithNothingRelevantRecallsNothingRatherThanTheFullBudget() {
+        // Before the gate, recall returned the full budget for any query at all: both
+        // vector legs took the k nearest regardless of distance, and RRF then normalised
+        // the best hit to 1.0 whatever its true similarity. Live, four invented words and
+        // a bare "hey" each returned ten memories.
+        var agent = agentId("gate-empty");
+        store.store(agent, BERLIN, "fact", 0.6);
+
+        // DEPLOY_QUERY's vector is orthogonal to BERLIN (cosine 0) and shares no wording
+        // with it, so neither leg has anything to contribute.
+        assertTrue(store.search(agent, DEPLOY_QUERY, 10).isEmpty(),
+                "a query unrelated on both legs must recall nothing");
+    }
+
+    @Test
+    void theGateIsAllOrNothingPerLegSoAWeakTailSurvivesAStrongHit() {
+        // Measured on the live corpus: a real question's best hit clears the floor while
+        // its tenth sits down in the same band as a nonsense query. Filtering hit by hit
+        // therefore cost legitimate recall — complete misses rose from 4 to 8 of 150 —
+        // so the leg is gated on its best hit instead. FINANCE is the weak tail here: its
+        // vector is close to BERLIN's, so it rides in on BERLIN_QUERY's strong hit.
+        var agent = agentId("gate-tail");
+        store.store(agent, BERLIN, "fact", 0.6);
+        store.store(agent, FINANCE, "fact", 0.6);
+
+        var texts = store.search(agent, BERLIN_QUERY, 10).stream().map(MemoryStore.MemoryEntry::text).toList();
+        assertTrue(texts.contains(BERLIN), "the strong hit must survive: " + texts);
+        assertTrue(texts.contains(FINANCE), "the weaker tail must ride in with it: " + texts);
+    }
+
+    @Test
+    void loweringTheFloorRestoresThePreGateBehaviour() {
+        // The floor is an operator knob because the right value is a property of the
+        // embedding model, not of the code — a different model needs a different sweep.
+        var agent = agentId("gate-knob");
+        store.store(agent, BERLIN, "fact", 0.6);
+        assertTrue(store.search(agent, DEPLOY_QUERY, 10).isEmpty(), "precondition: gated at the default");
+
+        services.ConfigService.set(JpaMemoryStore.KEY_RECALL_MIN_COSINE, "-1.0");
+        try {
+            assertFalse(store.search(agent, DEPLOY_QUERY, 10).isEmpty(),
+                    "a floor below every cosine must let the vector leg through again");
+        } finally {
+            services.ConfigService.delete(JpaMemoryStore.KEY_RECALL_MIN_COSINE);
+        }
+    }
 }

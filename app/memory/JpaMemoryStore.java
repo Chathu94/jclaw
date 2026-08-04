@@ -393,22 +393,50 @@ public class JpaMemoryStore implements MemoryStore {
      * weighted sum) forces a sequential scan of every embedding. Test-pinned.
      */
     public static final String PG_VECTOR_LEG_SQL = """
-            SELECT m.id FROM memory m
+            SELECT m.id, 1 - (m.embedding <=> ?2::text::vector) AS cos FROM memory m
             WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL
             ORDER BY m.embedding <=> ?2::text::vector
             """;
 
     private List<Long> pgVectorIds(Long pk, float[] embedding, int limit) {
+        // JCLAW-940: selects the cosine so the leg can be gated on its best hit in Java,
+        // matching the Lucene branch. The ORDER BY stays the bare operator the HNSW index
+        // serves — only the projection is added, never a wrapping expression.
         List<?> rows = JPA.em().createNativeQuery(PG_VECTOR_LEG_SQL)
                 .setParameter(1, pk)
                 .setParameter(2, toVectorLiteral(embedding))
                 .setMaxResults(limit)
                 .getResultList();
+        if (rows.isEmpty()) return List.of();
         var ids = new ArrayList<Long>(rows.size());
+        double best = -1;
         for (Object r : rows) {
-            ids.add(((Number) r).longValue());
+            var cols = (Object[]) r;
+            ids.add(((Number) cols[0]).longValue());
+            best = Math.max(best, ((Number) cols[1]).doubleValue());
         }
-        return ids;
+        return vectorLegAboveFloor(best) ? ids : List.of();
+    }
+
+    /**
+     * JCLAW-940: whether the vector leg's <em>best</em> hit clears the floor.
+     *
+     * <p>All-or-nothing per leg, not per hit. Measured on this corpus, the two
+     * distributions overlap in the tail but separate at the head: four invented words top
+     * out below 0.60 cosine while a real question's best hit clears 0.62, yet a real
+     * question's tenth hit sits down in the same band as the nonsense. Filtering hit by hit
+     * therefore removes the tail of good queries — recall-large complete misses rose from
+     * 4 to 8 of 150 across the sweep — while only a floor high enough to do that damage
+     * silenced the degenerate queries. Gating the leg on its best hit separates them: a
+     * query with nothing relevant loses the whole leg, and a query with something relevant
+     * keeps all of it.
+     *
+     * <p>This is also the acceptance criterion read literally — no memory above the
+     * threshold means no block, rather than dropping whichever individual memories fall
+     * below it.
+     */
+    private static boolean vectorLegAboveFloor(double bestCosine) {
+        return bestCosine >= ConfigService.getDouble(KEY_RECALL_MIN_COSINE, DEFAULT_RECALL_MIN_COSINE);
     }
 
     /**
@@ -462,7 +490,8 @@ public class JpaMemoryStore implements MemoryStore {
         var fts = Memory.searchByTextScored(agentId, query, limit);
         List<ScoredId> knn;
         try {
-            knn = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit);
+            var hits = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit);
+            knn = vectorLegAboveFloor(hits.isEmpty() ? -1 : 2 * hits.getFirst().score() - 1) ? hits : List.of();
         } catch (IOException e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Lucene KNN search failed, falling back to FTS: %s".formatted(e.getMessage()));
@@ -497,6 +526,40 @@ public class JpaMemoryStore implements MemoryStore {
      * replaces the fused scores, otherwise downstream importance blending
      * (JCLAW-40) would re-sort on scores the rerank just overruled.
      */
+    public static final String KEY_RECALL_MIN_COSINE = "memory.recall.minCosine";
+
+    /**
+     * JCLAW-940: absolute cosine a memory must reach to enter recall at all.
+     *
+     * <p>Both vector legs return the k nearest regardless of distance, and
+     * {@link ReciprocalRankFusion#fuse} then divides every fused score by the top one — so
+     * the best hit is 1.0 by construction however far away it actually is. The keyword
+     * leg's {@code minScoreRatio} is likewise relative to its own top hit. With every
+     * signal relative, nothing absolute survives to the selection step, and recall
+     * returned a full budget for "hey" and for four invented words.
+     *
+     * <p>Deliberately the same shape as the capture-dedup floor
+     * ({@code memory.autocapture.dedup.cosineThreshold}), which already thresholds on a
+     * real cosine on both dialects. The asymmetry was that dedup got this and recall
+     * never did.
+     *
+     * <p>0.60 measured on this corpus with nomic-embed-text-v1.5 at 768 dims. It silences
+     * four invented words and a bare "hey" completely, for one question of 150 losing its
+     * gold from the top ten (R@10 0.973 to 0.967) with coverage@k and R@1 unchanged. 0.55
+     * and 0.58 cost the identical case while gating less, so 0.60 dominates them; 0.62
+     * costs three and 0.65 costs seven.
+     *
+     * <p>It does not gate a coherent question about the wrong subject — "how do I bake
+     * sourdough bread at high altitude" tops 0.65 against this corpus — because there the
+     * distributions genuinely overlap. The gate removes degenerate queries, not irrelevant
+     * ones, and no floor on this embedding model separates the latter.
+     *
+     * <p>The threshold is a property of the embedding model, not of the code: cosine
+     * distributions differ per model, so re-sweep after changing it. The knob is what makes
+     * that a config change rather than a release.
+     */
+    public static final double DEFAULT_RECALL_MIN_COSINE = 0.60;
+
     public static final String KEY_RRF_K = "memory.recall.rrfK";
 
     /**
