@@ -15,7 +15,9 @@
  */
 import type { Component } from 'vue'
 import {
+  AdjustmentsHorizontalIcon,
   ArrowPathIcon,
+  ArrowsUpDownIcon,
   ArrowUpTrayIcon,
   BoltIcon,
   ChatBubbleBottomCenterTextIcon,
@@ -46,7 +48,9 @@ import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
 import SettingsLoggingPanel from './SettingsLoggingPanel.vue'
 import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
-import SettingsMemoryPanel from './SettingsMemoryPanel.vue'
+import SettingsMemoryEmbeddingsPanel from './SettingsMemoryEmbeddingsPanel.vue'
+import SettingsMemoryLimitsPanel from './SettingsMemoryLimitsPanel.vue'
+import SettingsMemoryRerankerPanel from './SettingsMemoryRerankerPanel.vue'
 import SettingsOcrPanel from './SettingsOcrPanel.vue'
 import SettingsPasswordPanel from './SettingsPasswordPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
@@ -139,7 +143,16 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
-      { id: 'memory', title: 'Memory', icon: CircleStackIcon, component: SettingsMemoryPanel },
+    ],
+  },
+  {
+    label: 'Memory',
+    sections: [
+      { id: 'memory-limits', title: 'Limits', icon: AdjustmentsHorizontalIcon, component: SettingsMemoryLimitsPanel },
+      // Keeps the shipped `memory` id: it has always addressed the embedding panel, and
+      // the header rule above applies — bookmarks and deep links point at it.
+      { id: 'memory', title: 'Embeddings', icon: CircleStackIcon, component: SettingsMemoryEmbeddingsPanel },
+      { id: 'memory-reranker', title: 'Reranker', icon: ArrowsUpDownIcon, component: SettingsMemoryRerankerPanel },
     ],
   },
   {
