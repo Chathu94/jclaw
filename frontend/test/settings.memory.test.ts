@@ -78,9 +78,65 @@ describe('Settings page — Memory Embeddings', () => {
     baseEndpoints()
     const component = await mountSettingsSection('memory')
 
-    expect(component.text()).toContain('Memory Embeddings')
+    expect(component.text()).toContain('Embeddings')
     expect(component.find('[data-testid="memory-vector-toggle"]').text()).toBe('Enable')
     expect(component.find('[data-testid="memory-embedding-provider"]').exists()).toBe(false)
+  })
+
+  it('carries all three subsections', async () => {
+    // The Memory section is the home for limits, embeddings and reranking — and for
+    // RAG and knowledge-graph settings later. Pin the three that exist now.
+    baseEndpoints()
+    const component = await mountSettingsSection('memory')
+
+    expect(component.text()).toContain('Limits')
+    expect(component.text()).toContain('Embeddings')
+    expect(component.text()).toContain('Reranker')
+    expect(component.find('[data-testid="memory-core-max-count"]').exists()).toBe(true)
+    expect(component.find('[data-testid="memory-recall-limit"]').exists()).toBe(true)
+    expect(component.find('[data-testid="memory-rerank-toggle"]').exists()).toBe(true)
+  })
+
+  it('defaults the limits to the backend code defaults', async () => {
+    // These two are the ONLY bounds on their blocks, so a wrong default here silently
+    // changes how much memory reaches the prompt.
+    baseEndpoints()
+    const component = await mountSettingsSection('memory')
+
+    expect((component.find('[data-testid="memory-core-max-count"]').element as HTMLInputElement).value).toBe('20')
+    expect((component.find('[data-testid="memory-recall-limit"]').element as HTMLInputElement).value).toBe('10')
+  })
+
+  it('refuses to save a limit below one', async () => {
+    baseEndpoints()
+    const component = await mountSettingsSection('memory')
+
+    await component.find('[data-testid="memory-recall-limit"]').setValue('0')
+    await flushPromises()
+
+    expect(component.find('[data-testid="memory-limits-invalid"]').exists()).toBe(true)
+    expect((component.find('[data-testid="memory-limits-save"]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('keeps the reranker pickers hidden until it is enabled', async () => {
+    baseEndpoints()
+    const component = await mountSettingsSection('memory')
+
+    expect(component.find('[data-testid="memory-rerank-toggle"]').text()).toBe('Enable')
+    expect(component.find('[data-testid="memory-rerank-provider"]').exists()).toBe(false)
+  })
+
+  it('offers only local providers for the reranker', async () => {
+    // Reranking renders the candidate memories into the prompt, so the same
+    // local-only rule as embeddings applies — enforced in ConfigService, narrowed here.
+    baseEndpoints([{ key: 'memory.rerank.enabled', value: 'true' }],
+      [localProvider('lm-studio'), cloudProvider('openrouter')])
+    const component = await mountSettingsSection('memory')
+
+    const options = component.find('[data-testid="memory-rerank-provider"]').findAll('option')
+    const values = options.map(o => (o.element as HTMLOptionElement).value)
+    expect(values).toContain('lm-studio')
+    expect(values).not.toContain('openrouter')
   })
 
   it('offers provider and model pickers once vector memory is enabled', async () => {

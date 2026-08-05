@@ -139,7 +139,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },
       { id: 'skills', title: 'Skills Promotion', icon: PuzzlePieceIcon, component: SettingsSkillsPanel },
-      { id: 'memory', title: 'Memory Embeddings', icon: CircleStackIcon, component: SettingsMemoryPanel },
+      { id: 'memory', title: 'Memory', icon: CircleStackIcon, component: SettingsMemoryPanel },
     ],
   },
   {

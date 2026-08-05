@@ -64,9 +64,15 @@ public final class MemoryReranker {
      * is installed (the override implies "active" the same way
      * {@code JpaMemoryStore.embedderOverride} implies canned embeddings).
      */
+    /** Config keys backing the Settings Memory panel's Reranker subsection. */
+    public static final String KEY_PREFIX = "memory.rerank.";
+    public static final String KEY_ENABLED = KEY_PREFIX + "enabled";
+    public static final String KEY_PROVIDER = KEY_PREFIX + "provider";
+    public static final String KEY_MODEL = KEY_PREFIX + "model";
+
     public static boolean active() {
         return rankCallOverride != null
-                || ConfigService.getBoolean("memory.rerank.enabled", false);
+                || ConfigService.getBoolean(KEY_ENABLED, false);
     }
 
     /**
@@ -95,22 +101,36 @@ public final class MemoryReranker {
     }
 
     /**
-     * Production rank call via the primary provider and
-     * {@code memory.rerank.model}. Null (skip rerank) when either is missing —
-     * the model has no agent-default fallback because recall runs without an
-     * agent's provider context (unlike auto-capture).
+     * Production rank call via the configured provider and {@link #KEY_MODEL}.
+     * Null (skip rerank) when either is missing — the model has no agent-default
+     * fallback because recall runs without an agent's provider context (unlike
+     * auto-capture).
+     *
+     * <p>Requires {@link #KEY_PROVIDER} rather than falling back to the registry
+     * primary. {@link #render} puts the full shortlist text into the prompt, so a
+     * rerank ships memory content to whatever serves it — the same exposure that
+     * restricts embeddings to a local provider (JCLAW-939). Defaulting to the
+     * primary would send that text to whichever endpoint happened to sort first,
+     * routinely a cloud one. {@code ConfigService} rejects a non-local value for
+     * this key, so a configured provider is a local provider.
      */
     private static RankCall productionCall() {
-        var provider = ProviderRegistry.getPrimary();
-        var model = ConfigService.get("memory.rerank.model", "");
-        if (provider == null || model.isBlank()) {
+        var providerName = ConfigService.get(KEY_PROVIDER, "").trim();
+        var model = ConfigService.get(KEY_MODEL, "");
+        if (providerName.isBlank() || model.isBlank()) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
-                    "memory.rerank.enabled is on but %s — skipping rerank"
-                            .formatted(provider == null ? "no LLM provider is configured"
-                                    : "memory.rerank.model is not set"));
+                    "%s is on but %s is not set — skipping rerank"
+                            .formatted(KEY_ENABLED, providerName.isBlank() ? KEY_PROVIDER : KEY_MODEL));
             return null;
         }
-        int maxTokens = ConfigService.getInt("memory.rerank.maxTokens", 256);
+        var provider = ProviderRegistry.get(providerName);
+        if (provider == null) {
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "%s names '%s', which is not a configured provider — skipping rerank"
+                            .formatted(KEY_PROVIDER, providerName));
+            return null;
+        }
+        int maxTokens = ConfigService.getInt(KEY_PREFIX + "maxTokens", 256);
         return msgs -> SessionCompactor.firstChoiceText(
                 provider.chat(model, msgs, List.of(), maxTokens, null, null));
     }

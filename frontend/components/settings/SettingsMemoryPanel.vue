@@ -15,6 +15,106 @@ import { MemoryVectorKeys, looksLikeEmbeddingModel } from '~/utils/embeddingMode
 
 const { configValue, saveField, saving, providersData, getProviderModels } = useSettingsConfig()
 
+/**
+ * Limits (JCLAW-955/979). These are the ONLY bounds on the two memory blocks — the
+ * token budgets that used to sit alongside them were removed because they dropped
+ * whichever memory happened to be verbose rather than whichever ranked lowest. So
+ * these two numbers decide how much memory reaches the prompt, which is why they
+ * belong in Settings rather than in the config table only.
+ */
+const MemoryLimitKeys = {
+  coreMaxCount: 'memory.coreload.maxCount',
+  recallLimit: 'memory.recall.limit',
+} as const
+
+/** Mirrors memory.MemoryReranker's keys. */
+const MemoryRerankKeys = {
+  enabled: 'memory.rerank.enabled',
+  provider: 'memory.rerank.provider',
+  model: 'memory.rerank.model',
+} as const
+
+const coreMaxCount = ref(configValue(MemoryLimitKeys.coreMaxCount, '20'))
+const recallLimit = ref(configValue(MemoryLimitKeys.recallLimit, '10'))
+
+const limitsDirty = computed(() =>
+  coreMaxCount.value !== configValue(MemoryLimitKeys.coreMaxCount, '20')
+  || recallLimit.value !== configValue(MemoryLimitKeys.recallLimit, '10'))
+
+/** Both are counts of whole memories, so anything below 1 disables the block by accident. */
+const limitsValid = computed(() =>
+  Number(coreMaxCount.value) >= 1 && Number(recallLimit.value) >= 1)
+
+async function saveLimits() {
+  if (!limitsDirty.value || !limitsValid.value) return
+  await saveField(MemoryLimitKeys.coreMaxCount, String(Number(coreMaxCount.value)))
+  await saveField(MemoryLimitKeys.recallLimit, String(Number(recallLimit.value)))
+}
+
+// ── Reranker ──────────────────────────────────────────────────────────────
+const rerankEnabled = computed(() => configValue(MemoryRerankKeys.enabled, 'false') === 'true')
+const savedRerankProvider = computed(() => configValue(MemoryRerankKeys.provider))
+const savedRerankModel = computed(() => configValue(MemoryRerankKeys.model))
+
+const rerankProvider = ref(savedRerankProvider.value)
+const rerankModel = ref(savedRerankModel.value)
+const rerankCatalog = ref<ProviderModelDef[] | null>(null)
+const rerankDiscovering = ref(false)
+
+/**
+ * Chat models, not embedding models: the reranker asks a model to reorder a numbered
+ * shortlist and reads back an index array, so it needs an instruct-following model.
+ * discover-models is the endpoint that excludes embedding/TTS/STT for exactly that use.
+ */
+async function discoverRerankModels() {
+  if (!rerankProvider.value) return
+  rerankDiscovering.value = true
+  rerankCatalog.value = null
+  try {
+    const r = await $fetch<ProviderModelsResponse>(
+      `/api/providers/${encodeURIComponent(rerankProvider.value)}/discover-models`,
+    )
+    rerankCatalog.value = (r?.models ?? []) as unknown as ProviderModelDef[]
+  }
+  catch {
+    rerankCatalog.value = null
+  }
+  finally {
+    rerankDiscovering.value = false
+  }
+}
+
+const rerankModels = computed<ProviderModelDef[]>(() => {
+  const base = rerankCatalog.value ?? getProviderModels(rerankProvider.value)
+  if (savedRerankModel.value && rerankProvider.value === savedRerankProvider.value
+    && !base.some(m => m.id === savedRerankModel.value)) {
+    return [{ id: savedRerankModel.value, name: savedRerankModel.value }, ...base]
+  }
+  return base
+})
+
+const rerankDirty = computed(() =>
+  rerankProvider.value !== savedRerankProvider.value || rerankModel.value !== savedRerankModel.value)
+
+watch(rerankProvider, (p, prev) => {
+  if (prev !== undefined) rerankModel.value = ''
+  if (p) discoverRerankModels()
+})
+
+onMounted(() => {
+  if (rerankProvider.value) discoverRerankModels()
+})
+
+async function toggleRerank() {
+  await saveField(MemoryRerankKeys.enabled, rerankEnabled.value ? 'false' : 'true')
+}
+
+async function saveRerank() {
+  if (!rerankDirty.value) return
+  await saveField(MemoryRerankKeys.provider, rerankProvider.value)
+  await saveField(MemoryRerankKeys.model, rerankModel.value)
+}
+
 const enabled = computed(() => configValue(MemoryVectorKeys.enabled, 'false') === 'true')
 const savedProvider = computed(() => configValue(MemoryVectorKeys.provider))
 const savedModel = computed(() => configValue(MemoryVectorKeys.model))
@@ -204,8 +304,83 @@ async function saveSelection() {
 <template>
   <div class="mb-6 space-y-4">
     <h2 class="text-sm font-medium text-fg-muted">
-      Memory Embeddings
+      Memory
     </h2>
+
+    <!-- ── Limits ─────────────────────────────────────────────── -->
+    <h3 class="text-xs font-semibold text-fg-strong uppercase tracking-wide pt-2">
+      Limits
+    </h3>
+    <p class="text-xs text-fg-muted">
+      How many memories reach the prompt. Core memories load on every turn; recalled memories are
+      matched against the current message. Both are counts of whole memories — a memory that is
+      selected is always injected in full.
+    </p>
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-3 space-y-3">
+        <div>
+          <label
+            for="memory-core-max-count"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Core memories per turn</span>
+            <input
+              id="memory-core-max-count"
+              v-model="coreMaxCount"
+              type="number"
+              min="1"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-core-max-count"
+            >
+          </label>
+          <p class="mt-1 text-[11px] text-fg-muted">
+            The highest-importance durable facts, always in context. Ordered by importance, so
+            lowering this drops the least important first.
+          </p>
+        </div>
+        <div>
+          <label
+            for="memory-recall-limit"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Recalled memories per turn</span>
+            <input
+              id="memory-recall-limit"
+              v-model="recallLimit"
+              type="number"
+              min="1"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-recall-limit"
+            >
+          </label>
+          <p class="mt-1 text-[11px] text-fg-muted">
+            Matched against each message and ranked by relevance, importance and age. Lowering this
+            drops the lowest-ranked first.
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+            :disabled="!limitsDirty || !limitsValid || saving"
+            data-testid="memory-limits-save"
+            @click="saveLimits"
+          >
+            Save
+          </button>
+          <span
+            v-if="!limitsValid"
+            class="text-[11px] text-red-700 dark:text-red-400"
+            data-testid="memory-limits-invalid"
+          >Both limits must be at least 1.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Embeddings ─────────────────────────────────────────── -->
+    <h3 class="text-xs font-semibold text-fg-strong uppercase tracking-wide pt-4">
+      Embeddings
+    </h3>
     <p class="text-xs text-fg-muted">
       Vector memory lets recall find a memory by meaning rather than wording, and lets capture
       recognise a fact you have already stored even when you phrase it differently. With it off,
@@ -460,6 +635,138 @@ async function saveSelection() {
         >
           Last run failed: {{ reembed.error }}
         </p>
+      </div>
+    </div>
+
+    <!-- ── Reranker ───────────────────────────────────────────── -->
+    <h3 class="text-xs font-semibold text-fg-strong uppercase tracking-wide pt-4">
+      Reranker
+    </h3>
+    <p class="text-xs text-fg-muted">
+      A second pass that re-orders the shortlist recall found, judging each candidate against the
+      question rather than by keyword and vector score alone. It costs one extra model call per
+      recall, so it is off by default.
+    </p>
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-2.5 flex items-center justify-between">
+        <div class="min-w-0">
+          <span class="text-sm font-medium text-fg-strong">Rerank recalled memories</span>
+          <span
+            v-if="rerankEnabled"
+            class="ml-2 text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+          >on</span>
+          <span
+            v-else
+            class="ml-2 text-[10px] text-fg-muted border border-input px-1"
+          >off</span>
+        </div>
+        <button
+          type="button"
+          class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+          :disabled="saving"
+          data-testid="memory-rerank-toggle"
+          @click="toggleRerank"
+        >
+          {{ rerankEnabled ? 'Disable' : 'Enable' }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      v-if="rerankEnabled"
+      class="bg-surface-elevated border border-border"
+    >
+      <div class="px-4 py-3 space-y-3">
+        <div>
+          <label
+            for="memory-rerank-provider"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Provider</span>
+            <select
+              id="memory-rerank-provider"
+              v-model="rerankProvider"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-rerank-provider"
+            >
+              <option value="">
+                Select a provider…
+              </option>
+              <option
+                v-for="p in providerNames"
+                :key="p"
+                :value="p"
+              >
+                {{ p }}
+              </option>
+            </select>
+          </label>
+          <p
+            v-if="!providerNames.length"
+            class="mt-1 text-xs text-fg-muted"
+            data-testid="memory-rerank-no-local-provider"
+          >
+            No local provider is configured. Reranking sends the candidate memories to the model,
+            so it must run on this machine — add a provider with a local base URL (for example
+            Ollama or LM Studio) to enable it.
+          </p>
+        </div>
+
+        <div v-if="rerankProvider">
+          <label
+            for="memory-rerank-model"
+            class="block"
+          >
+            <span class="block text-xs font-medium text-fg-strong mb-1">Model</span>
+            <select
+              id="memory-rerank-model"
+              v-model="rerankModel"
+              class="w-full px-2 py-1.5 text-sm bg-surface border border-input text-fg-strong"
+              data-testid="memory-rerank-model"
+            >
+              <option value="">
+                Select a model…
+              </option>
+              <option
+                v-for="m in rerankModels"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.name || m.id }}
+              </option>
+            </select>
+          </label>
+          <p
+            v-if="rerankDiscovering"
+            class="mt-1 text-[11px] text-fg-muted"
+            data-testid="memory-rerank-discovering"
+          >
+            Loading models from {{ rerankProvider }}…
+          </p>
+          <p
+            v-else
+            class="mt-1 text-[11px] text-fg-muted"
+          >
+            A small instruct model is enough — it only has to return the shortlist in a new order.
+          </p>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+            :disabled="!rerankDirty || !rerankProvider || !rerankModel || saving"
+            data-testid="memory-rerank-save"
+            @click="saveRerank"
+          >
+            Save
+          </button>
+          <span
+            v-if="rerankEnabled && (!savedRerankProvider || !savedRerankModel)"
+            class="text-[11px] text-amber-700 dark:text-amber-400"
+            data-testid="memory-rerank-incomplete"
+          >Reranking stays off until a provider and model are saved.</span>
+        </div>
       </div>
     </div>
   </div>

@@ -170,6 +170,29 @@ class ConfigServiceTest extends UnitTest {
         assertEquals("Asia/Kuala_Lumpur", ConfigService.get("app.timezone"));
     }
 
+    // --- setWithSideEffects: memory providers must stay on this machine ---
+
+    @Test
+    void setWithSideEffectsRejectsANonLocalRerankProvider() {
+        // Reranking renders the candidate memories into its prompt, so whatever serves it
+        // sees memory text — the same exposure that restricts embeddings (JCLAW-939).
+        // Enforced here and not only in the Settings picker, because the key is reachable
+        // through POST /api/config directly.
+        var error = ConfigService.setWithSideEffects(memory.MemoryReranker.KEY_PROVIDER, "openrouter");
+        assertNotNull(error, "a non-local rerank provider must be rejected");
+        assertTrue(error.contains("reranking"),
+                "the error must name the feature it is protecting: " + error);
+        assertNull(ConfigService.get(memory.MemoryReranker.KEY_PROVIDER),
+                "the rejected value must not be persisted");
+    }
+
+    @Test
+    void setWithSideEffectsAcceptsBlankRerankProviderAsTheOffSwitch() {
+        // Clearing the provider is how an operator turns the reranker back off without
+        // hunting for the enabled flag; a blank must not trip the locality guard.
+        assertNull(ConfigService.setWithSideEffects(memory.MemoryReranker.KEY_PROVIDER, ""));
+    }
+
     // --- setWithSideEffects: the privilege-guard path ---
 
     @Test

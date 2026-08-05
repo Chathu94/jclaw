@@ -5,6 +5,7 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
 import llm.ProviderLocality;
+import memory.MemoryReranker;
 import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
 import models.Agent;
@@ -200,10 +201,14 @@ public class ConfigService {
         // provider is restricted to one running on the operator's own machine. Enforced
         // here rather than only in the Settings picker: this key is reachable through
         // POST /api/config directly, and a hidden option is not a disabled one.
-        if (key.equals(MemoryVectorSettings.KEY_PREFIX + "provider")
+        //
+        // The reranker is held to the same rule for the same reason: it renders the whole
+        // candidate shortlist into its prompt, so whatever serves it sees memory text.
+        if ((key.equals(MemoryVectorSettings.KEY_PROVIDER) || key.equals(MemoryReranker.KEY_PROVIDER))
                 && value != null && !value.isBlank()
                 && !ProviderLocality.isLocal(value)) {
-            return "Provider '" + value + "' is not local. Memory embeddings must use a "
+            var feature = key.equals(MemoryReranker.KEY_PROVIDER) ? "reranking" : "embeddings";
+            return "Provider '" + value + "' is not local. Memory " + feature + " must use a "
                     + "provider on this machine so memory text never leaves it.";
         }
 
