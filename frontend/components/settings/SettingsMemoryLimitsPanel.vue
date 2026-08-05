@@ -193,7 +193,7 @@ onMounted(refreshMigration)
         </div>
 
         <p class="text-xs text-fg-muted">
-          {{ migration.liveCore }} stored, {{ migration.cap }} allowed.
+          {{ migration.cap }} allowed per agent; the busiest holds {{ migration.liveCore }}.
           <template v-if="migration.overCap">
             The excess is not loaded into any turn — it holds the core category without the
             benefit. Migrating asks each memory's own agent to file it under the category that
@@ -204,6 +204,33 @@ onMounted(refreshMigration)
             Core memories are added only when you ask the agent to remember something. Anything
             it notices on its own is captured under another category.
           </template>
+        </p>
+
+        <!-- Which agents actually hold core memories. The cap is per agent, so a single
+             number cannot say where the pressure is, nor whether a migration can move it. -->
+        <ul
+          v-if="migration.agents.length"
+          class="text-xs text-fg-muted space-y-0.5"
+          data-testid="memory-core-per-agent"
+        >
+          <li
+            v-for="a in migration.agents"
+            :key="a.agentId"
+            class="flex items-center gap-2"
+          >
+            <span class="truncate text-fg-strong">{{ a.agentName }}</span>
+            <span class="tabular-nums">{{ a.core }} / {{ migration.cap }}</span>
+            <span
+              v-if="a.overCap"
+              class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+            >over</span>
+          </li>
+        </ul>
+        <p
+          v-else
+          class="text-xs text-fg-muted"
+        >
+          No agent holds a core memory yet.
         </p>
 
         <p

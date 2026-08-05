@@ -543,13 +543,25 @@ export interface CoreMigrationStatus {
   running: boolean
   processed: number
   total: number
-  /** Live core memories across all agents. */
+  /**
+   * The largest live core count held by any single agent — the number the cap governs.
+   * Not a total: the cap is per agent, because the core block is assembled per agent.
+   */
   liveCore: number
   /** memory.coreload.maxCount. */
   cap: number
   /** liveCore > cap — what enables the migrate button. Not derivable from `running`. */
   overCap: boolean
   error: string | null
+  /** Per-agent usage, busiest first. Only agents holding at least one core memory. */
+  agents: CoreMigrationAgent[]
+}
+
+export interface CoreMigrationAgent {
+  agentId: string
+  agentName: string
+  core: number
+  overCap: boolean
 }
 
 /** Shape returned by GET /api/agents/:id/prompt-breakdown. */

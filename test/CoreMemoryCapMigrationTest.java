@@ -241,4 +241,53 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         assertEquals(cap() + 3L, s.liveCore(), "the worst agent is what the panel must report");
         assertTrue(s.overCap(), "an agent past the cap must still be detected");
     }
+
+    // --- the per-agent breakdown ---
+
+    @Test
+    void statusNamesEachAgentHoldingCoreMemoriesBusiestFirst() {
+        // A single number cannot say where the pressure is: "20 of 20" is the same
+        // reading whether one agent is at the cap or five are spread beneath it.
+        storeCore("main core fact", 0.9);
+        var busy = otherAgent();
+        for (int i = 0; i < 3; i++) storeCoreFor(busy, "busy core fact " + i, 0.9);
+
+        var rows = CoreMemoryCapMigration.status().agents();
+        assertEquals(2, rows.size(), "both agents holding core memories must appear: " + rows);
+        assertEquals(busy.name, rows.getFirst().agentName(), "busiest agent first");
+        assertEquals(3L, rows.getFirst().core());
+        assertEquals(agent.name, rows.get(1).agentName());
+        assertEquals(1L, rows.get(1).core());
+    }
+
+    @Test
+    void agentsWithNoCoreMemoriesAreAbsentRatherThanListedAsZero() {
+        // What keeps the payload small: this instance has 489 agents and two of them hold
+        // a core memory. Listing zeros would make a polled endpoint carry the agent table.
+        storeCore("the only core fact", 0.9);
+        otherAgent();
+
+        var rows = CoreMemoryCapMigration.status().agents();
+        assertEquals(1, rows.size(), "only the agent holding a core memory belongs: " + rows);
+        assertEquals(agent.name, rows.getFirst().agentName());
+    }
+
+    @Test
+    void theBreakdownFlagsWhichAgentIsOverTheCap() {
+        storeCore("the quiet agent's only core fact", 0.9);
+        var busy = otherAgent();
+        for (int i = 0; i < cap() + 2; i++) storeCoreFor(busy, "busy core fact " + i, 0.9);
+
+        var rows = CoreMemoryCapMigration.status().agents();
+        assertTrue(rows.getFirst().overCap(), "the agent past the cap must be marked");
+        assertFalse(rows.get(1).overCap(), "the one within it must not be");
+    }
+
+    @Test
+    void anEmptyCorpusReportsNoAgentsAndIsNotOverTheCap() {
+        var s = CoreMemoryCapMigration.status();
+        assertTrue(s.agents().isEmpty());
+        assertEquals(0L, s.liveCore(), "no core memories means zero, not a stale maximum");
+        assertFalse(s.overCap());
+    }
 }

@@ -89,14 +89,24 @@ public final class CoreMemoryCapMigration {
      * What the Limits panel polls. {@code overCap} is what turns the button on, and is not
      * derivable from {@code running} — a corpus can be over the cap with nothing in flight.
      */
+    /**
+     * One agent's core-memory usage against the cap.
+     *
+     * @param core the agent's live core count — the number the cap governs
+     */
+    public record AgentCore(String agentId, String agentName, long core, boolean overCap) {}
+
     public record Status(boolean running, int processed, int total,
-                         long liveCore, int cap, boolean overCap, String error) {}
+                         long liveCore, int cap, boolean overCap, String error,
+                         List<AgentCore> agents) {}
 
     public static Status status() {
-        long live = Tx.run(CoreMemoryCapMigration::maxLiveCorePerAgent);
         int cap = cap();
+        var agents = Tx.run(() -> coreByAgent(cap));
+        // Sorted desc, so the head is the agent the cap actually binds.
+        long live = agents.isEmpty() ? 0 : agents.getFirst().core();
         return new Status(running.get(), processed.get(), total.get(),
-                live, cap, live > cap, lastError);
+                live, cap, live > cap, lastError, agents);
     }
 
     private static int cap() {
@@ -104,23 +114,34 @@ public final class CoreMemoryCapMigration {
     }
 
     /**
-     * The largest live-core count held by any one agent — the number the cap governs.
+     * Live core counts per agent, busiest first, for every agent holding at least one.
      *
-     * <p>Was the sum across every agent, which does not describe anything {@link #migrate()}
-     * can act on: the cap is per agent, because the core block is assembled per agent. The
-     * sum reported "over the limit" for corpora already in line and left the button unable
-     * to change anything. Observed live at 20 core on one agent plus 1 on another: 21
-     * against a cap of 20, while every agent was within it and each pass moved nothing.
+     * <p>The cap is per agent, because the core block is assembled per agent — a total
+     * across the instance describes nothing {@link #migrate()} can act on, and reporting
+     * one made the panel show "over the limit" for a corpus already in line (20 core on
+     * one agent plus 1 on another read as 21 against a cap of 20, with no agent over it
+     * and nothing for a pass to select).
      *
-     * <p>Only a single-agent corpus makes the two agree, which is why every test here saw
-     * the same number either way.
+     * <p>One grouped query rather than a count per agent. The previous loop ran
+     * {@code Agent.findAll()} and counted each one — 489 queries per poll on this
+     * instance, 92 ms for an endpoint the Settings panel polls, against 0.18 ms for the
+     * aggregate. Agents holding no core memory are absent rather than listed as zero,
+     * which is what keeps the payload two rows instead of 489.
      */
-    private static long maxLiveCorePerAgent() {
-        long max = 0;
-        for (Agent a : Agent.<Agent>findAll()) {
-            max = Math.max(max, Memory.countLiveCore(String.valueOf(a.id)));
+    private static List<AgentCore> coreByAgent(int cap) {
+        List<?> rows = play.db.jpa.JPA.em().createQuery(
+                        "select m.agent.id, m.agent.name, count(m) from Memory m "
+                                + "where m.category = :core and m.supersededAt is null "
+                                + "group by m.agent.id, m.agent.name order by count(m) desc")
+                .setParameter("core", MemoryCategory.CORE.label)
+                .getResultList();
+        var out = new ArrayList<AgentCore>(rows.size());
+        for (Object row : rows) {
+            var cols = (Object[]) row;
+            long n = ((Number) cols[2]).longValue();
+            out.add(new AgentCore(String.valueOf(cols[0]), (String) cols[1], n, n > cap));
         }
-        return max;
+        return out;
     }
 
     /**

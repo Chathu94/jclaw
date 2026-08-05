@@ -110,6 +110,10 @@ describe('Settings page — Memory Embeddings', () => {
     // core write past it, but cannot make the agent ask before filing the fact elsewhere.
     registerEndpoint('/api/memories/core-migration', () => ({
       running: false, processed: 0, total: 0, liveCore: 62, cap: 20, overCap: true, error: null,
+      agents: [
+        { agentId: '1', agentName: 'main', core: 62, overCap: true },
+        { agentId: '9', agentName: 'scratch', core: 3, overCap: false },
+      ],
     }))
     baseEndpoints()
     const component = await mountSettingsSection('memory-limits')
@@ -117,12 +121,25 @@ describe('Settings page — Memory Embeddings', () => {
 
     expect(component.find('[data-testid="memory-core-over-cap"]').exists()).toBe(true)
     expect((component.find('[data-testid="memory-core-migrate"]').element as HTMLButtonElement).disabled).toBe(false)
-    expect(component.text()).toContain('62 stored, 20 allowed')
+    // The cap is per agent, so the summary says which number is which — a bare total
+    // was what made "21 stored, 20 allowed" unfixable-looking when no agent was over.
+    expect(component.text()).toContain('20 allowed per agent')
+    expect(component.text()).toContain('the busiest holds 62')
+
+    // And the breakdown names the agents, so the operator can see where the pressure is
+    // rather than inferring it from one number.
+    const perAgent = component.find('[data-testid="memory-core-per-agent"]')
+    expect(perAgent.exists()).toBe(true)
+    expect(perAgent.text()).toContain('main')
+    expect(perAgent.text()).toContain('62 / 20')
+    expect(perAgent.text()).toContain('scratch')
+    expect(perAgent.text()).toContain('3 / 20')
   })
 
   it('disables the migration when core is within the cap', async () => {
     registerEndpoint('/api/memories/core-migration', () => ({
       running: false, processed: 0, total: 0, liveCore: 8, cap: 20, overCap: false, error: null,
+      agents: [{ agentId: '1', agentName: 'main', core: 8, overCap: false }],
     }))
     baseEndpoints()
     const component = await mountSettingsSection('memory-limits')
