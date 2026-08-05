@@ -105,6 +105,33 @@ describe('Settings page — Memory Embeddings', () => {
     expect((component.find('[data-testid="memory-recall-limit"]').element as HTMLInputElement).value).toBe('10')
   })
 
+  it('offers the migration only when core is over the cap', async () => {
+    // JCLAW-981: the button is the enforceable half of the cap. The memory tool refuses a
+    // core write past it, but cannot make the agent ask before filing the fact elsewhere.
+    registerEndpoint('/api/memories/core-migration', () => ({
+      running: false, processed: 0, total: 0, liveCore: 62, cap: 20, overCap: true, error: null,
+    }))
+    baseEndpoints()
+    const component = await mountSettingsSection('memory-limits')
+    await flushPromises()
+
+    expect(component.find('[data-testid="memory-core-over-cap"]').exists()).toBe(true)
+    expect((component.find('[data-testid="memory-core-migrate"]').element as HTMLButtonElement).disabled).toBe(false)
+    expect(component.text()).toContain('62 stored, 20 allowed')
+  })
+
+  it('disables the migration when core is within the cap', async () => {
+    registerEndpoint('/api/memories/core-migration', () => ({
+      running: false, processed: 0, total: 0, liveCore: 8, cap: 20, overCap: false, error: null,
+    }))
+    baseEndpoints()
+    const component = await mountSettingsSection('memory-limits')
+    await flushPromises()
+
+    expect(component.find('[data-testid="memory-core-over-cap"]').exists()).toBe(false)
+    expect((component.find('[data-testid="memory-core-migrate"]').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('refuses to save a limit below one', async () => {
     baseEndpoints()
     const component = await mountSettingsSection('memory-limits')

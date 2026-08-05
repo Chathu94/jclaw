@@ -116,6 +116,12 @@ public class MemoryTool implements ToolRegistry.Tool {
                 remember something ("remember that…", "note that I prefer…"). Storing \
                 something already known is a no-op, not an error.
 
+                A deliberate instruction to remember is stored as a `core` memory — the \
+                tier loaded into every turn — so leave `category` unset. Core is capped; \
+                when it is full the store is refused and tells you what to ask the \
+                operator. Follow that instruction rather than quietly storing it \
+                elsewhere.
+
                 Use `forget` ONLY when the operator explicitly asks to remove something. It \
                 deletes every memory stating that fact, matched by meaning as well as \
                 wording, and is irreversible — report back exactly what was removed.
@@ -142,7 +148,9 @@ public class MemoryTool implements ToolRegistry.Tool {
         props.put(FIELD_CATEGORY, Map.of(
                 SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.ENUM, MemoryCategory.labels(),
-                SchemaKeys.DESCRIPTION, "Optional category for store; defaults to fact"));
+                SchemaKeys.DESCRIPTION, "Optional category for store; defaults to core. "
+                        + "Pass one explicitly only when the operator has agreed to a "
+                        + "different category because core is full."));
         props.put(FIELD_IMPORTANCE, Map.of(
                 SchemaKeys.TYPE, SchemaKeys.NUMBER,
                 SchemaKeys.DESCRIPTION, "Optional 0.0-1.0 for store; defaults to the category's baseline"));
@@ -226,7 +234,20 @@ public class MemoryTool implements ToolRegistry.Tool {
             return "Already remembered: \"%s\"".formatted(snippet(existing.getFirst().text));
         }
 
-        var category = MemoryCategory.coerceForStorage(JsonArgs.optString(args, FIELD_CATEGORY, null));
+        // JCLAW-981: a deliberate "remember that…" IS a core memory — this tool exists only
+        // for that instruction, so core is the default rather than fact. An explicit
+        // category still wins, which is what lets the operator accept a different bucket
+        // when core is full.
+        var requested = JsonArgs.optString(args, FIELD_CATEGORY, null);
+        var category = requested == null || requested.isBlank()
+                ? MemoryCategory.CORE.label
+                : MemoryCategory.coerceForStorage(requested);
+
+        if (MemoryCategory.CORE.label.equals(category)) {
+            var full = coreCapReached(agentId);
+            if (full != null) return full;
+        }
+
         double importance = args.has(FIELD_IMPORTANCE) && !args.get(FIELD_IMPORTANCE).isJsonNull()
                 ? Math.clamp(args.get(FIELD_IMPORTANCE).getAsDouble(), 0.0, 1.0)
                 : MemoryCategory.defaultImportanceFor(category);
@@ -243,6 +264,40 @@ public class MemoryTool implements ToolRegistry.Tool {
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
                 "Memory stored on operator request: \"%s\"".formatted(snippet(text)));
         return "Remembered [%s]: %s".formatted(category, text);
+    }
+
+    /**
+     * Refusal text when the agent already holds {@code memory.coreload.maxCount} core
+     * memories, or {@code null} when there is room (JCLAW-981).
+     *
+     * <p>Core is the always-loaded tier and the cap is what bounds it, so a new one cannot
+     * simply be added — something would have to leave, and which memory that is belongs to
+     * the operator. The refusal therefore carries the instruction to ask rather than
+     * deciding for them.
+     *
+     * <p>Counts live core rows at any importance, not just those above the load threshold.
+     * A core memory below the threshold still occupies the category the operator granted;
+     * counting only the visible ones would let the store fill up invisibly.
+     *
+     * <p>What this can and cannot enforce: it guarantees no core memory is written past the
+     * cap. It cannot guarantee the agent asks first — that is instruction, and a model may
+     * store under another category unprompted. Enforcing the conversation would need the
+     * approval gate.
+     */
+    private static String coreCapReached(String agentId) {
+        int cap = ConfigService.getInt("memory.coreload.maxCount", 20);
+        // Tool dispatch carries no ambient transaction (JCLAW-199) — the streaming chat
+        // path is @NoTransaction, so a bare finder here throws "No active EntityManager".
+        long live = Tx.run(() -> Memory.countLiveCore(agentId));
+        if (live < cap) return null;
+        return ("Not stored. Core memories are full (%d of %d) — core is the tier loaded into "
+                + "every turn, so adding one means dropping one, which is the operator's call. "
+                + "Tell them core is full, propose the category that fits this fact best "
+                + "(fact, preference, decision, entity or lesson), and ask whether to store it "
+                + "there instead. If they agree, call store again passing that category "
+                + "explicitly. If they would rather it stay core, ask which existing core "
+                + "memory to forget first. If they decline, do not store it at all.")
+                .formatted(live, cap);
     }
 
     // ─── forget ──────────────────────────────────────────────────────────────

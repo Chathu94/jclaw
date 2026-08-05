@@ -101,6 +101,20 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
     // ─── parseCandidates: additional edge arms ───────────────────────────────
 
     @Test
+    void parseCandidatesNeverYieldsACoreMemory() {
+        // JCLAW-981: core is the always-loaded tier and is the operator's to grant, via an
+        // explicit "remember that…". Dropping it from the extractor prompt is not enough —
+        // the extractor already returns labels outside the set it is given (JCLAW-927), so
+        // the parse has to be what refuses it.
+        var cands = MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"The user is a staff engineer\",\"category\":\"core\",\"importance\":0.95}]");
+
+        assertEquals(1, cands.size(), "the memory is still captured — only its category changes");
+        assertEquals(memory.MemoryCategory.FACT.label, cands.getFirst().category(),
+                "a capture labelled core must be demoted, never stored as core");
+    }
+
+    @Test
     void parseCandidatesRootPrimitiveYieldsEmpty() {
         assertTrue(MemoryAutoCapture.parseCandidates("42").isEmpty(),
                 "a bare JSON primitive is neither object nor array → empty");
@@ -192,7 +206,10 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
     void aCanonicalCategorySurvivesCoercionUnchanged() {
         // Guards against the coercion being unconditional, which would flatten the whole
         // taxonomy to fact and be invisible in a test that only checks invented labels.
+        // CORE is excluded deliberately: capture may not assign it (JCLAW-981), and
+        // parseCandidatesNeverYieldsACoreMemory above is what pins that.
         for (var c : MemoryCategory.values()) {
+            if (c == MemoryCategory.CORE) continue;
             var got = MemoryAutoCapture.parseCandidates(
                     "{\"memories\":[{\"text\":\"t\",\"category\":\"" + c.label + "\"}]}");
             assertEquals(c.label, got.getFirst().category(), "must preserve " + c.label);

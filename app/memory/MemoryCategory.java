@@ -85,6 +85,25 @@ public enum MemoryCategory {
     }
 
     /**
+     * As {@link #coerceForStorage}, but {@link #CORE} is not available: auto-capture may
+     * never assign it (JCLAW-981). Core is the always-loaded tier, so membership is the
+     * operator's to grant — through an explicit "remember that…", which reaches storage
+     * via {@code MemoryTool} rather than through here.
+     *
+     * <p>Enforced in code rather than only by dropping {@code core} from the extractor
+     * prompt. The extractor already returns labels outside the closed set it is given
+     * ({@code opinion}, {@code project} — see JCLAW-927), so an instruction not to use a
+     * bucket is not a guarantee it won't.
+     *
+     * <p>Demotes to {@link #FACT} for the reason given above: it is the neutral bucket that
+     * adds no meaning the model did not express.
+     */
+    public static String coerceForCapture(String raw) {
+        var coerced = coerceForStorage(raw);
+        return CORE.label.equals(coerced) ? FACT.label : coerced;
+    }
+
+    /**
      * Default importance for a raw category string, or
      * {@link #BASELINE_IMPORTANCE} when it isn't one of the six.
      */

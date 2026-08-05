@@ -275,6 +275,20 @@ public class Memory extends Model {
      * category is matched as a literal to keep this {@code models} class free of
      * a dependency on the {@code memory} package's {@code MemoryCategory}.
      */
+    /**
+     * Live {@code core} memories for an agent, at any importance (JCLAW-981).
+     *
+     * <p>Deliberately unfiltered by importance, unlike {@link #findCore}: that method
+     * answers "what loads this turn", this one answers "how many core slots are taken". A
+     * core memory below the load threshold still holds the category the operator granted,
+     * so counting only the visible ones would let the tier fill up unseen.
+     */
+    public static long countLiveCore(String agentId) {
+        Long pk = parsePk(agentId);
+        if (pk == null) return 0;
+        return Memory.count("agent.id = ?1 AND category = ?2 AND supersededAt IS NULL", pk, "core");
+    }
+
     public static List<Memory> findCore(String agentId, double minImportance, int limit) {
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();

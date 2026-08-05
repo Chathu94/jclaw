@@ -538,6 +538,20 @@ export interface PromptBreakdownEntry {
   tokens: number
 }
 
+/** Shape returned by GET/POST /api/memories/core-migration. */
+export interface CoreMigrationStatus {
+  running: boolean
+  processed: number
+  total: number
+  /** Live core memories across all agents. */
+  liveCore: number
+  /** memory.coreload.maxCount. */
+  cap: number
+  /** liveCore > cap — what enables the migrate button. Not derivable from `running`. */
+  overCap: boolean
+  error: string | null
+}
+
 /** Shape returned by GET /api/agents/:id/prompt-breakdown. */
 export interface PromptBreakdown {
   totalChars: number

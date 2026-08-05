@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import memory.CoreMemoryCapMigration;
 import memory.JpaMemoryStore;
 import memory.MemoryCategory;
 import memory.MemoryReembedService;
@@ -452,6 +453,38 @@ public class ApiMemoryController extends Controller {
     private static String vectorBackendLabel() {
         if (!MemoryVectorSettings.enabled()) return "keyword-only";
         return JpaMemoryStore.isPostgresDialect() ? "pgvector" : "lucene-hnsw";
+    }
+
+    /**
+     * GET /api/memories/core-migration — live core count against the cap, and progress.
+     * Polled by the Settings Limits panel; safe to call at any cadence.
+     */
+    @ApiResponse(responseCode = "200")
+    @Operation(summary = "Core-memory cap migration progress")
+    public static void coreMigrationStatus() {
+        renderJSON(gson.toJson(CoreMemoryCapMigration.status()));
+    }
+
+    /**
+     * POST /api/memories/core-migration — recategorise core memories past the cap,
+     * using each owning agent's own model to choose the new bucket (JCLAW-981).
+     *
+     * <p>Operator-triggered rather than automatic: the memory tool can refuse a core write
+     * past the cap but cannot make the agent ask before filing something elsewhere, so
+     * bringing an over-cap corpus back in line is a deliberate action, not a side effect
+     * of a boot.
+     *
+     * <p>Returns 409 with the reason when it cannot start — nothing over the cap, or a
+     * migration already in flight.
+     */
+    @ApiResponse(responseCode = "202")
+    @Operation(summary = "Recategorise core memories past the cap")
+    public static void coreMigrationStart() {
+        var refusal = CoreMemoryCapMigration.start();
+        if (refusal != null) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, refusal);
+        }
+        renderJSON(gson.toJson(CoreMemoryCapMigration.status()));
     }
 
     /**

@@ -105,6 +105,52 @@ class MemoryToolTest extends UnitTest {
         assertEquals(MemoryCategory.PREFERENCE.label, stored.getFirst().category());
     }
 
+    // --- JCLAW-981: core is operator-authored, and capped ---
+
+    @Test
+    void storeDefaultsToCoreBecauseTheToolOnlyRunsOnAnExplicitInstruction() {
+        call("{\"action\":\"store\",\"text\":\"The user's dog is called Biscuit\"}");
+        var stored = MemoryStoreFactory.get().list(String.valueOf(agent.id));
+        assertEquals(MemoryCategory.CORE.label, stored.getFirst().category(),
+                "a deliberate remember is a core memory — capture is what produces the rest");
+    }
+
+    @Test
+    void storeRefusesANewCoreMemoryOnceTheCapIsReached() {
+        int cap = services.ConfigService.getInt("memory.coreload.maxCount", 20);
+        for (int i = 0; i < cap; i++) {
+            MemoryStoreFactory.get().store(String.valueOf(agent.id),
+                    "Core fact number %d about the user".formatted(i), MemoryCategory.CORE.label, 0.9);
+        }
+
+        var out = call("{\"action\":\"store\",\"text\":\"The user's dog is called Biscuit\"}");
+
+        assertTrue(out.startsWith("Not stored."), "the store must be refused, not silently downgraded: " + out);
+        assertTrue(out.contains("ask"), "the refusal must tell the agent to ask the operator: " + out);
+        assertEquals(cap, MemoryStoreFactory.get().list(String.valueOf(agent.id)).stream()
+                        .filter(m -> MemoryCategory.CORE.label.equals(m.category())).count(),
+                "nothing may be written past the cap");
+    }
+
+    @Test
+    void anExplicitNonCoreCategoryStillStoresWhenCoreIsFull() {
+        // This is the operator having agreed to a different category — the path the
+        // refusal above points the agent at.
+        int cap = services.ConfigService.getInt("memory.coreload.maxCount", 20);
+        for (int i = 0; i < cap; i++) {
+            MemoryStoreFactory.get().store(String.valueOf(agent.id),
+                    "Core fact number %d about the user".formatted(i), MemoryCategory.CORE.label, 0.9);
+        }
+
+        var out = call("{\"action\":\"store\",\"text\":\"The user's dog is called Biscuit\","
+                + "\"category\":\"entity\"}");
+
+        assertTrue(out.startsWith("Remembered"), "an agreed category must store: " + out);
+        assertTrue(MemoryStoreFactory.get().list(String.valueOf(agent.id)).stream()
+                        .anyMatch(m -> MemoryCategory.ENTITY.label.equals(m.category())),
+                "and must land under the category the operator agreed to");
+    }
+
     // --- forget ---
 
     @Test

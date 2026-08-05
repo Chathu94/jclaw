@@ -599,10 +599,12 @@ public final class MemoryAutoCapture {
                 // omits importance.
                 var rawCategory = (o.has(KEY_CATEGORY) && !o.get(KEY_CATEGORY).isJsonNull())
                         ? MemoryCategory.normalize(o.get(KEY_CATEGORY).getAsString()) : null;
-                var category = MemoryCategory.coerceForStorage(rawCategory);
+                // JCLAW-981: coerceForCapture, not coerceForStorage — capture may not assign
+                // core. That tier is granted by an explicit operator instruction only.
+                var category = MemoryCategory.coerceForCapture(rawCategory);
                 if (rawCategory != null && !rawCategory.equals(category)) {
                     EventLogger.warn(EVENT_CATEGORY,
-                            "Extractor returned category '%s', outside the six-bucket taxonomy; stored as '%s'"
+                            "Extractor returned category '%s', which capture may not assign; stored as '%s'"
                                     .formatted(rawCategory, category));
                 }
                 double importance = (o.has(KEY_IMPORTANCE) && !o.get(KEY_IMPORTANCE).isJsonNull())
@@ -763,7 +765,6 @@ public final class MemoryAutoCapture {
             Write each memory as one concise, self-contained sentence in the third person ("The user ...", "The project ..."), resolving pronouns so it stands alone out of context. Preserve exact identifiers (names, paths, IDs, URLs) verbatim.
 
             Classify each into exactly one category:
-            - core: identity-defining, always-relevant facts about the user or their setup
             - fact: a stable factual statement
             - preference: how the user likes things done
             - decision: a choice made and (if given) its rationale

@@ -73,9 +73,18 @@ class MemoryAutoCaptureTest extends UnitTest {
     @Test
     void clampsImportanceAndNormalizesCategory() {
         var c = MemoryAutoCapture.parseCandidates(
-                "{\"memories\":[{\"text\":\"x\",\"category\":\"CORE\",\"importance\":5}]}").getFirst();
-        assertEquals("core", c.category());
+                "{\"memories\":[{\"text\":\"x\",\"category\":\"PREFERENCE\",\"importance\":5}]}").getFirst();
+        assertEquals("preference", c.category(), "case is normalized");
         assertEquals(1.0, c.importance(), 1e-9);
+    }
+
+    @Test
+    void aCaseVariantOfCoreIsStillRefusedByCapture() {
+        // Normalization runs before the capture rule, so CORE must not slip past it
+        // (JCLAW-981).
+        var c = MemoryAutoCapture.parseCandidates(
+                "{\"memories\":[{\"text\":\"x\",\"category\":\"CORE\",\"importance\":0.9}]}").getFirst();
+        assertEquals("fact", c.category());
     }
 
     // ─── capture() end-to-end via injected seam ──────────────────────────────
