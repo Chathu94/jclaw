@@ -648,10 +648,9 @@ public class JpaMemoryStore implements MemoryStore {
      * can't carry the vector because embedding generation is an LLM call that
      * must never run inside a JPA lifecycle callback).
      *
-     * <p>Known trade-off: an update through any other write path re-fires the
-     * entity hook without a vector, dropping the doc out of the KNN graph until
-     * re-stored (FTS still matches it). Re-embedding on update is JCLAW-527-era
-     * work.
+     * <p>A metadata edit no longer drops the vector: {@code Memory.onIndexUpsert}
+     * short-circuits on an unchanged doc identity (JCLAW-921). A text change still
+     * would, but nothing mutates {@code Memory.text} after insert.
      */
     private void generateAndIndexEmbedding(Memory memory) {
         var embedding = generateEmbedding(memory.text);
