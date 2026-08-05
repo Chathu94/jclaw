@@ -79,14 +79,38 @@ class OpenRouterProviderTest extends UnitTest {
     }
 
     @Test
-    void disableReasoningSetsEffortToNone() throws Exception {
+    void disableReasoningSendsMinimalBecauseNoneIsRejected() throws Exception {
+        // JCLAW-794: OpenRouter 400s on effort "none" for a growing set of models
+        // ("Reasoning is mandatory for this endpoint and cannot be disabled") and ignores
+        // it on the rest, so "none" either breaks the request or does nothing. "minimal"
+        // was accepted by every model probed and still yields zero or near-zero reasoning
+        // tokens, which is what the off-switch is for.
         var request = new JsonObject();
         var m = OpenRouterProvider.class.getDeclaredMethod(
                 "disableReasoning", JsonObject.class);
         m.setAccessible(true);
         m.invoke(provider, request);
-        assertEquals("none",
+
+        assertEquals("minimal",
                 request.get("reasoning").getAsJsonObject().get("effort").getAsString());
+        assertFalse(request.has("reasoning_effort"),
+                "the scalar is for the enable path; the object alone was verified sufficient");
+    }
+
+    @Test
+    void disableReasoningStaysProviderSpecificRatherThanSharedWithOllama() throws Exception {
+        // Guards the reason this is an override rather than a base-class change: Ollama
+        // rejects "minimal" outright and accepts "none", so unifying the two would trade
+        // this bug for its mirror image on the provider the default agent runs on.
+        var ollama = new llm.OllamaProvider(new ProviderConfig(
+                "ollama-cloud", "https://ollama.com/v1", "k", List.of()));
+        var m = llm.OllamaProvider.class.getDeclaredMethod("disableReasoning", JsonObject.class);
+        m.setAccessible(true);
+        var request = new JsonObject();
+        m.invoke(ollama, request);
+
+        assertEquals("none", request.get("reasoning_effort").getAsString(),
+                "Ollama's off-signal must stay \"none\" — it 400s on \"minimal\"");
     }
 
     // --- extractReasoningTokens ---

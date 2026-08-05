@@ -36,11 +36,31 @@ public final class OpenRouterProvider extends LlmProvider {
         request.addProperty("reasoning_effort", thinkingMode);
     }
 
+    /**
+     * JCLAW-794: {@code minimal}, not {@code none}, is how reasoning is turned off here.
+     *
+     * <p>OpenRouter rejects {@code effort: "none"} outright on a growing set of models —
+     * "Reasoning is mandatory for this endpoint and cannot be disabled", HTTP 400, not
+     * retried — and the set is no longer exotic: measured 2026-08-05 it covers
+     * gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.6-flash, deepseek-r1 and
+     * gpt-oss-120b. Where it is still accepted it changes nothing, because those models
+     * report zero reasoning tokens with the parameter omitted anyway. So {@code none} is a
+     * directive that either fails the request or does nothing.
+     *
+     * <p>{@code minimal} was accepted by every model probed and keeps the token saving the
+     * off-switch exists for: zero reasoning tokens across the Gemini line, 3 on
+     * gpt-oss-120b, 20 on deepseek-r1 — against a hard failure today.
+     *
+     * <p>Deliberately NOT lifted into {@link LlmProvider} or copied to the other providers.
+     * Ollama rejects {@code minimal} ("invalid reasoning value: 'minimal' (must be high,
+     * medium, low, ...)") and accepts {@code none}; LM Studio accepts {@code none} and
+     * genuinely suppresses reasoning with it. The correct value is per-endpoint, which is
+     * why this is a per-provider override.
+     */
     @Override
     protected void disableReasoning(JsonObject request) {
-        // Explicitly disable reasoning for models that think by default
         var reasoning = new JsonObject();
-        reasoning.addProperty("effort", "none");
+        reasoning.addProperty("effort", "minimal");
         request.add("reasoning", reasoning);
     }
 
