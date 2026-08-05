@@ -254,7 +254,9 @@ class MemoryToolTest extends UnitTest {
 
         var recalled = offDispatchThread(() -> tool.execute(
                 "{\"action\":\"recall\",\"query\":\"where is the NAS\"}", dispatchAgent));
-        assertFalse(recalled.startsWith("Error"), recalled);
+        // Not merely "did not error": "No memories matched" is also not an error, and would
+        // pass while recall returned nothing.
+        assertTrue(recalled.contains("NAS"), recalled);
 
         var forgotten = offDispatchThread(() -> tool.execute(
                 "{\"action\":\"forget\",\"query\":\"The user keeps the NAS in the basement\"}", dispatchAgent));

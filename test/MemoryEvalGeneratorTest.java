@@ -68,6 +68,10 @@ class MemoryEvalGeneratorTest extends UnitTest {
             assertTrue(c.id().startsWith("mem-"), c.id());
             assertEquals("q?", c.query());
             assertEquals(1, c.goldGroups().size(), "an unrelated corpus gives one gold group per case");
+            // The gold must be the memory the case was built FROM. Asserting only the group
+            // count let a gold of "sourceId + 1" through.
+            assertTrue(c.goldGroups().getFirst().contains(Long.valueOf(c.id().substring(4))),
+                    "gold must contain the source memory: " + c.id() + " -> " + c.goldGroups());
         }
     }
 
@@ -231,12 +235,27 @@ class MemoryEvalGeneratorTest extends UnitTest {
 
     @Test
     void aClusterAboveMaxFactsIsRejectedAsATopicRatherThanAQuestion() {
-        for (int i = 0; i < 8; i++) seed("Shared subject sailing detail number %d here".formatted(i));
+        // Each fact needs its own nouns. Facts that differ by one token are near-duplicates
+        // under MemorySimilarity, collapse to ONE distinct fact, and are then rejected by
+        // minFacts — so a "too many facts" test written that way passes for the wrong reason
+        // and the maxFacts ceiling is never exercised at all.
+        seed("Sailing concerns the mainsail rigging");
+        seed("Sailing concerns the keel ballast");
+        seed("Sailing concerns the rudder linkage");
+        seed("Sailing concerns the winch servicing");
+        seed("Sailing concerns the anchor windlass");
 
         var narrow = MemoryEvalGenerator.generateCoverage(agent, "cov", 10,
                 new Clustering("lexical", 0.3, 3, 4), writerReturning("broad?", new ArrayList<>()));
         assertTrue(narrow.cases().isEmpty(),
                 "a cluster past the ceiling is a topic, whose retrieval is too diffuse to compare rankers with");
+
+        // Control: the SAME corpus with a ceiling above five must produce a case. Without
+        // this, an unconditional `continue` would satisfy the assertion above.
+        var wide = MemoryEvalGenerator.generateCoverage(agent, "cov", 10,
+                new Clustering("lexical", 0.3, 3, 12), writerReturning("broad?", new ArrayList<>()));
+        assertEquals(1, wide.cases().size(), "five distinct facts is a question, not a topic");
+        assertEquals(5, wide.cases().getFirst().goldGroups().size());
     }
 
     @Test
@@ -268,15 +287,26 @@ class MemoryEvalGeneratorTest extends UnitTest {
 
     @Test
     void coverageStopsAtMaxCases() {
-        for (int g = 0; g < 3; g++) {
-            seed("Group %d subject concerns the first aspect entirely".formatted(g));
-            seed("Group %d subject concerns the second aspect entirely".formatted(g));
-            seed("Group %d subject concerns the third aspect entirely".formatted(g));
-        }
-        var suite = MemoryEvalGenerator.generateCoverage(agent, "cov", 1,
-                new Clustering("lexical", 0.3, 3, 12), writerReturning("broad?", new ArrayList<>()));
+        // Two clusters that do not reach each other lexically, each with three distinct
+        // facts. Both halves matter: without two reachable clusters the cap is never the
+        // reason the second case is absent, and `<= 1` would hold for an empty suite.
+        seed("Sailing concerns the mainsail rigging");
+        seed("Sailing concerns the keel ballast");
+        seed("Sailing concerns the rudder linkage");
+        // Four content tokens each, so the two shared ones give Jaccard 2/6 = 0.33 and clear
+        // the 0.3 threshold. At five tokens it is 2/8 = 0.25 and the group does not cluster
+        // at all — which is why the first attempt at this test saw one cluster, not two.
+        seed("Baking needs precise temperature");
+        seed("Baking needs accurate hydration");
+        seed("Baking needs long fermentation");
 
-        assertTrue(suite.cases().size() <= 1, "asked for at most 1 case, got " + suite.cases().size());
+        var uncapped = MemoryEvalGenerator.generateCoverage(agent, "cov", 10,
+                new Clustering("lexical", 0.3, 3, 12), writerReturning("broad?", new ArrayList<>()));
+        assertEquals(2, uncapped.cases().size(), "the corpus must offer two clusters for the cap to bite");
+
+        var capped = MemoryEvalGenerator.generateCoverage(agent, "cov", 1,
+                new Clustering("lexical", 0.3, 3, 12), writerReturning("broad?", new ArrayList<>()));
+        assertEquals(1, capped.cases().size(), "maxCases must stop the second cluster");
     }
 
     @Test

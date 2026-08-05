@@ -50,8 +50,10 @@ class LoadTestSleepToolAndTtsClientTest extends UnitTest {
 
         var out = tool.execute("{\"ms\":0}", null);
 
-        assertNotNull(out);
-        assertFalse(out.isBlank());
+        // The exact duration, not just "non-blank": DEFAULT_MS is 200, comfortably inside a
+        // 2000 ms budget, so a version that ignored the argument entirely passed the timing
+        // assertion alone.
+        assertEquals("slept 0ms", out);
         assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 2000,
                 "a zero sleep must not block the harness");
         // Relative, not absolute: the counter is process-global and the concurrent lane
@@ -64,17 +66,19 @@ class LoadTestSleepToolAndTtsClientTest extends UnitTest {
         var started = System.nanoTime();
         var out = tool.execute("{\"ms\":-5000}", null);
 
-        assertNotNull(out);
+        assertEquals("slept 0ms", out, "a negative sleep clamps to zero");
         assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 2000,
-                "a negative sleep clamps to zero rather than failing or waiting");
+                "clamping must not mean waiting");
     }
 
     @Test
     void malformedArgumentsFallBackToTheDefaultInsteadOfFailing() {
         // Harness-caller only, so a bad payload degrades rather than erroring out of a run.
-        assertNotNull(tool.execute("not json at all", null));
-        assertNotNull(tool.execute("{\"ms\":null}", null));
-        assertNotNull(tool.execute("{}", null));
+        // The default (200ms) is what a fallback must produce — asserting only non-null let
+        // a version that ignored the ms argument on EVERY path through.
+        assertEquals("slept 200ms", tool.execute("not json at all", null));
+        assertEquals("slept 200ms", tool.execute("{\"ms\":null}", null));
+        assertEquals("slept 200ms", tool.execute("{}", null));
     }
 
     // ─── TtsSidecarClient ────────────────────────────────────────────────────
@@ -95,7 +99,7 @@ class LoadTestSleepToolAndTtsClientTest extends UnitTest {
         // the read-aloud path needs to know the sidecar is down.
         var client = clientAgainstNothing();
 
-        var thrown = assertThrows(Exception.class,
+        var thrown = assertThrows(services.tts.TtsException.class,
                 () -> client.synthesize("hello there", "kokoro", null, "wav"));
         assertNotNull(thrown.getMessage());
     }
@@ -104,9 +108,9 @@ class LoadTestSleepToolAndTtsClientTest extends UnitTest {
     void theFourArgOverloadDelegatesToTheFiveArgOneAndFailsIdentically() {
         var client = clientAgainstNothing();
 
-        var four = assertThrows(Exception.class,
+        var four = assertThrows(services.tts.TtsException.class,
                 () -> client.synthesize("hello", "kokoro", null, "wav"));
-        var five = assertThrows(Exception.class,
+        var five = assertThrows(services.tts.TtsException.class,
                 () -> client.synthesize("hello", "kokoro", null, "wav", null));
 
         assertEquals(four.getClass(), five.getClass(),
@@ -117,7 +121,7 @@ class LoadTestSleepToolAndTtsClientTest extends UnitTest {
     void anOptionalReferenceClipDoesNotChangeTheFailureContract() {
         var client = clientAgainstNothing();
 
-        assertThrows(Exception.class,
+        assertThrows(services.tts.TtsException.class,
                 () -> client.synthesize("hello", "chatterbox", "narrator", "wav", "/tmp/ref.wav"));
     }
 }

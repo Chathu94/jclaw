@@ -66,8 +66,9 @@ class SidecarCapabilityProbeTest extends UnitTest {
         awaitTerminal(p);
         var snap = p.snapshot();
 
-        assertTrue(snap.error() != null || snap.uvReason() != null,
-                "a terminal failure must carry an error or a uv reason");
+        // Not a disjunction with uvReason: that is non-null on every path (it reads
+        // "available" on success), so the || made the assertion unconditionally true.
+        assertNotNull(snap.error(), "a terminal failure must say what failed");
         assertNull(snap.capability(), "a failed probe must not claim a capability");
     }
 

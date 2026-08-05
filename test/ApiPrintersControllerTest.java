@@ -150,6 +150,9 @@ class ApiPrintersControllerTest extends FunctionalTest {
         var body = getContent(resp);
         assertTrue(body.contains("two-sided-long-edge"), body);
         assertFalse(body.contains("output-bin"), "a null option is not a setting: " + body);
+        // The blank half was unasserted, so widening the guard to `value != null` survived.
+        // media is not validated, so a stored "" would have gone unnoticed.
+        assertFalse(body.contains("media"), "a whitespace-only option is not a setting: " + body);
     }
 
     @Test

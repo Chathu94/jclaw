@@ -62,10 +62,16 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
     }
 
     @Test
-    void aNullMimeTypeIsToleratedByFallingBackToTheExtension() throws Exception {
+    void aNullMimeTypeYieldsNoFormatBecauseThereIsNoExtensionFallback() throws Exception {
+        // Named for what the code does, not what it might. MimeExtensions.forMime(null, ..)
+        // returns "" at its first guard — the .mp3 on the filename is never consulted. The
+        // earlier name claimed an extension fallback that does not exist, and assertNotNull
+        // on a method that cannot return null could never have caught it.
         var prepared = LlmAudio.prepare(clip("d.mp3", "x".getBytes()), null);
-        assertNotNull(prepared);
-        assertNotNull(prepared.format());
+
+        assertEquals("x", new String(Base64.getDecoder().decode(prepared.base64())));
+        assertTrue(prepared.format().isBlank(),
+                "documenting today's behaviour: a null MIME yields no format token");
     }
 
     @Test
@@ -110,8 +116,8 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
         assertFalse(TtsSidecarManager.isRunning());
     }
 
-    @Test
-    void theSidecarIdentityIsStableBecauseConfigKeysAreBuiltFromIt() {
-        assertEquals("tts", TtsSidecarManager.IDENTITY);
-    }
+    // Deliberately no test pinning TtsSidecarManager.IDENTITY. Asserting a constant equals
+    // its own literal cannot fail for any behavioural break, and the thing that actually
+    // matters — CONFIG_PREFIX, which every tts.local.* setting is keyed off — is
+    // package-private and so unreachable from here.
 }

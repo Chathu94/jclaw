@@ -567,16 +567,22 @@ class ApiMemoryControllerTest extends FunctionalTest {
 
         services.evals.MemoryEvalPaths.ensureLocalDir();
         var suiteJson = ("{\"id\":\"uatsuite\",\"description\":\"d\",\"corpusFingerprint\":\"1:0\","
-                + "\"cases\":[{\"id\":\"c1\",\"query\":\"basement NAS\",\"goldGroups\":[[" + memId + "]]}]}");
+                // The query must be a SUBSTRING of the memory: this class runs with the index
+                // closed, so recall degrades to Memory.likeFallback, which matches the whole
+                // query as one substring. "basement NAS" retrieved nothing and the original
+                // assertion (contains("mrr")) passed anyway.
+                + "\"cases\":[{\"id\":\"c1\",\"query\":\"NAS\",\"goldGroups\":[[" + memId + "]]}]}");
         java.nio.file.Files.writeString(services.evals.MemoryEvalPaths.suiteFile("uatsuite"), suiteJson);
 
         var resp = POST("/api/memories/evals/run", "application/json",
                 "{\"agentId\":\"" + agentId + "\",\"suiteId\":\"uatsuite\",\"scope\":\"candidates\"}");
         assertIsOk(resp);
         var body = getContent(resp);
-        assertTrue(body.contains("mrr"), "the report must carry the ranking metric: " + body);
-        assertTrue(body.contains("\"cases\":1") || body.contains("\"caseCount\":1") || body.contains("c1"),
-                "the report must describe the suite it scored: " + body);
+        // Assert the SCORE, not the field names. "mrr" and "c1" are both structural — the
+        // Report record always emits mrr, and c1 appears in missed[] on a total failure — so
+        // a stubbed-out recall returning List.of() would satisfy a contains() on either.
+        assertTrue(body.contains("\"mrr\":1.0"), "the seeded memory must be retrieved at rank 1: " + body);
+        assertTrue(body.contains("\"missed\":[]"), "nothing should be missed: " + body);
     }
 
     // ─── Re-embed (JCLAW-933) ────────────────────────────────────────────────
