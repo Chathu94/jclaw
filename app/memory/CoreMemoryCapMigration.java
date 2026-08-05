@@ -93,7 +93,7 @@ public final class CoreMemoryCapMigration {
                          long liveCore, int cap, boolean overCap, String error) {}
 
     public static Status status() {
-        long live = Tx.run(CoreMemoryCapMigration::countAllLiveCore);
+        long live = Tx.run(CoreMemoryCapMigration::maxLiveCorePerAgent);
         int cap = cap();
         return new Status(running.get(), processed.get(), total.get(),
                 live, cap, live > cap, lastError);
@@ -103,10 +103,24 @@ public final class CoreMemoryCapMigration {
         return ConfigService.getInt("memory.coreload.maxCount", 20);
     }
 
-    private static long countAllLiveCore() {
-        long n = 0;
-        for (Agent a : Agent.<Agent>findAll()) n += Memory.countLiveCore(String.valueOf(a.id));
-        return n;
+    /**
+     * The largest live-core count held by any one agent — the number the cap governs.
+     *
+     * <p>Was the sum across every agent, which does not describe anything {@link #migrate()}
+     * can act on: the cap is per agent, because the core block is assembled per agent. The
+     * sum reported "over the limit" for corpora already in line and left the button unable
+     * to change anything. Observed live at 20 core on one agent plus 1 on another: 21
+     * against a cap of 20, while every agent was within it and each pass moved nothing.
+     *
+     * <p>Only a single-agent corpus makes the two agree, which is why every test here saw
+     * the same number either way.
+     */
+    private static long maxLiveCorePerAgent() {
+        long max = 0;
+        for (Agent a : Agent.<Agent>findAll()) {
+            max = Math.max(max, Memory.countLiveCore(String.valueOf(a.id)));
+        }
+        return max;
     }
 
     /**

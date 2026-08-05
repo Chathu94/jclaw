@@ -47,6 +47,21 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         LuceneTestSync.release();
     }
 
+    /** A second agent, so the per-agent cap can be told apart from a global sum. */
+    private Agent otherAgent() {
+        var a = new Agent();
+        a.name = "core-cap-other-agent";
+        a.modelProvider = "openrouter";
+        a.modelId = "gpt-4.1";
+        a.save();
+        return a;
+    }
+
+    private void storeCoreFor(Agent a, String text, double importance) {
+        MemoryStoreFactory.get().store(String.valueOf(a.id), text,
+                MemoryCategory.CORE.label, importance);
+    }
+
     private void storeCore(String text, double importance) {
         MemoryStoreFactory.get().store(String.valueOf(agent.id), text,
                 MemoryCategory.CORE.label, importance);
@@ -182,5 +197,48 @@ class CoreMemoryCapMigrationTest extends UnitTest {
 
         assertEquals(1, seen.size(), "only the overflow is classified");
         assertTrue(seen.getFirst().contains("MOVE"), "and it is the lowest-ranked memory: " + seen);
+    }
+
+    // --- the cap is per agent, not a total across the instance ---
+
+    @Test
+    void twoAgentsEachWithinTheCapAreNotOverIt() {
+        // Reported from the running instance: 20 core on one agent plus 1 on another read
+        // as "21 stored, 20 allowed" and lit the migrate button, but migrate() skips any
+        // agent at or under the cap, so every pass moved nothing and the panel stayed over
+        // the limit. status() was summing across agents while migrate() enforced per agent.
+        for (int i = 0; i < cap(); i++) storeCore("main core fact " + i, 0.9);
+        storeCoreFor(otherAgent(), "the other agent's single core fact", 0.9);
+
+        var s = CoreMemoryCapMigration.status();
+        assertEquals(cap(), s.liveCore(),
+                "liveCore must describe the agent the cap governs, not the instance total");
+        assertFalse(s.overCap(),
+                "no agent exceeds the cap, so nothing is over it");
+    }
+
+    @Test
+    void aCorpusNoMigrationCanFixIsNotOfferedOne() {
+        // The user-visible half of the same bug: the button was enabled for a state the
+        // pass could never change.
+        for (int i = 0; i < cap(); i++) storeCore("main core fact " + i, 0.9);
+        storeCoreFor(otherAgent(), "the other agent's single core fact", 0.9);
+
+        var refusal = CoreMemoryCapMigration.start();
+        assertNotNull(refusal, "a migration that cannot move anything must be refused");
+        assertTrue(refusal.contains("nothing to migrate"), refusal);
+    }
+
+    @Test
+    void oneAgentOverTheCapIsStillDetectedWhenAnotherIsUnderIt() {
+        // Guards the opposite error: a max that ignored agents past the first, or a fix
+        // that made overCap unreachable with more than one agent.
+        storeCore("the quiet agent's only core fact", 0.9);
+        var busy = otherAgent();
+        for (int i = 0; i < cap() + 3; i++) storeCoreFor(busy, "busy core fact " + i, 0.9);
+
+        var s = CoreMemoryCapMigration.status();
+        assertEquals(cap() + 3L, s.liveCore(), "the worst agent is what the panel must report");
+        assertTrue(s.overCap(), "an agent past the cap must still be detected");
     }
 }
