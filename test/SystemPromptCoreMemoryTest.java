@@ -114,6 +114,52 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     }
 
     @Test
+    void coreBoundaryMarkerSitsBetweenTheStaticPrefixAndTheCoreBlock() {
+        // JCLAW-978: the marker has to land after the last static section and before the
+        // first core memory, or the provider's split puts the wrong bytes in each block.
+        var agent = newAgent("spa-core-boundary");
+        store(agent, "MARKER_CORE_BOUNDARY_FACT", "core", 0.9);
+
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+        int env = prompt.indexOf("## Environment");
+        int coreMarker = prompt.indexOf(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER);
+        int coreHeader = prompt.indexOf("## Core Memories");
+        int cacheMarker = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+
+        assertTrue(env >= 0 && coreMarker > env, "core marker must follow the static sections");
+        assertTrue(coreHeader > coreMarker, "core marker must precede the core block");
+        assertTrue(cacheMarker > coreHeader, "the cache boundary still closes the cacheable prefix");
+        assertEquals(coreMarker, prompt.lastIndexOf(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER),
+                "the core marker must appear exactly once");
+    }
+
+    @Test
+    void noCoreMemoriesMeansNoCoreBoundaryMarker() {
+        // Without a core block there is nothing to give a second breakpoint to, and an
+        // empty segment between two markers would only cost a wasted cache write.
+        var agent = newAgent("spa-core-none");
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+        assertFalse(prompt.contains(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER),
+                "no core memories → no core boundary marker");
+        assertTrue(prompt.contains(SystemPromptAssembler.CACHE_BOUNDARY_MARKER),
+                "the cache boundary is still emitted");
+    }
+
+    @Test
+    void breakdownReportsTheThreeWaySplit() {
+        var agent = newAgent("spa-core-breakdown");
+        store(agent, "MARKER_BREAKDOWN_CORE", "core", 0.9);
+
+        var bd = SystemPromptAssembler.breakdown(agent, null, "web");
+        assertTrue(bd.coreMemoryChars() > 0, "core block must be measured");
+        assertTrue(bd.staticPrefixChars() > 0, "static prefix must be measured");
+        assertEquals(bd.cacheablePrefixChars(),
+                bd.staticPrefixChars() + bd.coreMemoryChars()
+                        + SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER.length(),
+                "the two cached segments plus the marker must account for the whole prefix");
+    }
+
+    @Test
     void coreMemoryIsExcludedFromPerTurnRecall() {
         var agent = newAgent("spa-core-5");
         store(agent,"MARKER_DUAL widget preferences are important to track", "core", 0.9);

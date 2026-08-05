@@ -544,6 +544,12 @@ export interface PromptBreakdown {
   totalTokenEstimate: number
   cacheBoundaryMarker: string
   cacheablePrefixChars: number
+  /** Bytes before the core-memory boundary — carries its own breakpoint, so a
+   *  core-memory write does not re-prefill it (JCLAW-978). Equals
+   *  cacheablePrefixChars when the agent has no core memories. */
+  staticPrefixChars: number
+  /** Bytes of the core-memory block: cached, but re-prefilled when it changes. */
+  coreMemoryChars: number
   variableSuffixChars: number
   sections: PromptBreakdownEntry[]
   skills: PromptBreakdownEntry[]

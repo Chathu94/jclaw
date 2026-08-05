@@ -48,6 +48,17 @@ public class SystemPromptAssembler {
     public static final String CACHE_BOUNDARY_MARKER = "<!-- JCLAW_CACHE_BOUNDARY -->";
 
     /**
+     * Sentinel separating the fully static prefix from the core-memory block, so the two
+     * can carry independent cache breakpoints (JCLAW-978). Present only when the agent has
+     * core memories to render; absent, the prompt splits in two exactly as before.
+     *
+     * <p>Both markers are provider-protocol, not model-facing: a provider that caches
+     * consumes them by splitting on them, and every other route has them scrubbed in
+     * {@code LlmProvider.serializeRequest}.
+     */
+    public static final String CORE_MEMORY_BOUNDARY_MARKER = "<!-- JCLAW_CORE_BOUNDARY -->";
+
+    /**
      * Fallback string used for environment fields whose source (the {@code application.version}
      * config key, {@code os.name} / {@code os.arch} system properties) is missing at assembly time.
      */
@@ -68,6 +79,13 @@ public class SystemPromptAssembler {
      *                             per-turn variable suffix
      * @param cacheablePrefixChars characters before the cache-boundary marker
      *                             (stable across turns)
+     * @param staticPrefixChars    characters before the core-memory boundary — the
+     *                             segment that survives a core-memory write because it
+     *                             carries its own breakpoint (JCLAW-978). Equals
+     *                             {@code cacheablePrefixChars} when the agent has no
+     *                             core memories and the prompt splits in two.
+     * @param coreMemoryChars      characters between the two markers: the core-memory
+     *                             block, cached but re-prefilled when it changes
      * @param variableSuffixChars  characters after the marker (vary per turn)
      * @param sections             per-section size breakdown (one entry per
      *                             named prompt section)
@@ -79,6 +97,8 @@ public class SystemPromptAssembler {
             int totalTokenEstimate,
             String cacheBoundaryMarker,
             int cacheablePrefixChars,
+            int staticPrefixChars,
+            int coreMemoryChars,
             int variableSuffixChars,
             List<Entry> sections,
             List<Entry> skills,
@@ -174,11 +194,16 @@ public class SystemPromptAssembler {
                     tool.function().name(), json.length(), approxTokens(json.length())));
         }
 
-        // Split prefix/suffix at the cache boundary for at-a-glance cache diagnostics.
+        // Split at both markers for at-a-glance cache diagnostics: the three segments here
+        // are the three blocks a caching provider emits breakpoints for.
         var full = builder.sb.toString();
         var markerIdx = full.indexOf(CACHE_BOUNDARY_MARKER);
+        var coreIdx = full.indexOf(CORE_MEMORY_BOUNDARY_MARKER);
         int cacheablePrefix = markerIdx >= 0 ? markerIdx : full.length();
         int variableSuffix = markerIdx >= 0 ? full.length() - markerIdx - CACHE_BOUNDARY_MARKER.length() : 0;
+        int staticPrefix = coreIdx >= 0 && coreIdx < cacheablePrefix ? coreIdx : cacheablePrefix;
+        int coreMemory = cacheablePrefix - staticPrefix
+                - (coreIdx >= 0 && coreIdx < cacheablePrefix ? CORE_MEMORY_BOUNDARY_MARKER.length() : 0);
 
         // Total input bytes the LLM actually sees: the prompt string (which already
         // contains the skills XML, so those aren't double-counted) plus the separately-
@@ -190,6 +215,8 @@ public class SystemPromptAssembler {
                 approxTokens(totalChars),
                 CACHE_BOUNDARY_MARKER,
                 cacheablePrefix,
+                staticPrefix,
+                coreMemory,
                 variableSuffix,
                 sectionEntries,
                 skillEntries,
@@ -362,12 +389,21 @@ public class SystemPromptAssembler {
         // the dynamic analogue of USER.md: core-category memories above the
         // importance threshold are the slowest-changing memory tier, so the
         // block stays byte-stable within an agent's lifetime and only busts the
-        // prefix cache when a core memory is actually added or edited. A token
-        // budget caps the block so it can never crowd out the context window;
-        // the returned ids let the per-turn recall below skip duplicates.
+        // prefix cache when a core memory is actually added or edited. The
+        // returned ids let the per-turn recall below skip duplicates.
+        //
+        // JCLAW-978: the block gets its own breakpoint marker rather than riding
+        // the static prefix's. Core memories are the only mutable section above
+        // the cache boundary, and on one measured deployment they changed on
+        // roughly 1 turn in 15 — often enough that sharing a breakpoint would
+        // re-prefill workspace files, skills and the tool catalog along with
+        // them. Marker emitted only when the block is non-empty, so an agent
+        // without core memories still produces today's two-segment split.
         var coreMemoryIds = Set.<String>of();
         var coreBlock = renderCoreMemories(agent);
         if (!coreBlock.text().isEmpty()) {
+            b.startSection("Core Memory Boundary");
+            appendCoreMemoryBoundary(b.sb);
             b.startSection("Core Memories");
             b.sb.append(coreBlock.text());
             coreMemoryIds = coreBlock.ids();
@@ -559,6 +595,10 @@ public class SystemPromptAssembler {
 
     private static void appendCacheBoundary(StringBuilder sb) {
         sb.append("\n").append(CACHE_BOUNDARY_MARKER).append("\n");
+    }
+
+    private static void appendCoreMemoryBoundary(StringBuilder sb) {
+        sb.append("\n").append(CORE_MEMORY_BOUNDARY_MARKER).append("\n");
     }
 
     /**

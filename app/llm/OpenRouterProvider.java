@@ -146,27 +146,58 @@ public final class OpenRouterProvider extends LlmProvider {
             return;
         }
 
-        var text = content.getAsString();
-        var markerIdx = text.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        systemMsg.add(FIELD_CONTENT, splitIntoCachedBlocks(content.getAsString()));
+    }
+
+    /**
+     * Cut the system text at its markers into cached and uncached blocks.
+     *
+     * <p>Both markers present gives three segments: the static prefix and the core-memory
+     * block each carry a breakpoint, so a core-memory write re-prefills only the core
+     * block instead of the workspace files, skills and tool catalog above it (JCLAW-978).
+     * Only the cache boundary present gives the two-segment split — the shape for an agent
+     * with no core memories. Neither present falls back to one cached block, which is what
+     * prompts predating the marker convention produce.
+     *
+     * <p>Empty segments are dropped rather than sent as empty text blocks, and a breakpoint
+     * is never attached to the trailing segment: it is the per-turn-variable tail, so
+     * caching it would write a block that can never be read back.
+     */
+    private static JsonArray splitIntoCachedBlocks(String text) {
+        var coreIdx = text.indexOf(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER);
+        var boundaryIdx = text.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
         var blocks = new JsonArray();
-        if (markerIdx < 0) {
-            // No marker: single cached block, preserving legacy behavior.
+
+        if (boundaryIdx < 0) {
             var block = textBlock(text);
             attachCacheControl(block);
             blocks.add(block);
-        } else {
-            var prefix = text.substring(0, markerIdx);
-            var suffix = text.substring(markerIdx + SystemPromptAssembler.CACHE_BOUNDARY_MARKER.length());
-            var prefixBlock = textBlock(prefix);
-            attachCacheControl(prefixBlock);
-            blocks.add(prefixBlock);
-            // Skip the suffix block entirely when empty — no reason to send an
-            // empty text block just to hold a missing cache_control.
-            if (!suffix.isEmpty()) {
-                blocks.add(textBlock(suffix));
-            }
+            return blocks;
         }
-        systemMsg.add(FIELD_CONTENT, blocks);
+
+        // A core marker only counts when it precedes the cache boundary; anything else
+        // means the text was assembled by something other than buildPrompt.
+        if (coreIdx >= 0 && coreIdx < boundaryIdx) {
+            addCached(blocks, text.substring(0, coreIdx));
+            addCached(blocks, text.substring(
+                    coreIdx + SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER.length(), boundaryIdx));
+        } else {
+            addCached(blocks, text.substring(0, boundaryIdx));
+        }
+
+        var suffix = text.substring(boundaryIdx + SystemPromptAssembler.CACHE_BOUNDARY_MARKER.length());
+        if (!suffix.isEmpty()) {
+            blocks.add(textBlock(suffix));
+        }
+        return blocks;
+    }
+
+    /** Append {@code segment} as a cache-tagged block, skipping it when empty. */
+    private static void addCached(JsonArray blocks, String segment) {
+        if (segment.isEmpty()) return;
+        var block = textBlock(segment);
+        attachCacheControl(block);
+        blocks.add(block);
     }
 
     /**

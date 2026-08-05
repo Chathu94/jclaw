@@ -399,6 +399,49 @@ class LlmClientTest extends UnitTest {
     }
 
     @Test
+    void openrouter_cache_coreMarkerSplitsPrefixIntoTwoCachedBlocks() {
+        // JCLAW-978: the static prefix and the core-memory block get independent
+        // breakpoints, so a core-memory write re-prefills only the core block.
+        var core = agents.SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER;
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system(
+                                "skills and tools\n" + core + "\ncore memories\n" + marker + "\nrecalled"),
+                        llm.LlmTypes.ChatMessage.user("hello")));
+
+        var blocks = firstSystem(serialize(openRouterProvider(), req)).getAsJsonArray("content");
+
+        assertEquals(3, blocks.size(), "expected static + core + variable blocks");
+        var stat = blocks.get(0).getAsJsonObject();
+        var coreBlock = blocks.get(1).getAsJsonObject();
+        var tail = blocks.get(2).getAsJsonObject();
+        assertTrue(stat.has("cache_control"), "static prefix keeps its own breakpoint");
+        assertTrue(coreBlock.has("cache_control"), "core block gets a second breakpoint");
+        assertFalse(tail.has("cache_control"), "the per-turn tail must never be cached");
+        assertTrue(stat.get("text").getAsString().contains("skills and tools"));
+        assertTrue(coreBlock.get("text").getAsString().contains("core memories"));
+        assertTrue(tail.get("text").getAsString().contains("recalled"));
+        for (var b : blocks) {
+            var t = b.getAsJsonObject().get("text").getAsString();
+            assertFalse(t.contains(core) || t.contains(marker), "markers are consumed by the split");
+        }
+    }
+
+    @Test
+    void openrouter_cache_noCoreMarker_keepsTheTwoBlockShape() {
+        // An agent with no core memories emits no core marker, and must still split in two.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("stable\n" + marker + "\ndynamic"),
+                        llm.LlmTypes.ChatMessage.user("hello")));
+
+        var blocks = firstSystem(serialize(openRouterProvider(), req)).getAsJsonArray("content");
+        assertEquals(2, blocks.size(), "no core marker → unchanged two-block split");
+        assertTrue(blocks.get(0).getAsJsonObject().has("cache_control"));
+        assertFalse(blocks.get(1).getAsJsonObject().has("cache_control"));
+    }
+
+    @Test
     void openrouter_cache_noBoundaryMarker_fallsBackToSingleBlock() {
         // Regression guard for prompts that predate the marker convention —
         // still get cache_control, just on a single block.
@@ -538,20 +581,34 @@ class LlmClientTest extends UnitTest {
     void openrouter_cache_breakpointCountAtMost4() {
         // Anthropic allows ≤4 cache_control markers per request. Defensive
         // assertion: no matter what we do upstream, we must not blow past 4.
+        var core = agents.SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER;
         var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
-        var req = chatRequest("anthropic/claude-3-7-sonnet",
-                List.of(llm.LlmTypes.ChatMessage.system("stable\n" + marker + "\ndynamic"),
-                        llm.LlmTypes.ChatMessage.user("first"),
-                        llm.LlmTypes.ChatMessage.assistant("reply"),
-                        llm.LlmTypes.ChatMessage.user("follow-up")));
+        var tail = List.of(llm.LlmTypes.ChatMessage.user("first"),
+                llm.LlmTypes.ChatMessage.assistant("reply"),
+                llm.LlmTypes.ChatMessage.user("follow-up"));
 
-        var json = serialize(openRouterProvider(), req).toString();
-        // Count occurrences of "cache_control" in the serialized body.
+        var noCore = new java.util.ArrayList<llm.LlmTypes.ChatMessage>();
+        noCore.add(llm.LlmTypes.ChatMessage.system("stable\n" + marker + "\ndynamic"));
+        noCore.addAll(tail);
+        assertEquals(2, breakpointCount(noCore),
+                "JCLAW-128 shape — system prefix plus trailing user message");
+
+        var withCore = new java.util.ArrayList<llm.LlmTypes.ChatMessage>();
+        withCore.add(llm.LlmTypes.ChatMessage.system(
+                "stable\n" + core + "\ncore\n" + marker + "\ndynamic"));
+        withCore.addAll(tail);
+        int n = breakpointCount(withCore);
+        assertEquals(3, n, "JCLAW-978 adds the core-memory breakpoint and no more");
+        assertTrue(n <= 4, "must not exceed Anthropic's 4-breakpoint budget, got " + n);
+    }
+
+    private static int breakpointCount(List<llm.LlmTypes.ChatMessage> messages) {
+        var json = serialize(openRouterProvider(), chatRequest("anthropic/claude-3-7-sonnet", messages))
+                .toString();
         int count = 0;
         int idx = 0;
         while ((idx = json.indexOf("cache_control", idx)) >= 0) { count++; idx++; }
-        assertTrue(count <= 4, "must not exceed Anthropic's 4-breakpoint budget, got " + count);
-        assertEquals(2, count, "JCLAW-128 emits exactly 2 breakpoints per request");
+        return count;
     }
 
     // ─── helpers ─────────────────────────────────────────────────────

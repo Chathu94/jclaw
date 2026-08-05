@@ -2861,16 +2861,31 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </div>
             <div
               class="bg-muted border border-border px-3 py-2"
-              title="Bytes above the cache boundary marker — hash-stable, reused from the provider cache on repeat turns"
+              title="Bytes above the core-memory boundary — the fully static segment. It carries its own cache breakpoint, so editing a core memory does not re-prefill it."
             >
               <div class="text-[10px] text-fg-muted uppercase tracking-wide">
-                Cacheable prefix
+                Static prefix
               </div>
               <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-                {{ formatChars(promptBreakdownData.cacheablePrefixChars) }}
+                {{ formatChars(promptBreakdownData.staticPrefixChars) }}
               </div>
               <div class="text-[10px] text-fg-muted">
-                ≈ {{ formatTokens(Math.round(promptBreakdownData.cacheablePrefixChars / 4)) }} tokens
+                ≈ {{ formatTokens(Math.round(promptBreakdownData.staticPrefixChars / 4)) }} tokens
+              </div>
+            </div>
+            <div
+              v-if="promptBreakdownData.coreMemoryChars > 0"
+              class="bg-muted border border-border px-3 py-2"
+              title="Core memories — cached on its own breakpoint, so a memory write re-prefills only this block rather than the static prefix above it"
+            >
+              <div class="text-[10px] text-fg-muted uppercase tracking-wide">
+                Core memories
+              </div>
+              <div class="text-sm font-mono text-amber-700 dark:text-amber-400">
+                {{ formatChars(promptBreakdownData.coreMemoryChars) }}
+              </div>
+              <div class="text-[10px] text-fg-muted">
+                ≈ {{ formatTokens(Math.round(promptBreakdownData.coreMemoryChars / 4)) }} tokens
               </div>
             </div>
             <div

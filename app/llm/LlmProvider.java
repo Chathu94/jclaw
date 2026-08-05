@@ -352,9 +352,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         var content = systemMsg.get(JSON_CONTENT);
         if (content == null || !content.isJsonPrimitive()) return;
         var text = content.getAsString();
-        if (!text.contains(SystemPromptAssembler.CACHE_BOUNDARY_MARKER)) return;
-        systemMsg.addProperty(JSON_CONTENT,
-                text.replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, ""));
+        var scrubbed = text
+                .replace(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER, "")
+                .replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, "");
+        if (scrubbed.equals(text)) return;
+        systemMsg.addProperty(JSON_CONTENT, scrubbed);
     }
 
     /** The first {@code role=system} message in a serialized request, or null when there is none. */
