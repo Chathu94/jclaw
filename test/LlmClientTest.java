@@ -499,6 +499,24 @@ class LlmClientTest extends UnitTest {
     }
 
     @Test
+    void openrouter_cache_qwenGetsBreakpointsButImplicitCachersDoNot() {
+        // JCLAW-980: eligibility is per-upstream and was settled by probe. Qwen caches
+        // measurably better with an explicit breakpoint; Grok already caches fully on its
+        // own, so a directive would only add the cold-call write premium.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var messages = List.of(
+                llm.LlmTypes.ChatMessage.system("stable\n" + marker + "\nvariable"),
+                llm.LlmTypes.ChatMessage.user("hello"));
+
+        assertTrue(serialize(openRouterProvider(), chatRequest("qwen/qwen3.7-plus", messages))
+                        .toString().contains("cache_control"),
+                "qwen/ requires an explicit breakpoint to cache well");
+        assertFalse(serialize(openRouterProvider(), chatRequest("x-ai/grok-4.5", messages))
+                        .toString().contains("cache_control"),
+                "x-ai/grok- caches implicitly; a breakpoint would only cost a write premium");
+    }
+
+    @Test
     void openrouter_cache_nonAnthropicModel_stripsBoundaryMarker() {
         // Non-caching route: the marker substring is scrubbed from the
         // system content so it doesn't reach the model.

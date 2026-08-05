@@ -257,10 +257,25 @@ public final class OpenRouterProvider extends LlmProvider {
      * Returns true for OpenRouter model IDs whose upstream provider requires explicit
      * {@code cache_control} to activate prompt caching. Models not listed here either
      * cache implicitly (OpenAI, DeepSeek, Grok, Gemini 2.5) or have no caching.
+     *
+     * <p>Membership is decided by probe, not by docs (JCLAW-980). A model that already
+     * caches implicitly must stay out: the directive buys nothing and costs a cache-write
+     * premium on the cold call. Probed 2026-08-05 with an identical 9k-token prompt, cold
+     * then warm, reading {@code prompt_tokens_details} and {@code cost} back:
+     *
+     * <ul>
+     *   <li>{@code qwen/} — in. Implicit caching reaches 8448/9028 tokens at 0.000734
+     *       warm; the directive reaches 9010 at 0.000302, so a warm read is 2.4x cheaper.
+     *       The cold write costs 25% more (0.003617 against 0.002897), repaid inside two
+     *       warm turns.</li>
+     *   <li>{@code x-ai/grok-} — out. Implicit caching already returns the full 9216
+     *       tokens warm; adding the directive changed neither the cached count nor the
+     *       cost, so it would be pure cache-write premium.</li>
+     * </ul>
      */
     private static boolean requiresExplicitCacheControl(String model) {
         if (model == null) return false;
-        if (model.startsWith("anthropic/")) return true;
+        if (model.startsWith("anthropic/") || model.startsWith("qwen/")) return true;
         // Gemini 2.5 Pro/Flash cache implicitly; older Gemini variants need cache_control.
         return model.startsWith("google/gemini-") && !model.startsWith("google/gemini-2.5-");
     }
