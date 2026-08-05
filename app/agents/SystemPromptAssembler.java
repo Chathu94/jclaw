@@ -605,7 +605,11 @@ public class SystemPromptAssembler {
         try {
             double minImportance = ConfigService.getDouble("memory.coreload.minImportance", 0.8);
             int maxCount = ConfigService.getInt("memory.coreload.maxCount", 20);
-            int tokenBudget = ConfigService.getInt("memory.coreload.tokenBudget", 400);
+            // 600, not 400: at 400 the budget — not maxCount — was the binding cap, and
+            // a 36-memory corpus seated 17 of the 20 maxCount allows. Sized so maxCount
+            // is what actually limits the block, with the budget as the runaway guard
+            // its name implies.
+            int tokenBudget = ConfigService.getInt("memory.coreload.tokenBudget", 600);
 
             // Partition on the immutable agent id, not the mutable name (JCLAW-531).
             var core = Memory.findCore(String.valueOf(agent.id), minImportance, maxCount);

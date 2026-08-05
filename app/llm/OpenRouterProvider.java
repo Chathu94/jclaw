@@ -104,15 +104,11 @@ public final class OpenRouterProvider extends LlmProvider {
         // up to 4 cache breakpoints per request — we emit 2.
         //
         // OpenAI/DeepSeek/Grok/Gemini 2.5 cache implicitly and need no directive.
+        // The else-branch leaves the marker in place deliberately — LlmProvider scrubs it
+        // after this hook returns, for every provider at once.
         if (requiresExplicitCacheControl(chatRequest.model())) {
             splitSystemMessageAtCacheBoundary(request);
             injectTrailingUserMessageCacheBreakpoint(request);
-        } else {
-            // Non-caching providers still carry the boundary marker verbatim in
-            // the system text, which is meaningless to them. Strip it so it
-            // doesn't pollute the model's context (observed: some models echo
-            // HTML comments back if asked to quote their instructions).
-            stripCacheBoundaryMarker(request);
         }
     }
 
@@ -226,24 +222,6 @@ public final class OpenRouterProvider extends LlmProvider {
     }
 
     /**
-     * Remove the cache-boundary marker substring from the first system message
-     * for providers that don't participate in our cache protocol. The marker
-     * is an HTML comment inside the system text; cache-emitting routes
-     * consume it via {@link #splitSystemMessageAtCacheBoundary}, but other
-     * routes (OpenAI, DeepSeek, Grok, Gemini 2.5, Ollama) would otherwise
-     * ship it verbatim to the model.
-     */
-    private static void stripCacheBoundaryMarker(JsonObject request) {
-        var systemMsg = findFirstSystemMessage(request);
-        if (systemMsg == null) return;
-        var content = systemMsg.get(FIELD_CONTENT);
-        if (content == null || !content.isJsonPrimitive()) return;
-        var text = content.getAsString();
-        if (!text.contains(SystemPromptAssembler.CACHE_BOUNDARY_MARKER)) return;
-        systemMsg.addProperty(FIELD_CONTENT, text.replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, ""));
-    }
-
-    /**
      * Convert a message's string content into a single-element block array,
      * or return the existing block array. Returns {@code null} when the
      * content is null/JsonNull/non-convertible. Mutates the message to hold
@@ -260,18 +238,6 @@ public final class OpenRouterProvider extends LlmProvider {
         blocks.add(textBlock(content.getAsString()));
         msg.add(FIELD_CONTENT, blocks);
         return blocks;
-    }
-
-    private static JsonObject findFirstSystemMessage(JsonObject request) {
-        if (!request.has(FIELD_MESSAGES) || !request.get(FIELD_MESSAGES).isJsonArray()) return null;
-        for (var el : request.getAsJsonArray(FIELD_MESSAGES)) {
-            if (!el.isJsonObject()) continue;
-            var msg = el.getAsJsonObject();
-            if (msg.has("role") && MessageRole.SYSTEM.value.equals(msg.get("role").getAsString())) {
-                return msg;
-            }
-        }
-        return null;
     }
 
     private static JsonObject textBlock(String text) {

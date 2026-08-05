@@ -8,6 +8,7 @@ import llm.LlmTypes.ToolDef;
 import llm.OllamaProvider;
 import llm.OpenAiProvider;
 import llm.OpenRouterProvider;
+import llm.TogetherAiProvider;
 import llm.ToolCallChunkMerger;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -42,6 +43,16 @@ class LlmProviderTest extends UnitTest {
     private static OpenRouterProvider openRouter() {
         return new OpenRouterProvider(new ProviderConfig(
                 "openrouter", "https://openrouter.ai/api/v1", "sk-test", List.of()));
+    }
+
+    private static OllamaProvider ollama() {
+        return new OllamaProvider(new ProviderConfig(
+                "ollama-local", "http://localhost:11434/v1", "", List.of()));
+    }
+
+    private static TogetherAiProvider togetherAi() {
+        return new TogetherAiProvider(new ProviderConfig(
+                "together", "https://api.together.xyz/v1", "sk-test", List.of()));
     }
 
     // =====================
@@ -319,6 +330,51 @@ class LlmProviderTest extends UnitTest {
         assertEquals("tool", msg.get("role").getAsString());
         assertEquals("call-99", msg.get("tool_call_id").getAsString());
         assertFalse(msg.has("name"));
+    }
+
+    // =====================
+    // serializeRequest — cache-boundary marker never reaches the wire
+    // =====================
+
+    @Test
+    void everyProviderStripsTheCacheBoundaryMarker() throws Exception {
+        // The marker is JClaw's own protocol, meaningless to a model. Only the
+        // OpenRouter Anthropic route consumes it (by splitting on it); every other
+        // route used to ship the literal HTML comment because the strip lived in
+        // OpenRouterProvider. The base class now scrubs it for all four.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var systemText = "stable prefix\n" + marker + "\nvariable suffix";
+        List<LlmProvider> providers = List.of(openAi(), openRouter(), ollama(), togetherAi());
+
+        for (var p : providers) {
+            var req = new ChatRequest("gpt-4o",
+                    List.of(ChatMessage.system(systemText), ChatMessage.user("hi")),
+                    null, false, null, null);
+            var json = serialize(p, req).toString();
+            assertFalse(json.contains(marker),
+                    "marker must not reach the wire for " + p.getClass().getSimpleName() + ": " + json);
+            assertTrue(json.contains("stable prefix") && json.contains("variable suffix"),
+                    "stripping must keep the surrounding text for " + p.getClass().getSimpleName());
+        }
+    }
+
+    @Test
+    void anthropicRouteStillConsumesTheMarkerBySplitting() throws Exception {
+        // The base-class strip must not pre-empt the split: on the Anthropic route the
+        // marker still has to become a block boundary carrying cache_control, not just
+        // vanish from a single block.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var req = new ChatRequest("anthropic/claude-3-7-sonnet",
+                List.of(ChatMessage.system("stable prefix\n" + marker + "\nvariable suffix"),
+                        ChatMessage.user("hi")),
+                null, false, null, null);
+
+        var blocks = serialize(openRouter(), req)
+                .getAsJsonArray("messages").get(0).getAsJsonObject()
+                .getAsJsonArray("content");
+        assertEquals(2, blocks.size(), "marker must still split the system message in two");
+        assertTrue(blocks.get(0).getAsJsonObject().has("cache_control"),
+                "the stable prefix block keeps its breakpoint");
     }
 
     // =====================

@@ -1,5 +1,6 @@
 package llm;
 
+import agents.SystemPromptAssembler;
 import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -21,6 +22,7 @@ import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
 import llm.LlmTypes.Usage;
 import llm.ToolCallChunkMerger.ToolCallBuilder;
+import models.MessageRole;
 import services.EventLogger;
 import utils.HttpKeys;
 import utils.LatencyTrace;
@@ -73,7 +75,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     // off the wire shape without the compiler catching it.
     private static final String JSON_USAGE = "usage";
     private static final String JSON_MODEL = "model";
+    private static final String JSON_MESSAGES = "messages";
     private static final String JSON_CONTENT = "content";
+    private static final String JSON_ROLE = "role";
     private static final String JSON_TOOL_CALLS = "tool_calls";
     private static final String JSON_TOOL_CALL_ID = "tool_call_id";
     private static final String JSON_FINISH_REASON = "finish_reason";
@@ -330,6 +334,40 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      */
     protected void applyCacheDirectives(JsonObject request, ChatRequest chatRequest) {
         // Default: no-op
+    }
+
+    /**
+     * Scrub {@link SystemPromptAssembler#CACHE_BOUNDARY_MARKER} from the first system
+     * message. Runs on every outbound request after {@link #applyCacheDirectives}, so a
+     * provider whose cache protocol already consumed the marker by splitting on it sees
+     * a no-op; every other route would otherwise ship the literal HTML comment, which
+     * some models echo back when asked to quote their instructions.
+     *
+     * <p>Only string content is handled — a block array means a subclass structured the
+     * system message itself and owns what the blocks contain.
+     */
+    private static void stripCacheBoundaryMarker(JsonObject request) {
+        var systemMsg = findFirstSystemMessage(request);
+        if (systemMsg == null) return;
+        var content = systemMsg.get(JSON_CONTENT);
+        if (content == null || !content.isJsonPrimitive()) return;
+        var text = content.getAsString();
+        if (!text.contains(SystemPromptAssembler.CACHE_BOUNDARY_MARKER)) return;
+        systemMsg.addProperty(JSON_CONTENT,
+                text.replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, ""));
+    }
+
+    /** The first {@code role=system} message in a serialized request, or null when there is none. */
+    protected static JsonObject findFirstSystemMessage(JsonObject request) {
+        if (!request.has(JSON_MESSAGES) || !request.get(JSON_MESSAGES).isJsonArray()) return null;
+        for (var el : request.getAsJsonArray(JSON_MESSAGES)) {
+            if (!el.isJsonObject()) continue;
+            var msg = el.getAsJsonObject();
+            if (msg.has(JSON_ROLE) && MessageRole.SYSTEM.value.equals(msg.get(JSON_ROLE).getAsString())) {
+                return msg;
+            }
+        }
+        return null;
     }
 
     /**
@@ -655,7 +693,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     protected String serializeRequest(ChatRequest request) {
         var obj = new JsonObject();
         obj.addProperty(JSON_MODEL, request.model());
-        obj.add("messages", serializeMessages(request.messages()));
+        obj.add(JSON_MESSAGES, serializeMessages(request.messages()));
         if (request.tools() != null && !request.tools().isEmpty()) {
             obj.add("tools", gson.toJsonTree(request.tools()));
         }
@@ -674,6 +712,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             disableReasoning(obj);
         }
         applyCacheDirectives(obj, request);
+        stripCacheBoundaryMarker(obj);
         return gson.toJson(obj);
     }
 
@@ -681,7 +720,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         var array = new JsonArray();
         for (var msg : messages) {
             var obj = new JsonObject();
-            obj.addProperty("role", msg.role());
+            obj.addProperty(JSON_ROLE, msg.role());
             if (msg.content() instanceof String s) {
                 obj.addProperty(JSON_CONTENT, s);
             } else if (msg.content() != null) {
@@ -728,7 +767,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     }
 
     private ChatMessage deserializeMessage(JsonObject msgObj) {
-        var role = msgObj.get("role").getAsString();
+        var role = msgObj.get(JSON_ROLE).getAsString();
         String content = null;
         if (msgObj.has(JSON_CONTENT) && !msgObj.get(JSON_CONTENT).isJsonNull()) {
             content = msgObj.get(JSON_CONTENT).getAsString();
