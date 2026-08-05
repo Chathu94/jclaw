@@ -119,11 +119,21 @@ public final class TokenUsageEstimator {
         return new TokenCount(tokens, resolved.name(), resolved.modelMatched());
     }
 
+    /**
+     * Token cost of a bare string, with no chat-message framing added.
+     *
+     * <p>{@code model} may be null, resolving to the {@code cl100k_base} fallback — which
+     * is what memory recall reports its block cost with, having no model in scope.
+     */
+    public static TokenCount estimateText(String model, String text) {
+        var resolved = resolveEncoding(model);
+        return new TokenCount(count(resolved.encoding(), text),
+                resolved.name(), resolved.modelMatched());
+    }
+
     /** Estimate streamed reasoning text by itself for UI/reporting fallback fields. */
     public static TokenCount estimateReasoning(String model, String reasoningText) {
-        var resolved = resolveEncoding(model);
-        return new TokenCount(count(resolved.encoding(), reasoningText),
-                resolved.name(), resolved.modelMatched());
+        return estimateText(model, reasoningText);
     }
 
     private static int estimateMessage(Encoding encoding, ChatMessage message) {

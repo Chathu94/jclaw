@@ -87,15 +87,30 @@ class SystemPromptCoreMemoryTest extends UnitTest {
     }
 
     @Test
-    void tokenBudgetCapsTheCoreBlock() {
+    void maxCountCapsTheCoreBlock() {
         var agent = newAgent("spa-core-4");
         for (int i = 0; i < 50; i++) {
             store(agent,"COREFILL%02d ".formatted(i) + "x".repeat(80), "core", 0.9);
         }
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
-        int count = countOccurrences(prompt, "COREFILL");
-        assertTrue(count > 0, "some core memories should load");
-        assertTrue(count < 50, "token budget must cap the core block below the full set");
+        assertEquals(20, countOccurrences(prompt, "COREFILL"),
+                "memory.coreload.maxCount is the block's only bound — exactly 20 of the 50 load");
+    }
+
+    @Test
+    void aVerboseCoreMemoryIsStillLoadedWhole() {
+        // JCLAW-955/979: length is not a ranking signal, so a long core memory is neither
+        // truncated nor allowed to displace the ones ranked below it.
+        var agent = newAgent("spa-core-verbose");
+        store(agent, "COREBIG " + "x".repeat(4000), "core", 0.99);
+        store(agent, "CORESMALL", "core", 0.98);
+
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+
+        assertTrue(prompt.contains("COREBIG " + "x".repeat(4000)),
+                "a verbose core memory must be injected in full, not clipped to a budget");
+        assertTrue(prompt.contains("CORESMALL"),
+                "and must not consume a budget that starves the memory ranked after it");
     }
 
     @Test
