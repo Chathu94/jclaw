@@ -75,90 +75,61 @@ public final class CoreMemoryCapMigration {
         classifierOverride = override;
     }
 
-    /** Test-only: run the sweep inline, so a test need not poll the virtual thread. */
-    public static void runForTest() {
-        migrate();
+    /** Test-only: run the pass inline for one agent, so a test need not poll the virtual thread. */
+    public static void runForTest(String agentId) {
+        migrate(agentId);
     }
 
     private static final AtomicBoolean running = new AtomicBoolean(false);
     private static final AtomicInteger processed = new AtomicInteger();
     private static final AtomicInteger total = new AtomicInteger();
     private static volatile String lastError;
+    /** Which agent the in-flight pass belongs to; null when idle. */
+    private static volatile String runningFor;
+    /** Which agent {@link #lastError} came from, so it surfaces on that card only. */
+    private static volatile String lastErrorFor;
 
     /**
      * What the Limits panel polls. {@code overCap} is what turns the button on, and is not
      * derivable from {@code running} — a corpus can be over the cap with nothing in flight.
      */
     /**
-     * One agent's core-memory usage against the cap.
+     * What one agent's Memory card polls. {@code overCap} is what turns its button on, and
+     * is not derivable from {@code running} — an agent can be over the cap with nothing in
+     * flight.
      *
-     * @param core the agent's live core count — the number the cap governs
+     * @param running true only while THIS agent is the one being migrated
      */
-    public record AgentCore(String agentId, String agentName, long core, boolean overCap) {}
-
     public record Status(boolean running, int processed, int total,
-                         long liveCore, int cap, boolean overCap, String error,
-                         List<AgentCore> agents) {}
+                         long liveCore, int cap, boolean overCap, String error) {}
 
-    public static Status status() {
+    public static Status status(String agentId) {
         int cap = cap();
-        var agents = Tx.run(() -> coreByAgent(cap));
-        // Sorted desc, so the head is the agent the cap actually binds.
-        long live = agents.isEmpty() ? 0 : agents.getFirst().core();
-        return new Status(running.get(), processed.get(), total.get(),
-                live, cap, live > cap, lastError, agents);
+        long live = Tx.run(() -> Memory.countLiveCore(agentId));
+        boolean mine = agentId.equals(runningFor);
+        return new Status(mine, mine ? processed.get() : 0, mine ? total.get() : 0,
+                live, cap, live > cap, agentId.equals(lastErrorFor) ? lastError : null);
     }
 
     private static int cap() {
         return ConfigService.getInt("memory.coreload.maxCount", 20);
     }
 
-    /**
-     * Live core counts per agent, busiest first, for every agent holding at least one.
-     *
-     * <p>The cap is per agent, because the core block is assembled per agent — a total
-     * across the instance describes nothing {@link #migrate()} can act on, and reporting
-     * one made the panel show "over the limit" for a corpus already in line (20 core on
-     * one agent plus 1 on another read as 21 against a cap of 20, with no agent over it
-     * and nothing for a pass to select).
-     *
-     * <p>One grouped query rather than a count per agent. The previous loop ran
-     * {@code Agent.findAll()} and counted each one — 489 queries per poll on this
-     * instance, 92 ms for an endpoint the Settings panel polls, against 0.18 ms for the
-     * aggregate. Agents holding no core memory are absent rather than listed as zero,
-     * which is what keeps the payload two rows instead of 489.
-     */
-    private static List<AgentCore> coreByAgent(int cap) {
-        List<?> rows = play.db.jpa.JPA.em().createQuery(
-                        "select m.agent.id, m.agent.name, count(m) from Memory m "
-                                + "where m.category = :core and m.supersededAt is null "
-                                + "group by m.agent.id, m.agent.name order by count(m) desc")
-                .setParameter("core", MemoryCategory.CORE.label)
-                .getResultList();
-        var out = new ArrayList<AgentCore>(rows.size());
-        for (Object row : rows) {
-            var cols = (Object[]) row;
-            long n = ((Number) cols[2]).longValue();
-            out.add(new AgentCore(String.valueOf(cols[0]), (String) cols[1], n, n > cap));
-        }
-        return out;
-    }
-
-    /**
-     * Start a migration on a virtual thread. Returns the reason it could not start, or
-     * {@code null} when it did — single-flight, because two passes would classify the same
-     * overflow twice and the second would act on a stale snapshot.
-     */
-    public static String start() {
-        var s = status();
+    public static String start(String agentId) {
+        var s = status(agentId);
         if (!s.overCap()) {
-            return "No agent is over the core-memory cap of %d — there is nothing to migrate."
+            return "This agent is not over the core-memory cap of %d — there is nothing to migrate."
                     .formatted(s.cap());
         }
+        // Single-flight across the instance, not per agent: each pass is a chain of model
+        // calls, and letting several run at once would multiply that load for no gain.
+        // The refusal names the agent holding the slot so the wait is explainable.
         if (!running.compareAndSet(false, true)) {
-            return "A core-memory migration is already running.";
+            return "A core-memory migration is already running for %s.".formatted(runningFor);
         }
+        runningFor = agentId;
         lastError = null;
+        lastErrorFor = null;
         processed.set(0);
         total.set(0);
         Thread.ofVirtual().name("core-memory-migration").start(CoreMemoryCapMigration::run);
@@ -166,64 +137,54 @@ public final class CoreMemoryCapMigration {
     }
 
     private static void run() {
+        var agentId = runningFor;
         try {
-            migrate();
+            migrate(agentId);
         } catch (Exception e) {
             lastError = e.getMessage();
+            lastErrorFor = agentId;
             EventLogger.warn(EVENT_CATEGORY,
                     "Core-memory migration failed: %s".formatted(e.getMessage()));
         } finally {
+            runningFor = null;
             running.set(false);
         }
     }
 
-    private static void migrate() {
+    private static void migrate(String agentId) {
         int cap = cap();
-        for (Agent agent : Tx.run(() -> List.copyOf(Agent.<Agent>findAll()))) {
-            var agentId = String.valueOf(agent.id);
-            // Importance 0 so this sees every core row, matching countLiveCore — one below
-            // the load threshold still occupies a slot.
-            List<Memory> core = Tx.run(() ->
-                    Memory.findCore(agentId, 0.0, Integer.MAX_VALUE));
-            if (core.size() <= cap) continue;
+        Agent agent = Tx.run(() -> Agent.<Agent>findById(Long.valueOf(agentId)));
+        if (agent == null) return;
+        // Importance 0 so this sees every core row, matching countLiveCore — one below
+        // the load threshold still occupies a slot.
+        List<Memory> core = Tx.run(() -> Memory.findCore(agentId, 0.0, Integer.MAX_VALUE));
+        if (core.size() <= cap) return;
 
-            // findCore's own order — importance, then recency. The survivors are therefore
-            // exactly the memories the operator has been seeing in the prompt; any other
-            // order silently swaps the always-loaded set.
-            var overflow = core.subList(cap, core.size());
-            total.addAndGet(overflow.size());
-            var assigned = classify(agent, overflow.stream().map(m -> m.text).toList());
+        // findCore's own order — importance, then recency. The survivors are therefore
+        // exactly the memories the operator has been seeing in the prompt; any other
+        // order silently swaps the always-loaded set.
+        var overflow = core.subList(cap, core.size());
+        total.addAndGet(overflow.size());
+        var assigned = classify(agent, overflow.stream().map(m -> m.text).toList());
 
-            for (int i = 0; i < overflow.size(); i++) {
-                var category = assigned.get(i);
-                if (category == null) continue;   // left as core, to be retried
-                var id = overflow.get(i).id;
-                Tx.run(() -> {
-                    Memory row = Memory.findById(id);
-                    if (row != null) {
-                        row.category = category;
-                        row.save();
-                    }
-                });
-                processed.incrementAndGet();
-            }
-            EventLogger.info(EVENT_CATEGORY, agent.name, null,
-                    "Core-memory migration: %d kept, %d recategorised of %d over the cap"
-                            .formatted(cap, processed.get(), overflow.size()));
+        for (int i = 0; i < overflow.size(); i++) {
+            var category = assigned.get(i);
+            if (category == null) continue;   // left as core, to be retried
+            var id = overflow.get(i).id;
+            Tx.run(() -> {
+                Memory row = Memory.findById(id);
+                if (row != null) {
+                    row.category = category;
+                    row.save();
+                }
+            });
+            processed.incrementAndGet();
         }
+        EventLogger.info(EVENT_CATEGORY, agent.name, null,
+                "Core-memory migration: %d kept, %d recategorised of %d over the cap"
+                        .formatted(cap, processed.get(), overflow.size()));
     }
 
-    /**
-     * One valid non-core category per text, or null for an entry that was not classified.
-     *
-     * <p>Nulls rather than a {@code fact} fallback: see the fail-safe note on the class.
-     *
-     * <p>{@link #sanitise} runs on the model's answer AND on a test stub's. The seam
-     * replaces the model call only — putting it any wider would let a test assert against
-     * its own stub rather than against what production does with that stub, which is
-     * exactly how the "a model answering core" case first passed while the guard was
-     * unreachable.
-     */
     private static List<String> classify(Agent agent, List<String> texts) {
         var answers = classifierOverride != null
                 ? classifierOverride.classify(agent, texts)

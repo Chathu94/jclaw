@@ -53,7 +53,16 @@ function setupAgentsApi(opts?: {
   agent2Tools?: unknown[]
   agent1Skills?: unknown[]
   agent2Skills?: unknown[]
+  agent1Core?: unknown
+  agent2Core?: unknown
 }) {
+  // JCLAW-981: core-memory usage is per agent, so it is polled per agent.
+  registerEndpoint('/api/agents/1/core-migration', () => opts?.agent1Core ?? ({
+    running: false, processed: 0, total: 0, liveCore: 4, cap: 20, overCap: false, error: null,
+  }))
+  registerEndpoint('/api/agents/2/core-migration', () => opts?.agent2Core ?? ({
+    running: false, processed: 0, total: 0, liveCore: 4, cap: 20, overCap: false, error: null,
+  }))
   registerEndpoint('/api/agents', () => opts?.agents ?? [
     {
       id: 1,
@@ -961,5 +970,38 @@ describe('Agents page — bulk-toggle all tools and skills', () => {
     // Both should be set to enabled: true (the flipped target state).
     expect(toolPuts.exec).toEqual({ enabled: true })
     expect(toolPuts.filesystem).toEqual({ enabled: true })
+  })
+})
+
+describe('Agents page — core-memory usage sits on the agent, not in Settings', () => {
+  it('offers the migration on an agent that is over the core cap', async () => {
+    // The cap is per agent, because the core block is assembled per agent. An
+    // instance-wide reading cannot say whose excess it is, nor whether a migration can
+    // move it — Settings still owns the cap itself, which is global policy.
+    setupAgentsApi({
+      agent2Core: {
+        running: false, processed: 0, total: 0, liveCore: 26, cap: 20, overCap: true, error: null,
+      },
+    })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    expect(component.find('[data-testid="agent-core-over-cap"]').exists()).toBe(true)
+    expect((component.find('[data-testid="agent-core-migrate"]').element as HTMLButtonElement)
+      .disabled).toBe(false)
+    expect(component.find('[data-testid="agent-core-memory"]').text()).toContain('26 of 20 allowed')
+  })
+
+  it('leaves the migration disabled for an agent within the cap', async () => {
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    expect(component.find('[data-testid="agent-core-over-cap"]').exists()).toBe(false)
+    expect((component.find('[data-testid="agent-core-migrate"]').element as HTMLButtonElement)
+      .disabled).toBe(true)
+    expect(component.find('[data-testid="agent-core-memory"]').text()).toContain('4 of 20 allowed')
   })
 })

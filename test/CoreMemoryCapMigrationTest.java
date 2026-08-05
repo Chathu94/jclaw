@@ -62,6 +62,10 @@ class CoreMemoryCapMigrationTest extends UnitTest {
                 MemoryCategory.CORE.label, importance);
     }
 
+    private String agentId() {
+        return String.valueOf(agent.id);
+    }
+
     private void storeCore(String text, double importance) {
         MemoryStoreFactory.get().store(String.valueOf(agent.id), text,
                 MemoryCategory.CORE.label, importance);
@@ -87,7 +91,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
     @Test
     void statusReportsTheCorpusAgainstTheCap() {
         storeCore("The only core fact", 0.9);
-        var s = CoreMemoryCapMigration.status();
+        var s = CoreMemoryCapMigration.status(agentId());
         assertEquals(1L, s.liveCore());
         assertEquals(cap(), s.cap());
         assertFalse(s.overCap(), "one memory is not over a cap of %d".formatted(cap()));
@@ -97,7 +101,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
     @Test
     void refusesToStartWhenNothingIsOverTheCap() {
         storeCore("The only core fact", 0.9);
-        var refusal = CoreMemoryCapMigration.start();
+        var refusal = CoreMemoryCapMigration.start(agentId());
         assertNotNull(refusal, "starting a pointless migration must be refused, not silently run");
         assertTrue(refusal.contains("nothing to migrate"), refusal);
     }
@@ -108,7 +112,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         assertEquals(cap() + 5L, liveCore(), "seed must actually exceed the cap");
         classifyAllAs(MemoryCategory.ENTITY.label);
 
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
 
         assertEquals(cap(), liveCore(), "exactly the cap survives as core");
         assertEquals(5, MemoryStoreFactory.get().list(String.valueOf(agent.id)).stream()
@@ -124,7 +128,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         storeCore("MARKER_LOW an afterthought", 0.30);
         classifyAllAs(MemoryCategory.FACT.label);
 
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
 
         var demoted = MemoryStoreFactory.get().list(String.valueOf(agent.id)).stream()
                 .filter(m -> m.text().contains("MARKER_LOW")).findFirst().orElseThrow();
@@ -144,7 +148,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
             return out;
         });
 
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
 
         assertEquals(cap() + 1L, liveCore(), "nothing may be recategorised on a failed classification");
     }
@@ -156,7 +160,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         for (int i = 0; i < cap() + 1; i++) storeCore("Core fact %02d".formatted(i), 0.9);
         classifyAllAs(MemoryCategory.CORE.label);
 
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
 
         assertEquals(cap(), liveCore(), "an answer of 'core' must be coerced away, not honoured");
     }
@@ -165,7 +169,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
     void leavesACorpusUnderTheCapAlone() {
         storeCore("The only core fact", 0.9);
         classifyAllAs(MemoryCategory.FACT.label);
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
         assertEquals(1, liveCore());
     }
 
@@ -174,11 +178,11 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         for (int i = 0; i < cap() + 3; i++) storeCore("Core fact %02d".formatted(i), 0.9);
         classifyAllAs(MemoryCategory.FACT.label);
 
-        CoreMemoryCapMigration.runForTest();
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
+        CoreMemoryCapMigration.runForTest(agentId());
 
         assertEquals(cap(), liveCore(), "a second pass has nothing left to do");
-        assertNull(CoreMemoryCapMigration.status().error());
+        assertNull(CoreMemoryCapMigration.status(agentId()).error());
     }
 
     @Test
@@ -193,7 +197,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
             return List.of(MemoryCategory.FACT.label);
         });
 
-        CoreMemoryCapMigration.runForTest();
+        CoreMemoryCapMigration.runForTest(agentId());
 
         assertEquals(1, seen.size(), "only the overflow is classified");
         assertTrue(seen.getFirst().contains("MOVE"), "and it is the lowest-ranked memory: " + seen);
@@ -210,7 +214,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         for (int i = 0; i < cap(); i++) storeCore("main core fact " + i, 0.9);
         storeCoreFor(otherAgent(), "the other agent's single core fact", 0.9);
 
-        var s = CoreMemoryCapMigration.status();
+        var s = CoreMemoryCapMigration.status(agentId());
         assertEquals(cap(), s.liveCore(),
                 "liveCore must describe the agent the cap governs, not the instance total");
         assertFalse(s.overCap(),
@@ -224,70 +228,53 @@ class CoreMemoryCapMigrationTest extends UnitTest {
         for (int i = 0; i < cap(); i++) storeCore("main core fact " + i, 0.9);
         storeCoreFor(otherAgent(), "the other agent's single core fact", 0.9);
 
-        var refusal = CoreMemoryCapMigration.start();
+        var refusal = CoreMemoryCapMigration.start(agentId());
         assertNotNull(refusal, "a migration that cannot move anything must be refused");
         assertTrue(refusal.contains("nothing to migrate"), refusal);
     }
 
-    @Test
-    void oneAgentOverTheCapIsStillDetectedWhenAnotherIsUnderIt() {
-        // Guards the opposite error: a max that ignored agents past the first, or a fix
-        // that made overCap unreachable with more than one agent.
-        storeCore("the quiet agent's only core fact", 0.9);
-        var busy = otherAgent();
-        for (int i = 0; i < cap() + 3; i++) storeCoreFor(busy, "busy core fact " + i, 0.9);
-
-        var s = CoreMemoryCapMigration.status();
-        assertEquals(cap() + 3L, s.liveCore(), "the worst agent is what the panel must report");
-        assertTrue(s.overCap(), "an agent past the cap must still be detected");
-    }
-
-    // --- the per-agent breakdown ---
+    // --- scoping: one agent's card must not answer for another ---
 
     @Test
-    void statusNamesEachAgentHoldingCoreMemoriesBusiestFirst() {
-        // A single number cannot say where the pressure is: "20 of 20" is the same
-        // reading whether one agent is at the cap or five are spread beneath it.
-        storeCore("main core fact", 0.9);
-        var busy = otherAgent();
-        for (int i = 0; i < 3; i++) storeCoreFor(busy, "busy core fact " + i, 0.9);
+    void statusAnswersForTheAgentAskedAboutOnly() {
+        // The panel moved onto the agent editor, so every reading is addressed to one
+        // agent. A status that leaked another agent's count would put the migrate button
+        // on the wrong card — the same class of mistake as the instance-wide total.
+        for (int i = 0; i < cap() + 3; i++) storeCore("busy core fact " + i, 0.9);
+        var quiet = otherAgent();
+        storeCoreFor(quiet, "the quiet agent's only core fact", 0.9);
 
-        var rows = CoreMemoryCapMigration.status().agents();
-        assertEquals(2, rows.size(), "both agents holding core memories must appear: " + rows);
-        assertEquals(busy.name, rows.getFirst().agentName(), "busiest agent first");
-        assertEquals(3L, rows.getFirst().core());
-        assertEquals(agent.name, rows.get(1).agentName());
-        assertEquals(1L, rows.get(1).core());
+        var busy = CoreMemoryCapMigration.status(agentId());
+        assertEquals(cap() + 3L, busy.liveCore());
+        assertTrue(busy.overCap(), "the agent over the cap must say so");
+
+        var calm = CoreMemoryCapMigration.status(String.valueOf(quiet.id));
+        assertEquals(1L, calm.liveCore(), "an agent's card must report only its own memories");
+        assertFalse(calm.overCap());
     }
 
     @Test
-    void agentsWithNoCoreMemoriesAreAbsentRatherThanListedAsZero() {
-        // What keeps the payload small: this instance has 489 agents and two of them hold
-        // a core memory. Listing zeros would make a polled endpoint carry the agent table.
-        storeCore("the only core fact", 0.9);
-        otherAgent();
+    void migratingOneAgentLeavesAnotherAgentsCoreMemoriesAlone() {
+        for (int i = 0; i < cap() + 2; i++) storeCore("busy core fact " + i, 0.9);
+        var quiet = otherAgent();
+        for (int i = 0; i < 3; i++) storeCoreFor(quiet, "quiet core fact " + i, 0.9);
+        classifyAllAs(MemoryCategory.FACT.label);
 
-        var rows = CoreMemoryCapMigration.status().agents();
-        assertEquals(1, rows.size(), "only the agent holding a core memory belongs: " + rows);
-        assertEquals(agent.name, rows.getFirst().agentName());
+        CoreMemoryCapMigration.runForTest(agentId());
+
+        assertEquals(cap(), liveCore(), "the migrated agent comes down to the cap");
+        assertEquals(3L, Memory.countLiveCore(String.valueOf(quiet.id)),
+                "an untouched agent keeps every core memory it had");
     }
 
     @Test
-    void theBreakdownFlagsWhichAgentIsOverTheCap() {
-        storeCore("the quiet agent's only core fact", 0.9);
-        var busy = otherAgent();
-        for (int i = 0; i < cap() + 2; i++) storeCoreFor(busy, "busy core fact " + i, 0.9);
+    void anAgentWithinTheCapIsRefusedEvenWhileAnotherIsOverIt() {
+        for (int i = 0; i < cap() + 5; i++) storeCore("busy core fact " + i, 0.9);
+        var quiet = otherAgent();
+        storeCoreFor(quiet, "the quiet agent's only core fact", 0.9);
 
-        var rows = CoreMemoryCapMigration.status().agents();
-        assertTrue(rows.getFirst().overCap(), "the agent past the cap must be marked");
-        assertFalse(rows.get(1).overCap(), "the one within it must not be");
-    }
-
-    @Test
-    void anEmptyCorpusReportsNoAgentsAndIsNotOverTheCap() {
-        var s = CoreMemoryCapMigration.status();
-        assertTrue(s.agents().isEmpty());
-        assertEquals(0L, s.liveCore(), "no core memories means zero, not a stale maximum");
-        assertFalse(s.overCap());
+        var refusal = CoreMemoryCapMigration.start(String.valueOf(quiet.id));
+        assertNotNull(refusal, "a migration this agent cannot benefit from must be refused");
+        assertTrue(refusal.contains("not over the core-memory cap"), refusal);
     }
 }

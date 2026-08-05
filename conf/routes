@@ -114,8 +114,8 @@ GET     /api/memories                           ApiMemoryController.list
 POST    /api/memories/recall                    ApiMemoryController.recall
 POST    /api/memories/evals/generate            ApiMemoryController.evalGenerate
 POST    /api/memories/evals/run                 ApiMemoryController.evalRun
-GET     /api/memories/core-migration            ApiMemoryController.coreMigrationStatus
-POST    /api/memories/core-migration            ApiMemoryController.coreMigrationStart
+GET     /api/agents/{agentId}/core-migration     ApiMemoryController.coreMigrationStatus
+POST    /api/agents/{agentId}/core-migration     ApiMemoryController.coreMigrationStart
 GET     /api/memories/reembed                   ApiMemoryController.reembedStatus
 POST    /api/memories/reembed                   ApiMemoryController.reembedStart
 PUT     /api/memories/{memoryId}                ApiMemoryController.update

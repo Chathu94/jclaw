@@ -40,6 +40,7 @@ import type {
   AgentTool,
   ConfigResponse,
   ConfigValueResponse,
+  CoreMigrationStatus,
   EffectiveAllowlist,
   PromptBreakdown,
   PromptBreakdownEntry,
@@ -348,6 +349,51 @@ const acpAllowed = ref(false)
 // The toggle gates capture; the provider/model selects override the extractor
 // model (sent as null when they match the agent's default, so it keeps
 // inheriting the default and tracks it if the default later changes).
+/**
+ * Core-memory usage for the agent being edited (JCLAW-981).
+ *
+ * Lives on the agent rather than in Settings because the cap is per agent: the core block
+ * is assembled per agent, so one instance-wide number describes a state no migration can
+ * act on, and cannot say whose excess it is. Settings still owns the cap itself, which is
+ * global policy.
+ */
+const coreMigration = ref<CoreMigrationStatus | null>(null)
+const coreMigrationError = ref('')
+
+async function refreshCoreMigration() {
+  if (!editing.value?.id) return
+  try {
+    coreMigration.value = await $fetch<CoreMigrationStatus>(
+      `/api/agents/${editing.value.id}/core-migration`)
+  }
+  catch {
+    coreMigration.value = null
+  }
+}
+
+async function startCoreMigration() {
+  if (!editing.value?.id) return
+  coreMigrationError.value = ''
+  try {
+    coreMigration.value = await $fetch<CoreMigrationStatus>(
+      `/api/agents/${editing.value.id}/core-migration`, { method: 'POST' })
+    pollCoreMigration()
+  }
+  catch (e) {
+    coreMigrationError.value = (e as { data?: { message?: string } })?.data?.message
+      ?? 'Could not start the migration.'
+  }
+}
+
+/** Poll only while this agent's run is in flight; the status is otherwise static. */
+function pollCoreMigration() {
+  if (!coreMigration.value?.running) return
+  setTimeout(async () => {
+    await refreshCoreMigration()
+    pollCoreMigration()
+  }, 1000)
+}
+
 const memoryAutocaptureEnabled = ref(true)
 const memoryAutocaptureProvider = ref('')
 const memoryAutocaptureModel = ref('')
@@ -754,6 +800,9 @@ function editAgent(agent: Agent) {
   compressionTargetRatio.value = agent.compressionTargetRatio
   acpAllowed.value = agent.acpAllowed
   memoryAutocaptureEnabled.value = agent.memoryAutocaptureEnabled
+  coreMigrationError.value = ''
+  coreMigration.value = null
+  refreshCoreMigration()
   memoryAutocaptureProvider.value = agent.memoryAutocaptureProvider
   memoryAutocaptureModel.value = agent.memoryAutocaptureModel
   creating.value = false
@@ -1801,6 +1850,60 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </div>
           </button>
         </div>
+        <!-- Core-memory usage: per agent, because the cap is (JCLAW-981) -->
+        <div
+          v-if="coreMigration"
+          class="px-4 py-2.5 border-t border-border"
+          data-testid="agent-core-memory"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <span class="text-sm font-medium text-fg-strong">Core memories</span>
+              <span
+                v-if="coreMigration.running"
+                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+              >migrating</span>
+              <span
+                v-else-if="coreMigration.overCap"
+                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+                data-testid="agent-core-over-cap"
+              >over the limit</span>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+              :disabled="!coreMigration.overCap || coreMigration.running"
+              data-testid="agent-core-migrate"
+              @click="startCoreMigration"
+            >
+              {{ coreMigration.running ? 'Migrating…' : 'Migrate excess' }}
+            </button>
+          </div>
+          <p class="text-xs text-fg-muted mt-1">
+            {{ coreMigration.liveCore }} of {{ coreMigration.cap }} allowed.
+            <template v-if="coreMigration.overCap">
+              The excess is not loaded into any turn — it holds the core category without the
+              benefit. Migrating asks this agent to file each one under the category that fits
+              it best; nothing is deleted, and anything it cannot classify stays core so you
+              can run this again.
+            </template>
+          </p>
+          <p
+            v-if="coreMigration.running && coreMigration.total > 0"
+            class="text-xs text-fg-muted mt-1"
+            data-testid="agent-core-migrate-progress"
+          >
+            Recategorised {{ coreMigration.processed }} of {{ coreMigration.total }}.
+          </p>
+          <p
+            v-if="coreMigrationError || coreMigration.error"
+            class="text-xs text-red-700 dark:text-red-400 mt-1"
+            data-testid="agent-core-migrate-error"
+          >
+            {{ coreMigrationError || `Last run failed: ${coreMigration.error}` }}
+          </p>
+        </div>
+
         <div
           v-if="memoryAutocaptureEnabled"
           class="px-4 pb-3 pt-2 border-t border-border"

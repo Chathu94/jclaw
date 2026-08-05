@@ -456,35 +456,48 @@ public class ApiMemoryController extends Controller {
     }
 
     /**
-     * GET /api/memories/core-migration — live core count against the cap, and progress.
-     * Polled by the Settings Limits panel; safe to call at any cadence.
+     * GET /api/agents/{agentId}/core-migration — this agent's core count against the cap.
+     * Polled by the agent editor's Memory card; safe to call at any cadence.
+     *
+     * <p>Per agent rather than per instance because the cap is: the core block is
+     * assembled per agent, so a total across the instance describes a state no migration
+     * can act on (JCLAW-981).
      */
     @ApiResponse(responseCode = "200")
-    @Operation(summary = "Core-memory cap migration progress")
-    public static void coreMigrationStatus() {
-        renderJSON(gson.toJson(CoreMemoryCapMigration.status()));
+    @Operation(summary = "One agent's core-memory usage against the cap")
+    public static void coreMigrationStatus(Long agentId) {
+        requireAgentById(agentId);
+        renderJSON(gson.toJson(CoreMemoryCapMigration.status(String.valueOf(agentId))));
     }
 
     /**
-     * POST /api/memories/core-migration — recategorise core memories past the cap,
-     * using each owning agent's own model to choose the new bucket (JCLAW-981).
+     * POST /api/agents/{agentId}/core-migration — recategorise this agent's core memories
+     * past the cap, using its own model to choose the new bucket (JCLAW-981).
      *
      * <p>Operator-triggered rather than automatic: the memory tool can refuse a core write
      * past the cap but cannot make the agent ask before filing something elsewhere, so
-     * bringing an over-cap corpus back in line is a deliberate action, not a side effect
+     * bringing an over-cap agent back in line is a deliberate action, not a side effect
      * of a boot.
      *
-     * <p>Returns 409 with the reason when it cannot start — nothing over the cap, or a
-     * migration already in flight.
+     * <p>Returns 409 with the reason when it cannot start — this agent is not over the
+     * cap, or another agent's migration holds the single-flight slot.
      */
     @ApiResponse(responseCode = "202")
-    @Operation(summary = "Recategorise core memories past the cap")
-    public static void coreMigrationStart() {
-        var refusal = CoreMemoryCapMigration.start();
+    @Operation(summary = "Recategorise one agent's core memories past the cap")
+    public static void coreMigrationStart(Long agentId) {
+        requireAgentById(agentId);
+        var refusal = CoreMemoryCapMigration.start(String.valueOf(agentId));
         if (refusal != null) {
             ApiResponses.error(409, ApiResponses.CONFLICT, refusal);
         }
-        renderJSON(gson.toJson(CoreMemoryCapMigration.status()));
+        renderJSON(gson.toJson(CoreMemoryCapMigration.status(String.valueOf(agentId))));
+    }
+
+    /** 404s unless {@code agentId} names an existing agent. */
+    private static void requireAgentById(Long agentId) {
+        if (agentId == null || Agent.<Agent>findById(agentId) == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent with id " + agentId);
+        }
     }
 
     /**
