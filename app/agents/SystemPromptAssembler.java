@@ -683,6 +683,15 @@ public class SystemPromptAssembler {
      * inspecting, and make a repeated eval run measure its own earlier passes.
      */
     public static RecallResult recall(String agentId, String query, Set<String> excludeIds) {
+        long startNs = System.nanoTime();
+        try {
+            return recallTimed(agentId, query, excludeIds);
+        } finally {
+            utils.LatencyTrace.recordMemoryRecall((System.nanoTime() - startNs) / 1_000_000L);
+        }
+    }
+
+    private static RecallResult recallTimed(String agentId, String query, Set<String> excludeIds) {
         int recallLimit = ConfigService.getInt("memory.recall.limit", 10);
         // Over-fetch so core-memory exclusion and the importance re-rank still
         // yield a full set.

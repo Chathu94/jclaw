@@ -37,6 +37,8 @@ public final class LatencyTrace {
     private final long acceptedAtNs;
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
     private final AtomicLong toolExecMs = new AtomicLong();
+    private final AtomicLong memoryRecallMs = new AtomicLong();
+    private final AtomicInteger memoryRecallCount = new AtomicInteger();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
     private final AtomicInteger llmCallCount = new AtomicInteger();
     private final AtomicInteger llmCachedCallCount = new AtomicInteger();
@@ -120,6 +122,31 @@ public final class LatencyTrace {
         Long streamEnd = marks.get(STREAM_BODY_END);
         if (firstToken == null || streamEnd == null) return 0L;
         return Math.max(0L, nsToMs(streamEnd - firstToken));
+    }
+
+    /**
+     * Record one memory recall's wall-clock cost against the calling thread's turn.
+     *
+     * <p>Memory sat inside {@code prologue_prompt} with no breakdown of its own, so the
+     * only way to answer "what does recall cost a turn" was to measure it by hand from
+     * outside. Measured that way on a 606-memory corpus it is 18.8 ms p50 — of which the
+     * embedding round-trip is roughly half — against a 66 ms prologue_prompt. Small, but
+     * invisible, and the embedding leg is a network call whose cost moves with the
+     * provider.
+     *
+     * <p>An accumulator rather than a mark pair, because recall is nested inside prompt
+     * assembly rather than a phase boundary in the prologue sequence. Counts every recall
+     * in the turn, including one the {@code memory} tool makes mid-turn — hence the
+     * companion count segment, which separates one prompt-assembly recall from several.
+     *
+     * <p>No-op when no trace is bound, so the introspection endpoint and the eval harness
+     * do not bill a turn that is not theirs.
+     */
+    public static void recordMemoryRecall(long elapsedMs) {
+        var trace = CURRENT.get();
+        if (trace == null) return;
+        trace.memoryRecallMs.addAndGet(elapsedMs);
+        trace.memoryRecallCount.incrementAndGet();
     }
 
     /** Record the wall-clock cost of a single tool-execution round. */
@@ -253,6 +280,15 @@ public final class LatencyTrace {
         recordToolSegments();
         recordLlmCallSegments();
         recordToolVerificationSegments();
+        recordMemorySegments();
+    }
+
+    private void recordMemorySegments() {
+        int calls = memoryRecallCount.get();
+        if (calls > 0) {
+            emit("memory_recall", memoryRecallMs.get());
+            emit("memory_recall_count", calls);
+        }
     }
 
     /**
