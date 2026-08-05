@@ -482,6 +482,123 @@ class ApiMemoryControllerTest extends FunctionalTest {
         }
     }
 
+    // ─── Eval generation / scoring (JCLAW-529) ───────────────────────────────
+
+    @Test
+    void evalEndpointsRequireAuth() {
+        assertEquals(401, POST("/api/memories/evals/generate", "application/json", "{}").status.intValue());
+        assertEquals(401, POST("/api/memories/evals/run", "application/json", "{}").status.intValue());
+        assertEquals(401, GET("/api/memories/reembed").status.intValue());
+        assertEquals(401, POST("/api/memories/reembed", "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void evalGenerateWithoutAnAgentIdIsRejected() {
+        login();
+        var resp = POST("/api/memories/evals/generate", "application/json", "{}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("agentId"), getContent(resp));
+    }
+
+    @Test
+    void evalGenerateForAnUnknownAgentIs404() {
+        login();
+        var resp = POST("/api/memories/evals/generate", "application/json", "{\"agentId\":\"99999\"}");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void aDryRunReportsClusterSizesWithoutGeneratingAnyQuestion() {
+        // The threshold is the one number in coverage generation that has to be measured
+        // rather than picked, and sweeping it through the full generator would spend a model
+        // call per surviving cluster per sweep point. dryRun is that sweep, so it must not
+        // need a provider at all.
+        seedMemory("alice", "Shared subject sailing concerns the mainsail rigging", "fact", 0.5);
+        seedMemory("alice", "Shared subject sailing concerns the keel ballast", "fact", 0.5);
+        login();
+        var agentId = fetchInFreshTx(() -> models.Agent.find("name = ?1", "alice").<models.Agent>first().id);
+
+        var resp = POST("/api/memories/evals/generate", "application/json",
+                "{\"agentId\":\"" + agentId + "\",\"dryRun\":true,\"clusterBy\":\"lexical\",\"clusterThreshold\":0.3}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("lexical"), body);
+        assertTrue(body.contains("0.3"), body);
+    }
+
+    @Test
+    void evalGenerateIs409WhenTheAgentHasNoUsableProvider() {
+        // A refusal rather than a later call failure: without a provider there is nothing
+        // to write the questions with, and a half-written suite is worse than none.
+        seedMemory("alice", "Some fact about kayaking rivers", "fact", 0.5);
+        login();
+        var agentId = fetchInFreshTx(() -> {
+            var a = models.Agent.find("name = ?1", "alice").<models.Agent>first();
+            a.modelProvider = "no-such-provider";
+            a.save();
+            return a.id;
+        });
+
+        var resp = POST("/api/memories/evals/generate", "application/json",
+                "{\"agentId\":\"" + agentId + "\"}");
+        assertEquals(409, resp.status.intValue());
+        assertTrue(getContent(resp).contains("provider"), getContent(resp));
+    }
+
+    @Test
+    void evalRunForAMissingSuiteSaysGenerateOneFirst() {
+        seedMemory("alice", "Some fact about welding steel", "fact", 0.5);
+        login();
+        var agentId = fetchInFreshTx(() -> models.Agent.find("name = ?1", "alice").<models.Agent>first().id);
+
+        var resp = POST("/api/memories/evals/run", "application/json",
+                "{\"agentId\":\"" + agentId + "\",\"suiteId\":\"no-such-suite\"}");
+        assertEquals(404, resp.status.intValue());
+        assertTrue(getContent(resp).contains("generate"), getContent(resp));
+    }
+
+    @Test
+    void evalRunScoresAGeneratedSuiteAgainstLiveRecall() throws Exception {
+        // The point of the harness: the score has to come from the same recall pipeline the
+        // system prompt uses, not a reimplementation, or it measures the harness instead.
+        var memId = seedMemory("alice", "The user keeps the NAS in the basement", "fact", 0.7);
+        login();
+        var agentId = fetchInFreshTx(() -> models.Agent.find("name = ?1", "alice").<models.Agent>first().id);
+
+        services.evals.MemoryEvalPaths.ensureLocalDir();
+        var suiteJson = ("{\"id\":\"uatsuite\",\"description\":\"d\",\"corpusFingerprint\":\"1:0\","
+                + "\"cases\":[{\"id\":\"c1\",\"query\":\"basement NAS\",\"goldGroups\":[[" + memId + "]]}]}");
+        java.nio.file.Files.writeString(services.evals.MemoryEvalPaths.suiteFile("uatsuite"), suiteJson);
+
+        var resp = POST("/api/memories/evals/run", "application/json",
+                "{\"agentId\":\"" + agentId + "\",\"suiteId\":\"uatsuite\",\"scope\":\"candidates\"}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("mrr"), "the report must carry the ranking metric: " + body);
+        assertTrue(body.contains("\"cases\":1") || body.contains("\"caseCount\":1") || body.contains("c1"),
+                "the report must describe the suite it scored: " + body);
+    }
+
+    // ─── Re-embed (JCLAW-933) ────────────────────────────────────────────────
+
+    @Test
+    void reembedStatusIsSafeToPollBeforeAnyRebuildHasRun() {
+        login();
+        var resp = GET("/api/memories/reembed");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).trim().startsWith("{"), getContent(resp));
+    }
+
+    @Test
+    void reembedRefusesToStartWhenItCouldNotFinish() {
+        // The rebuild wipes the index before writing, so starting it with no usable vector
+        // backend would leave nothing behind — a 409 refusal, not a warning.
+        login();
+        var resp = POST("/api/memories/reembed", "application/json", "{}");
+        assertEquals(409, resp.status.intValue());
+        assertFalse(getContent(resp).isBlank(), "a refusal has to say why");
+    }
+
     /** Stands in for a Lucene backend that is present but erroring — the only way to reach
      *  the IOException arm, since a closed index reports dialect "none" and takes the LIKE
      *  path instead. Safe to install: the class holds the LuceneTestSync lock throughout. */
