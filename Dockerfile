@@ -45,17 +45,14 @@ FROM --platform=$BUILDPLATFORM azul/zulu-openjdk:25.0.3 AS bundle-stage
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# TARGETARCH is a buildx-provided global ARG (amd64, arm64, …) that has
-# to be redeclared inside each stage that wants to read it; without the
-# ARG line it stays empty in this stage's RUN commands. It picks the
-# sherpa-onnx native lib (-PtargetArch, the one arch-specific artifact in
-# the dependency graph) and keys the cache mounts below. Since this stage
-# is pinned to $BUILDPLATFORM the two target builds now run on the same
-# architecture and their caches are byte-identical, but the mount ids stay
-# per-target: buildx runs both concurrently and BuildKit cache mounts
-# default to sharing=shared, which would drop two simultaneous pnpm/Nuxt
-# builds into one node_modules tree.
+# TARGETARCH and BUILDARCH are buildx-provided global ARGs (amd64, arm64,
+# …) that have to be redeclared inside each stage that wants to read them;
+# without the ARG lines they stay empty in this stage's RUN commands.
+# TARGETARCH picks the sherpa-onnx native lib (-PtargetArch, the one
+# arch-specific artifact in the dependency graph); both key the cache
+# mounts below.
 ARG TARGETARCH
+ARG BUILDARCH
 
 # Toolchain. unzip extracts the Gradle dist + the play1 release zip + the
 # bundle. curl/git fetch the play1 fork. Node 24 + corepack drive pnpm
@@ -112,9 +109,14 @@ COPY . /src/
 # commit — `git init` itself doesn't need them.
 #
 # BuildKit cache mounts (require Docker 23.0+ / BuildKit on by default).
-# Mounts marked [per-target] use id=…-${TARGETARCH} to keep the two
-# concurrent target builds out of each other's mutable state; [shared]
-# mounts are content-addressed or read-mostly and safe to pool.
+# Mounts marked [per-target] use id=…-${BUILDARCH}-${TARGETARCH}; [shared]
+# mounts are content-addressed or read-mostly and safe to pool. TARGETARCH
+# separates the two concurrent target builds — BuildKit mounts default to
+# sharing=shared, which would drop two simultaneous pnpm/Nuxt runs into one
+# node_modules tree. BUILDARCH is what the trees are valid *for*: pnpm
+# resolves optional native packages against the running CPU, so a tree left
+# behind by an emulated build serves the wrong lightningcss binding to a
+# native one.
 #   /root/.gradle              [per-target] Gradle's user cache — resolved
 #                              jars, dep metadata, configuration cache.
 #                              ~500 MB warm. Gradle takes exclusive locks
@@ -149,10 +151,10 @@ COPY . /src/
 # shared between everyone who pulls the image. The secret is generated
 # fresh per-container at entrypoint time instead — see
 # docker-entrypoint.sh.
-RUN --mount=type=cache,target=/root/.gradle,id=gradle-${TARGETARCH} \
+RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH} \
     --mount=type=cache,target=/root/.local/share/pnpm \
     --mount=type=cache,target=/root/.cache/node \
-    --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${TARGETARCH} \
+    --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${BUILDARCH}-${TARGETARCH} \
     git init -q && \
     gradle --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
     mkdir /staging && \
