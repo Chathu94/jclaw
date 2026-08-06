@@ -64,6 +64,7 @@ public final class CascadeFkMigrator {
     private static final String AGENT = "AGENT";
     private static final String AGENT_ID = "AGENT_ID";
     private static final String CONVERSATION = "CONVERSATION";
+    private static final String CONVERSATION_ID = "CONVERSATION_ID";
     private static final String SUBAGENT_RUN = "SUBAGENT_RUN";
 
     static final List<ForeignKey> OWNERSHIP_FKS = List.of(
@@ -77,9 +78,9 @@ public final class CascadeFkMigrator {
             new ForeignKey(CONVERSATION, AGENT_ID, AGENT, "ID"),
             new ForeignKey(CONVERSATION, "PARENT_CONVERSATION_ID", CONVERSATION, "ID"),
             new ForeignKey("MEMORY", AGENT_ID, AGENT, "ID"),
-            new ForeignKey("MESSAGE", "CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("MESSAGE", CONVERSATION_ID, CONVERSATION, "ID"),
             new ForeignKey("NOTIFICATION", AGENT_ID, AGENT, "ID"),
-            new ForeignKey("SESSION_COMPACTION", "CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("SESSION_COMPACTION", CONVERSATION_ID, CONVERSATION, "ID"),
             new ForeignKey("SLACK_BINDING", AGENT_ID, AGENT, "ID"),
             new ForeignKey(SUBAGENT_RUN, "CHILD_AGENT_ID", AGENT, "ID"),
             new ForeignKey(SUBAGENT_RUN, "CHILD_CONVERSATION_ID", CONVERSATION, "ID"),
@@ -93,7 +94,7 @@ public final class CascadeFkMigrator {
             new ForeignKey("TELEGRAM_TOPIC_BINDING", "BINDING_ID", "TELEGRAM_BINDING", "ID"),
             new ForeignKey("TOOL_APPROVAL_GRANT", AGENT_ID, AGENT, "ID"),
             new ForeignKey("VIDEO_GENERATION_JOB", AGENT_ID, AGENT, "ID"),
-            new ForeignKey("VIDEO_GENERATION_JOB", "CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("VIDEO_GENERATION_JOB", CONVERSATION_ID, CONVERSATION, "ID"),
             new ForeignKey("WHATSAPP_BINDING", AGENT_ID, AGENT, "ID"),
             new ForeignKey("WHATSAPP_CONVERSATION_WINDOW", "BINDING_ID", "WHATSAPP_BINDING", "ID"));
 

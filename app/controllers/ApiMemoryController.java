@@ -59,6 +59,7 @@ public class ApiMemoryController extends Controller {
     private static final String KEY_IMPORTANCE = "importance";
     private static final String KEY_CATEGORY = "category";
     private static final String FIELD_IMPORTANCE = "m.importance";
+    private static final String NO_SUCH_AGENT = "No agent with id ";
 
     public record MemoryDto(String id, String agentName, String text, String category,
                             double importance, String createdAt,
@@ -383,7 +384,7 @@ public class ApiMemoryController extends Controller {
         }
         Agent agent = Agent.findById(Long.valueOf(agentId));
         if (agent == null) {
-            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent with id " + agentId);
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
         }
         return agent;
     }
@@ -433,7 +434,7 @@ public class ApiMemoryController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
         }
         if (Agent.findById(Long.valueOf(agentId)) == null) {
-            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent with id " + agentId);
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
         }
 
         var result = SystemPromptAssembler.recall(agentId, query, Set.of());
@@ -496,7 +497,7 @@ public class ApiMemoryController extends Controller {
     /** 404s unless {@code agentId} names an existing agent. */
     private static void requireAgentById(Long agentId) {
         if (agentId == null || Agent.<Agent>findById(agentId) == null) {
-            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent with id " + agentId);
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
         }
     }
 

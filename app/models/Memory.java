@@ -269,13 +269,6 @@ public class Memory extends Model {
     }
 
     /**
-     * High-importance {@code core}-category memories for session-start auto-load
-     * (JCLAW-40), ranked by importance then recency and bounded by {@code limit}
-     * (the caller additionally enforces a token budget). The {@code core}
-     * category is matched as a literal to keep this {@code models} class free of
-     * a dependency on the {@code memory} package's {@code MemoryCategory}.
-     */
-    /**
      * Live {@code core} memories for an agent, at any importance (JCLAW-981).
      *
      * <p>Deliberately unfiltered by importance, unlike {@link #findCore}: that method
@@ -289,6 +282,13 @@ public class Memory extends Model {
         return Memory.count("agent.id = ?1 AND category = ?2 AND supersededAt IS NULL", pk, "core");
     }
 
+    /**
+     * High-importance {@code core}-category memories for session-start auto-load
+     * (JCLAW-40), ranked by importance then recency and bounded by {@code limit}
+     * (the caller additionally enforces a token budget). The {@code core}
+     * category is matched as a literal to keep this {@code models} class free of
+     * a dependency on the {@code memory} package's {@code MemoryCategory}.
+     */
     public static List<Memory> findCore(String agentId, double minImportance, int limit) {
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();

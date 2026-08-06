@@ -25,14 +25,14 @@ class LoadTestSleepToolAndTtsClientTest extends UnitTest {
         // The harness calls it with no arguments to measure baseline dispatch cost, so a
         // required parameter would break the very thing it exists for.
         var params = tool.parameters();
-        var props = (java.util.Map<?, ?>) params.get(SchemaKeys_TYPE_PROPERTIES);
+        var props = (java.util.Map<?, ?>) params.get(SCHEMA_KEY_PROPERTIES);
         assertTrue(props.containsKey("ms"), props.toString());
-        assertTrue(((java.util.List<?>) params.get(SchemaKeys_REQUIRED)).isEmpty(),
+        assertTrue(((java.util.List<?>) params.get(SCHEMA_KEY_REQUIRED)).isEmpty(),
                 "ms must be optional");
     }
 
-    private static final String SchemaKeys_TYPE_PROPERTIES = "properties";
-    private static final String SchemaKeys_REQUIRED = "required";
+    private static final String SCHEMA_KEY_PROPERTIES = "properties";
+    private static final String SCHEMA_KEY_REQUIRED = "required";
 
     @Test
     void theSleepToolIsParallelSafeBecauseItHoldsNoState() {
