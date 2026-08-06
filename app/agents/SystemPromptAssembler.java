@@ -29,13 +29,20 @@ import java.util.stream.Collectors;
  *
  * <h2>Cache-prefix invariant</h2>
  * <p>The Anthropic (and most other) LLM prompt cache hashes every byte of the
- * system prompt. If any byte above the {@value #CACHE_BOUNDARY_MARKER} marker
- * varies per turn, the cache misses on every request. To keep the cache warm,
- * every section appended <em>before</em> {@link #appendCacheBoundary} MUST be
- * deterministic for a given agent within a day (workspace files, skills, static
- * guidance, day-granularity environment info). Only content appended <em>after</em>
- * the boundary — today, just recalled memories — may vary per turn. Any new
- * per-turn-variable section added to this class MUST go after the boundary.
+ * system prompt, so a byte that varies per turn misses the cache for everything
+ * above it. Sections appended <em>before</em> {@link #appendCoreMemoryBoundary}
+ * MUST therefore be deterministic for a given agent within a day (workspace files,
+ * skills, static guidance, day-granularity environment info).
+ *
+ * <p>The prompt carries two breakpoints, not one. Core memories are the single
+ * mutable section above {@value #CACHE_BOUNDARY_MARKER}, and JCLAW-978 gave them
+ * their own {@value #CORE_MEMORY_BOUNDARY_MARKER} so editing one re-prefills the
+ * memories alone rather than dragging workspace files, skills and the tool catalog
+ * with them — they changed on roughly 1 turn in 15 on a measured deployment.
+ *
+ * <p>So a new per-turn-variable section goes after {@link #appendCacheBoundary};
+ * a section that changes occasionally and is worth its own breakpoint goes between
+ * the two markers. Nothing else may vary above the cache boundary.
  */
 public class SystemPromptAssembler {
 
@@ -114,8 +121,10 @@ public class SystemPromptAssembler {
 
     /**
      * Assemble the full system prompt for an agent, given the user's latest message
-     * for memory recall. Byte-for-byte identical to the breakdown path. Backward-
-     * compatible shim that assembles with no channel context.
+     * for memory recall. Backward-compatible shim that assembles with no channel
+     * context, so its output matches {@link #breakdown} only where the caller would
+     * also have passed a null channel — a null channel emits no guidance section,
+     * where {@code "web"} emits one.
      */
     public static AssembledPrompt assemble(Agent agent, String userMessage) {
         return assemble(agent, userMessage, null, null);
@@ -153,9 +162,11 @@ public class SystemPromptAssembler {
      * debugging flows. Authoritative: shares the exact same build sequence as the
      * production path, so the breakdown cannot drift from the real prompt over time.
      *
-     * <p>{@code channelType} must be one of {@code web|telegram|slack|whatsapp}.
-     * Every real chat lives on a channel; the controller rejects missing values,
-     * and tests pick a channel explicitly.
+     * <p>{@code channelType} must be one of {@code web|telegram|slack|whatsapp} —
+     * this list mirrors {@code ApiAgentsController.VALID_BREAKDOWN_CHANNELS}, which
+     * rejects a missing, blank, or unlisted value with a 400. It is deliberately not
+     * the full {@link models.ChannelType} set: {@code voice} has guidance but is not
+     * accepted here, so adding it to this list would describe a request that 400s.
      */
     public static PromptBreakdown breakdown(Agent agent, String userMessage, String channelType) {
         var builder = new SectionedBuilder();
@@ -245,10 +256,11 @@ public class SystemPromptAssembler {
         // execution bias, channel guidance) so cross-provider tokens-per-sec
         // measurements aren't dragged down by prompt-prefill costs that
         // depend on the operator's other agents' workspace state. Skips
-        // workspace files, skills, tool catalog, workspace-file-delivery
-        // convention, environment info, and memories. The breakdown path
-        // (settings UI introspection) sees the same minimal output, since
-        // it shares this method.
+        // everything else this method would append — role, workspace files,
+        // skills, tool catalog, retrieval discipline, workspace-file-delivery
+        // convention, environment info, core memories, and memories. The
+        // breakdown path (settings UI introspection) sees the same minimal
+        // output, since it shares this method.
         if (LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
             b.startSection("Safety");
             appendSafetySection(b.sb);
@@ -265,8 +277,7 @@ public class SystemPromptAssembler {
         // serves (a single operator), which invocation mode it may be in (chat /
         // scheduled task / subagent), and how to treat messages from non-operators on
         // shared channels. Foundational context the operator-authored persona below is
-        // read within; static, so it anchors the cacheable prefix. Deliberately first,
-        // and omitted from the loadtest short-circuit above.
+        // read within; static, so it anchors the cacheable prefix. Deliberately first.
         b.startSection("Role");
         appendRoleSection(b.sb);
 
@@ -274,7 +285,7 @@ public class SystemPromptAssembler {
         // IDENTITY (who) → USER (for whom) → BOOTSTRAP (init/priming) → AGENT (what to do).
         // Each section is skipped silently when the file is missing or blank, so an
         // agent that only populates AGENT.md produces the same prompt as before the
-        // two new files were added.
+        // four persona files were added.
         b.startSection("SOUL.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "SOUL.md"));
 
@@ -416,12 +427,13 @@ public class SystemPromptAssembler {
         b.startSection("Cache Boundary");
         appendCacheBoundary(b.sb);
 
-        // 10. Current date and time is no longer assembled here at all — it now
-        // rides the last user message via CurrentTimeInjector. Below the cache
-        // boundary was still ahead of the whole conversation history in the
-        // token stream, so a per-minute value invalidated every history token
-        // on the turn the minute ticked over. See CurrentTimeInjector for the
-        // measurements. The cacheable Environment block still omits the clock.
+        // 10. Current date and time is not assembled here at all. Even below the cache
+        // boundary it sat ahead of the whole conversation history in the token stream, so
+        // a per-minute value invalidated every history token when the minute ticked over.
+        // CurrentTimeInjector splices it in at send time as its own trailing message —
+        // JCLAW-900, after merging it into the last user message proved to break Anthropic
+        // breakpoint caches instead; see that class for the cost measurements. The
+        // cacheable Environment block still omits the clock.
 
         // 11. Recalled memories — per-turn-variable, placed past the cache
         // boundary so updating it never invalidates the cacheable prefix.
