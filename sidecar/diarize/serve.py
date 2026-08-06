@@ -6,10 +6,11 @@ A long-running localhost HTTP daemon, launched on demand by the jclaw JVM
 (DiarizeSidecarManager) and hosting a persistent pyannote worker
 (diarize.py --worker: speaker-diarization-community-1 on GPU when available —
 CUDA or Apple MPS — else CPU). Diarization produces speaker TURNS (who spoke
-when) — no transcription, no emotion. The
-JVM fuses these turns with the ASR sidecar's transcript to build the
-speaker-attributed transcript. Emotion is deliberately absent: the measured
-classical-SER path (DiaRemot) did not transfer to 8kHz telephony.
+when) — no transcription. The JVM fuses these turns with the ASR sidecar's
+transcript to build the speaker-attributed transcript. Per-turn emotion is
+opt-in (emotions=true) and runs in a separate SER worker (ser.py); the
+classical-SER path (DiaRemot) was rejected first for not transferring to
+8kHz telephony.
 
 Protocol (bound to 127.0.0.1 only):
   GET  /health  -> 200 {status, model, loaded}

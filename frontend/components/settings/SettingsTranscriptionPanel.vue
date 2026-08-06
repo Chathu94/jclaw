@@ -720,7 +720,7 @@ onUnmounted(() => stopTranscriptionPolling())
             <label
               for="diarization-provider-pyannote-local"
               class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
-              title="On-device pyannote speaker diarization (community-1), fused with the local ASR transcript — no audio leaves the host. Speaker turns only, no emotion. Needs a Hugging Face token (shared with Image Generation) for the gated weights."
+              title="On-device pyannote speaker diarization (community-1), fused with the local ASR transcript — no audio leaves the host. Per-turn emotion is optional, from the selectable SER model. Needs a Hugging Face token (shared with Image Generation) for the gated weights."
             >
               <input
                 id="diarization-provider-pyannote-local"

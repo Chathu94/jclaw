@@ -296,8 +296,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
      * Fully-local speaker-attributed transcript (JCLAW-565 revival): the ASR
      * sidecar transcribes (WHAT + WHEN), the diarize sidecar produces speaker
      * turns (WHO + WHEN), and {@link DiarizationFusion} aligns them by time.
-     * No audio leaves the host — the privacy/cost path. No per-turn emotion
-     * (pyannote yields turns only); the cloud path stays for that case.
+     * No audio leaves the host — the privacy/cost path. Per-turn emotion is
+     * opt-in, from a separate SER pass in the diarize sidecar.
      */
     private String diarizeLocal(Path path, String filename, String language,
                                 Integer numSpeakers, boolean emotions) {
