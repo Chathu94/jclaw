@@ -464,13 +464,22 @@ dependencies {
     // alternative to the Python sidecar. Apache-2.0. The classes jar is
     // platform-neutral; the native-lib jar carries libsherpa-onnx-jni with ONNX
     // Runtime STATICALLY LINKED inside it, so this adds ONE native lib and does
-    // NOT pull com.microsoft.onnxruntime. Selected for the build host below; CPU
+    // NOT pull com.microsoft.onnxruntime. Selected for the target host below; CPU
     // inference (RTF ~0.03 for Piper, validated in the JCLAW-793 spike) — the
     // GPU path stays on the sidecar (Qwen3-TTS/vLLM). Resolved via the Ivy repo.
+    //
+    // This is the only architecture-specific artifact in the whole resolved
+    // graph, so it alone decides whether a bundle is portable. -PtargetArch
+    // (Docker's TARGETARCH: amd64/arm64) exists because the image's bundle
+    // stage builds natively on $BUILDPLATFORM and cross-targets — keying off
+    // os.arch there would ship the builder's x64 lib inside the arm64 image.
+    // Blank (an unset ARG expands -PtargetArch= to the empty string) means
+    // unspecified, not x64 — otherwise the guard silently fails the arm64 way.
     val sherpaVersion = "1.13.4"
     val sherpaNativeClassifier = run {
         val os = System.getProperty("os.name").lowercase()
-        val arch = System.getProperty("os.arch").lowercase()
+        val arch = ((findProperty("targetArch") as String?)?.takeIf { it.isNotBlank() }
+            ?: System.getProperty("os.arch")).lowercase()
         val a = if (arch.contains("aarch64") || arch.contains("arm64")) "aarch64" else "x64"
         when {
             os.contains("mac") || os.contains("darwin") -> "osx-$a"

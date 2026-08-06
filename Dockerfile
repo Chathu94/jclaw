@@ -34,20 +34,27 @@
 # ZipFileSystem POSIX attrs) that invokes `java -classpath ...
 # play.server.Server` directly. We unpack it inline so Stage 3's COPY
 # pulls a flat /app tree.
-FROM azul/zulu-openjdk:25.0.3 AS bundle-stage
+#
+# --platform=$BUILDPLATFORM pins this stage to the builder's own architecture
+# instead of the target's. Emulated (the Jenkins agent registers QEMU binfmt to
+# produce arm64), the forked playPrecompile JVM ran ~21x slower and then
+# deadlocked in JVM shutdown after logging "Done.", hanging the build until the
+# pipeline timeout. Everything this stage emits is arch-neutral except
+# sherpa-onnx's native lib, which -PtargetArch selects for the target below.
+FROM --platform=$BUILDPLATFORM azul/zulu-openjdk:25.0.3 AS bundle-stage
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 # TARGETARCH is a buildx-provided global ARG (amd64, arm64, …) that has
 # to be redeclared inside each stage that wants to read it; without the
-# ARG line it stays empty in this stage's RUN commands. We use it to
-# scope the node_modules and Gradle cache mounts per-architecture so a
-# multi-arch buildx invocation (linux/amd64,linux/arm64) doesn't share a
-# single mount across platforms — node_modules carries arch-specific
-# native bindings (oxc-parser, @parcel/watcher, esbuild, …) and Gradle's
-# configuration cache encodes absolute paths plus JVM toolchain
-# fingerprints. Sharing causes the second arch through to inherit the
-# first arch's native deps and crash on require().
+# ARG line it stays empty in this stage's RUN commands. It picks the
+# sherpa-onnx native lib (-PtargetArch, the one arch-specific artifact in
+# the dependency graph) and keys the cache mounts below. Since this stage
+# is pinned to $BUILDPLATFORM the two target builds now run on the same
+# architecture and their caches are byte-identical, but the mount ids stay
+# per-target: buildx runs both concurrently and BuildKit cache mounts
+# default to sharing=shared, which would drop two simultaneous pnpm/Nuxt
+# builds into one node_modules tree.
 ARG TARGETARCH
 
 # Toolchain. unzip extracts the Gradle dist + the play1 release zip + the
@@ -105,37 +112,26 @@ COPY . /src/
 # commit — `git init` itself doesn't need them.
 #
 # BuildKit cache mounts (require Docker 23.0+ / BuildKit on by default).
-# Mounts marked [per-arch] use id=…-${TARGETARCH} so a multi-arch buildx
-# invocation (linux/amd64,linux/arm64) gives each platform its own cache
-# — sharing across arches breaks builds whose contents depend on the
-# target architecture (native bindings, JVM toolchain fingerprint, etc).
-#   /root/.gradle              [per-arch] Gradle's user cache — resolved
+# Mounts marked [per-target] use id=…-${TARGETARCH} to keep the two
+# concurrent target builds out of each other's mutable state; [shared]
+# mounts are content-addressed or read-mostly and safe to pool.
+#   /root/.gradle              [per-target] Gradle's user cache — resolved
 #                              jars, dep metadata, configuration cache.
-#                              ~500 MB warm. The configuration cache
-#                              encodes absolute paths and JVM toolchain
-#                              metadata, both of which are arch-tagged,
-#                              so cross-arch sharing causes spurious
-#                              cache misses and (worse) corrupted
-#                              configuration-cache entries.
+#                              ~500 MB warm. Gradle takes exclusive locks
+#                              on this tree, so a shared id would serialise
+#                              the two target builds for their whole run.
 #   /root/.local/share/pnpm    [shared] pnpm's content-addressed store.
-#                              ~200 MB. Each native binding (e.g.
-#                              @oxc-parser/binding-linux-arm64-gnu vs
-#                              -x64-gnu) is a distinct package with its
-#                              own hash, so platforms coexist by hash —
-#                              no cross-arch conflict, and sharing
-#                              avoids re-downloading the same tarballs
-#                              once per arch.
+#                              ~200 MB. Writes are hash-addressed adds, so
+#                              concurrent builds pool it safely and skip
+#                              re-downloading the same tarballs.
 #   /root/.cache/node          [shared] corepack's pnpm-binary download
 #                              cache. ~50 MB. The pnpm npm package is
 #                              pure JavaScript — arch-independent.
-#   /src/frontend/node_modules [per-arch] pnpm's project-resolved tree
-#                              (symlinks into the store). ~200 MB.
-#                              Carries arch-specific native bindings;
-#                              sharing across arches makes the second
-#                              arch through hit "lockfile up-to-date"
-#                              and inherit the first arch's bindings,
-#                              causing nuxi generate to fail on
-#                              require('@oxc-parser/binding-…').
+#   /src/frontend/node_modules [per-target] pnpm's project-resolved tree
+#                              (symlinks into the store). ~200 MB. A
+#                              mutable tree that two simultaneous `pnpm
+#                              install` + `nuxi generate` runs would
+#                              corrupt if they shared it.
 # These mounts hold no application state — eviction reverts to clean
 # rebuilds, never to corrupt artifacts. CI that doesn't carry a warm
 # BuildKit cache simply pays the dep-resolution cost once and exits.
@@ -158,7 +154,7 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${TARGETARCH} \
     --mount=type=cache,target=/root/.cache/node \
     --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${TARGETARCH} \
     git init -q && \
-    gradle --no-daemon playBundle && \
+    gradle --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
     mkdir /staging && \
     unzip -q dist/jclaw-bundle.zip -d /staging && \
     rm dist/jclaw-bundle.zip
