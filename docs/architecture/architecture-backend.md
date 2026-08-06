@@ -97,6 +97,10 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 
 `MemoryStore` interface with a single implementation, `JpaMemoryStore` (the `memory` table) — the former pluggable `Neo4jMemoryStore` was dropped (`MemoryStoreFactory.create()`), so vector similarity and graph/ontology now live in Postgres. Memory rows are agent-scoped. Recall is hybrid — keyword plus vector similarity, blended by reciprocal-rank fusion (`ReciprocalRankFusion`) — and the vector backend is dialect-driven: `pgvector` on Postgres (provisioned by `PgVectorProvisioner`), an embedded Lucene HNSW index on H2. Supporting pieces: `MemoryAutoCapture`, `MemoryReranker`, `MemoryDecay`, `MemoryAttentionGate`, `MemoryCategory`, `MemorySafety`.
 
+**Vector memory is configured through the config store, not `conf/application.conf`.** The keys `memory.jpa.vector.enabled` / `.provider` / `.model` / `.dimensions` are written by `POST /api/config` from Settings › Memory › Embeddings; none of them appears in `application.conf`, and no restart is involved. Saving is gated on an embedding probe that confirms the model embeds and records its dimension, and changing the model marks the corpus for re-embedding (`/api/memories/reembed`).
+
+**Embedding and rerank providers are restricted to local ones (JCLAW-939)** — embedding sends a memory's full text to the provider, and `MemoryReranker` renders the whole candidate shortlist into its prompt, so both must run on the host for memory text never to leave it. `ConfigService` rejects a non-local value, so the constraint holds even against a direct `POST /api/config`; the Settings picker narrows the choice rather than being what enforces it. Prompt-facing bounds are `memory.coreload.maxCount` and `memory.recall.limit` — the only limits on their blocks since the token budgets were removed in JCLAW-955/979 for dropping verbose memories rather than low-ranked ones.
+
 ### Background jobs (`app/jobs/`)
 
 Play `@Every`/`@OnApplicationStart` jobs (task *execution* is owned by db-scheduler, not a custom poller):
@@ -116,6 +120,27 @@ Single server-push pipe multiplexed over `/api/events`. Controllers publish type
 ### Per-conversation queue (`services.ConversationQueue`)
 
 Serializes message processing per conversation to prevent state corruption under concurrent inbound messages, with eviction of stale entries (`ConversationQueueEvictionJob`). Modes: FIFO `queue` (default), `collect` (batch pending into the next prompt), and `interrupt` (cancel in-flight generation, queue the new message for drain).
+
+### Local ML sidecars (`app/services/{transcription,tts,imagegen,videogen}/`)
+Five on-demand Python daemons on loopback provide capability the JVM cannot: ASR (9529), diarization (9530), image (9527), TTS (9531), video (9528). `services.LocalSidecarDaemon` is the shared spawn/drain/health-poll/stop mechanism for the imagegen and videogen managers; ASR, diarize and TTS have their own managers plus dedicated clients over `services.sidecar.SidecarHttpClient`. One inference at a time per daemon — concurrent callers get `409` and queue on a JVM-wide fair lock. Nothing silently degrades: a missing sidecar or prerequisite surfaces an actionable error (JCLAW-614). Full detail in [architecture-sidecar.md](architecture-sidecar.md).
+
+### Transcription & diarization (`app/services/transcription/`)
+Every uploaded audio attachment gets a text transcript before it reaches the LLM, so text-only models see the content (audio-capable models still receive native audio). Speaker attribution runs through the `diarize_audio` tool on either of two paths: an audio-capable **cloud** chat model, or the fully **on-device** pyannote sidecar whose speaker turns `DiarizationFusion` fuses with the ASR transcript by time. The local path adds optional per-turn emotion from a separate SER pass.
+
+### Speech & voice (`app/services/tts/`, `VoiceController`)
+Text-to-speech has two engines: an **in-JVM sherpa-onnx** path (fastest, ~0.9 s first chunk) and the **TTS sidecar** for higher-quality/voice-cloning models. Voice mode is a duplex **WebSocket** at `/api/voice` (`VoiceController.socket`) — the only WS route in the app; everything else is REST or SSE.
+
+### Printing (`app/tools/PrinterTool.java`)
+JVM-native end to end via `jipp` (IPP) and `jmdns` (mDNS discovery) — no CUPS, no `lp`, no OS print stack, so behaviour is identical on macOS, Linux and Windows and works in a container with no print subsystem. Job options are read from the target device rather than a built-in list. Off by default for every agent: paper comes out of a device in someone's room and there is no undo.
+
+### ACP subagent harnesses (`app/services/` + `ApiAcpHarnessController`)
+Beyond in-process subagents, JClaw can delegate to **external coding harnesses** over the Agent Client Protocol (`acp-core`) — Claude Code, Codex, Gemini, opencode and custom binaries, detected by probe. `acp_allowed` on `Agent` gates the spawn privilege.
+
+### Apps (`ApiAppsController`, `ApiAppInvokeController`, `AppOriginGate`)
+Hosted static mini-apps under `public/apps/<slug>/`, discovered by filesystem scan. An app may invoke exactly one scoped agent through `POST /api/apps/{slug}/invoke`, gated by `AppOriginGate`.
+
+### Evals (`evals/`, `ApiEvalsController`, `EvalSuiteConformanceTest`)
+Agent-behaviour datasets in `evals/suites/<id>.json` with deterministic pass criteria. Validating and scoring are **offline** — no backend, no model call, no DB — and `play autotest` validates the dataset via `EvalSuiteConformanceTest`, so a malformed suite fails the build. Each run records a content fingerprint (`tool-selection@6e7927aeefe4`) covering case inputs and checks but not prose, so comparing two runs with differing fingerprints says so before printing anything. `--capture` is the exception: it drives real agent turns, needs the backend, and spends model calls. Capture leaves no conversation, history or memories and is excluded from the Chat Performance histograms — but tool **side effects are real**, which is why sweeps target `__evaltest__`, an agent for which every tool is opt-in and whose grants are rewritten per suite from `requiredTools`.
 
 ## Cross-cutting concerns
 

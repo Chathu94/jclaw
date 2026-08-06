@@ -1,0 +1,164 @@
+{
+  "workflow_version": "1.2.0",
+  "timestamps": {
+    "started": "2026-08-06T17:18:07Z",
+    "last_updated": "2026-08-06T17:55:00Z",
+    "completed": "2026-08-06T17:55:00Z"
+  },
+  "mode": "full_rescan",
+  "scan_level": "deep",
+  "project_root": "/Users/tarun/Programming/jclaw",
+  "project_knowledge": "/Users/tarun/Programming/jclaw/docs/architecture",
+  "completed_steps": [
+    {
+      "step": "step_0.5",
+      "summary": "Loaded documentation-requirements.csv: 11 project-type rows, 24-column header. Noted a vendored-asset defect - the 'web' row carries 25 fields, shifting its columns after ci_cd_patterns; the scan-driving columns (requires_*, key_file_patterns, critical_directories) are correct for both matched rows.",
+      "timestamp": "2026-08-06T17:18:07Z",
+      "outputs": []
+    },
+    {
+      "step": "step_0.6",
+      "summary": "Found existing docs at docs/architecture/index.md generated 2026-06-29. User chose option 1 (re-scan entire project) then Deep Scan. Staleness evidence gathered first: 1006 commits since generation, 172 app/ files and 77 frontend/ files changed, and five subsystems absent from all 12 docs (pyannote diarize sidecar, MERaLiON ASR, evals harness, PrinterTool/Printers panel, memory.jpa.vector config surface).",
+      "timestamp": "2026-08-06T17:18:07Z",
+      "outputs": [
+        "project-scan-report.json"
+      ]
+    },
+    {
+      "step": "step_1",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:35:00Z",
+      "summary": "Classified as monorepo with THREE parts (was two): backend (Java 25 / Play 1.13.53 fork, root /), frontend (TypeScript / Nuxt 4.5.1 SPA, /frontend), and NEW sidecar part (Python >=3.11 PEP 723 uv daemons, /sidecar: asr, diarize, image, tts, video). User confirmed. Adding sidecar structurally fixes two of the five documentation gaps.",
+      "outputs": []
+    },
+    {
+      "step": "step_2",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:35:00Z",
+      "summary": "Inventoried 39 existing docs: 6 root (README/AGENTS/CLAUDE/CONTRIBUTING/LICENSE/COMMERCIAL-LICENSE), 12 docs/architecture, 14 docs/user-guide, 4 docs/spikes, evals/README.md, 5 sidecar READMEs. CI is Jenkins (Jenkinsfile + Jenkinsfile.renovate), no GitHub Actions. User chose 'none' for extra focus areas; proceeding with evals/README.md, the sidecar READMEs and AGENTS.md as primary source material.",
+      "outputs": []
+    },
+    {
+      "step": "step_3",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:35:00Z",
+      "summary": "Tech stack per part. backend: Java 25, Play 1.13.53 fork, Gradle KTS, OkHttp 5.4.0 (+sse), Lucene 10.5.0, db-scheduler 16.12.0, Tika 3.3.2, sherpa-onnx, jipp 0.7.18 (printing), jmdns 3.6.3, acp-core 0.14.0, cobalt 0.0.10 (WhatsApp), Slack SDK 1.49.0, Telegram 9.5.0, Playwright 1.61.0, jtokkit, Caffeine JCache, ArchUnit, JUnit 6 (Jupiter 6.1.2 from the fork). frontend: Nuxt 4.5.1 / Vue 3 / TS 6 / Tailwind v4 / Vitest 4 / pnpm 11.18.0. sidecar: two-tier uv split - serve.py is a stdlib-only supervisor with an EMPTY dependency set shelling to PEP 723 workers (asr/diarize/tts); image and video run models in-process, video dual-runtime MLX vs diffusers never sharing a venv.",
+      "outputs": []
+    },
+    {
+      "step": "step_4a",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:35:00Z",
+      "summary": "Wrote api-contracts-backend.md from conf/routes: 212 routes / 48 controllers, grouped by domain. Documented the three auth gates (AuthCheck on 42 controllers, LoadtestAuthCheck loopback+header, WebhookIngressGate+signature) and the /@api OpenApiPlugin bypass. Corrected the chat SSE contract: the old doc listed 6 events, the frontend consumes 8 (adds tool_call and queued). Newly documented families absent before: printers, tts/voice, evals capture, apps invoke, memory reembed + evals, provider embedding-models/probe, transcription diarization models, acp-harnesses.",
+      "outputs": [
+        "api-contracts-backend.md"
+      ]
+    },
+    {
+      "step": "step_4b",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "Updated data-models-backend.md surgically rather than rewriting: the doc held up well. Corrected the entity count (~29 -> 31 concrete @Entity + 3 @MappedSuperclass), added the missing Prompt entity, and added a Mapped superclasses section for TimestampedModel / AgentFeatureConfig (JCLAW-408) / AgentBoundBinding (JCLAW-723). Did NOT change the Lucene search-hook list: an initial grep suggested ChannelConfig belonged there, but its @Post* hooks are cache eviction, not index sync - the existing 5-entity list was already correct.",
+      "outputs": [
+        "data-models-backend.md"
+      ]
+    },
+    {
+      "step": "step_5",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "source-tree-analysis.md: sidecar/ listed only image and video - added asr, diarize and tts with ports and worker scripts; added the missing evals/ tree with its build-gating conformance test. Earlier in the session also fixed the root-docs line, which named a non-existent LICENSE file.",
+      "outputs": [
+        "source-tree-analysis.md"
+      ]
+    },
+    {
+      "step": "step_7",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "integration-architecture.md: added the local ML sidecar tier as a third internal integration alongside REST and SSE, noting the two properties that distinguish it - files pass by path not upload, and one inference at a time with 409 + fair-lock queueing.",
+      "outputs": [
+        "integration-architecture.md"
+      ]
+    },
+    {
+      "step": "step_8",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "architecture-backend.md: added the EIGHT subsystems the doc never covered - sidecars, transcription/diarization, speech/voice, printing, ACP harnesses, apps, evals - and documented the vector-memory config surface (config-store keys, not application.conf; local-provider restriction per JCLAW-939; coreload/recall limits after the JCLAW-955/979 token-budget removal). Wrote architecture-sidecar.md from scratch: the two-tier uv split, all five protocols, engine routing, dual-runtime video split, prerequisites, gitignored uv.lock, MERaLiON licensing.",
+      "outputs": [
+        "architecture-backend.md",
+        "architecture-sidecar.md"
+      ]
+    },
+    {
+      "step": "step_9",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "component-inventory-frontend.md: corrected 91 components (74 primitives + 17 feature) to 136 (74 + 62), and replaced the flat feature list with the four real families - 22 root, 26 settings panels, 11 chat components from the JCLAW-690 decomposition, 3 prompts/guide. project-overview.md and project-parts.json now carry the third part.",
+      "outputs": [
+        "component-inventory-frontend.md",
+        "project-overview.md",
+        "project-parts.json"
+      ]
+    },
+    {
+      "step": "step_10",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "index.md: provenance header now records this full rescan as superseding the 2026-06-29 generation and its three correction passes; added architecture-sidecar.md to the document map and the read-these-first table; runtime topology diagram now shows the WS voice route and all five sidecar ports; repository-type line updated to three parts.",
+      "outputs": [
+        "index.md"
+      ]
+    },
+    {
+      "step": "step_11",
+      "status": "completed",
+      "timestamp": "2026-08-06T17:55:00Z",
+      "summary": "Validation caught two errors in my own output and both were fixed: (1) the route count was written as 212 when 210 are method-specific - the other 2 are '*' wildcard fallbacks, now documented as their own table since ApiNotFoundController's clean-404 behaviour depends on one of them; (2) memory.jpa.vector was still absent from every architecture doc despite being one of the five gaps this rescan set out to close - it had only been fixed in the user guide. Re-validated: all five gaps covered, all internal links resolve, both JSON artifacts parse, counts match code.",
+      "outputs": []
+    }
+  ],
+  "current_step": "complete",
+  "findings": {
+    "pre_scan_drift_probe": {
+      "docs_generated": "2026-06-29",
+      "commits_since": 1006,
+      "app_files_changed": 172,
+      "frontend_files_changed": 77,
+      "undocumented_subsystems": [
+        "sidecar/diarize (pyannote)",
+        "MERaLiON ASR + SER",
+        "evals/",
+        "PrinterTool + Printers settings panel",
+        "memory.jpa.vector config surface"
+      ],
+      "hand_correction_rounds": [
+        "2026-07-14",
+        "2026-07-23",
+        "2026-08-07"
+      ],
+      "baseline_commit": "e905bd01"
+    },
+    "validation": {
+      "links": "all resolve",
+      "counts": "match code",
+      "gaps_closed": 5,
+      "self_corrected": 2
+    }
+  },
+  "outputs_generated": [
+    "project-scan-report.json",
+    "api-contracts-backend.md",
+    "data-models-backend.md",
+    "architecture-sidecar.md",
+    "architecture-backend.md",
+    "component-inventory-frontend.md",
+    "source-tree-analysis.md",
+    "integration-architecture.md",
+    "project-overview.md",
+    "index.md",
+    "project-parts.json"
+  ],
+  "resume_instructions": "Complete. Re-run /bmad-document-project when structure drifts."
+}

@@ -1,6 +1,6 @@
 # Frontend Component Inventory
 
-The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. ~91 components total: 74 UI primitives + 17 feature components.
+The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **136 components total: 74 UI primitives + 62 feature components**, across 23 pages, 35 composables and 20 utility modules.
 
 ## UI primitives (`frontend/components/ui/`)
 
@@ -16,13 +16,39 @@ The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for 
 
 Variants are composed with `class-variance-authority` + `tailwind-merge` (`utils/ui-utils.ts` exposes the `cn()` helper).
 
-## Feature components (`frontend/components/` + `guide/`)
+## Feature components
 
-17 cross-page components:
+62 in four families:
+
+| Family | Count | Scope |
+|---|---|---|
+| `components/` (root) | 22 | Cross-page components — the table below |
+| `components/settings/` | 26 | One panel per Settings section, registered in `sections.ts` |
+| `components/chat/` | 11 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
+| `components/prompts/`, `components/guide/` | 3 | Prompt dialog + the user-guide renderer |
+
+### Settings panels (`components/settings/`)
+
+26 panels, each rendered by `pages/settings.vue` from the grouped registry in `sections.ts` (groups: System, Providers, Audio, Image, Video, Agents & Automation, Memory, Security):
+
+`Chat` · `ImageCaption` · `ImageGen` · `Logging` · `Malware` · `MemoryEmbeddings` · `MemoryLimits` · `MemoryReranker` · `Ocr` · `Password` · `Performance` · `Printers` · `Providers` · `Restart` · `Search` · `Shell` · `Skills` · `Speech` · `Subagents` · `Tasks` · `Timezone` · `Transcription` · `Uploads` · `VideoGen` · `VideoInterp`, plus `UnmanagedBanner`.
+
+Section **ids are stable across renames** — `memory` still addresses the panel now titled "Embeddings" because bookmarks and deep links point at it.
+
+### Chat components (`components/chat/`)
+
+11 components extracted from `chat.vue` during the JCLAW-690 decomposition: `ChatAgentSelector`, `ChatAttachmentChip`, `ChatAudioAttachment`, `ChatGeneratedImage`, `ChatGeneratedVideo`, `ChatMessage`, `ChatReembedNotice`, `ChatSubagentRow`, `ChatThinkingCard`, `ChatToolCalls`, `ChatVoiceOverlay`.
+
+### Cross-page components (`components/`)
 
 | Component | Purpose |
 |---|---|
 | `DataTable.vue` | `@tanstack/vue-table` wrapper for admin lists (tasks, subagent runs). |
+| `CodingRunMonitor.vue` | Live view of an ACP coding-harness subagent run. |
+| `ChatVoiceOverlay` / `IconVoiceWaveform.vue` | Voice-mode overlay and waveform indicator. |
+| `PromptSizeDonut.vue` | System-prompt composition by section (pairs with `/api/agents/{id}/prompt-breakdown`). |
+| `AppCostFields.vue` | Cost inputs for hosted apps. |
+| `GithubStarsButton.vue`, `GithubStarNudge.vue` | Repo star count + nudge. |
 | `ConfirmDialog.vue` | Imperative confirm/destructive-action modal (driven by `useConfirm`, mounted in `app.vue`). |
 | `CommandPalette.vue` | Global `/`-triggered command palette. |
 | `ChatContextMeter.vue`, `ChatCompressionSection.vue`, `ChatCostSection.vue` | Chat context/token/cost meters. |

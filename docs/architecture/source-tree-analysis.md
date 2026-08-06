@@ -103,9 +103,16 @@ jclaw/
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
 │   └── package.json              # pnpm pinned via packageManager (version + +sha512 hash).
 │
-├── sidecar/                      # Python local-generation daemons (uv-run).
-│   ├── image/                    # Local diffusion image model (FLUX.2 klein).
-│   └── video/                    # Local video model (LTX / WAN).
+├── sidecar/                      # Five Python ML daemons on loopback, uv-run on demand.
+│   │                             # Each: stdlib-only serve.py supervisor + PEP 723 workers.
+│   ├── asr/                      # :9529 Speech recognition — Whisper + MERaLiON (meralion.py,
+│   │                             #       align.py forced alignment for its missing timestamps).
+│   ├── diarize/                  # :9530 pyannote speaker turns + optional SER emotion (ser.py).
+│   ├── image/                    # :9527 Local diffusion image model (FLUX.2 klein), in-process.
+│   ├── tts/                      # :9531 Speech synthesis — mlx-audio / chatterbox (synth.py).
+│   └── video/                    # :9528 Local video model (LTX / WAN); dual runtime MLX vs diffusers.
+├── evals/                        # Agent-behaviour eval datasets; suites/<id>.json + README (format
+│                                 # contract). EvalSuiteConformanceTest fails the build on a bad suite.
 ├── test/                         # Play backend tests (JUnit 6). Run with `play autotest` — not `play test`.
 ├── public/                       # Play static assets; spa/ staged here at start/deploy (gitignored).
 ├── skills/                       # File-system skill definitions (global, promoted-skill source of truth).

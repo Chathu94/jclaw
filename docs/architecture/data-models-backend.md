@@ -1,6 +1,6 @@
 # Data Models — Backend
 
-JPA entities under `app/models/` (~29), all extending `play.db.jpa.Model` (Play 1.x gives an auto-generated `Long id` plus static finders: `find`, `findById`, `count`, `delete`, `save`). Schema is applied by `jpa.ddl=update` in both dev and prod — a deliberate pre-1.0 tradeoff (additive only; renames/type changes need manual intervention).
+JPA classes under `app/models/` — **31 concrete `@Entity` types plus 3 `@MappedSuperclass` bases** — all extending `play.db.jpa.Model` (Play 1.x gives an auto-generated `Long id` plus static finders: `find`, `findById`, `count`, `delete`, `save`). Schema is applied by `jpa.ddl=update` in both dev and prod — a deliberate pre-1.0 tradeoff (additive only; renames/type changes need manual intervention).
 
 **Dev DB:** H2 file at `./data/jclaw` (`MODE=MYSQL;AUTO_SERVER=TRUE`). **Prod DB:** PostgreSQL (commented template). **L2 cache:** read-mostly entities carry Hibernate `@Cache(READ_WRITE)` backed by Caffeine-JCache (JCLAW-205); a query cache is enabled globally (only `ApiToken` opts in today). **Enums** are string-backed (`@Enumerated(STRING)` or manual conversion) to survive Play 1.x hot-reload classloader identity.
 
@@ -20,6 +20,9 @@ Per-message media. `uuid` (unique, client-facing), `original_filename`, `storage
 
 ### `memory` — `Memory.java`
 Per-agent long-term memory, scoped by `agent_id` (string), with `text` + `category`. **Lucene-indexed** (JCLAW-415) — full-text search, *not* `LIKE`.
+
+### `prompt` — `Prompt.java`
+Saved, reusable prompts run into the chat composer (the Prompts Library). Fields: `name` (NOT NULL, 200), `content` (NOT NULL, TEXT), `description` (500), `category` (NOT NULL, 20). Indexed; exposed through `/api/prompts` including generate, import and export.
 
 ### `session_compaction` — `SessionCompaction.java`
 LLM-generated summary of a conversation prefix (JCLAW-38): `conversation_id`, `turn_count`, `summary_tokens`, `model`, `summary`, `compacted_at`.
@@ -82,6 +85,18 @@ Effective shell allowlist = `global shell.allowlist ∪ (AgentSkillAllowedTool W
 | `EventLog` | `event_log` | Structured audit log (`timestamp`, `level`, `category`, `agent_id`, `channel`, `message`, `details`); trimmed by `EventLogCleanupJob`. |
 | `LatencyMetric` | `latency_metrics` | Per-segment request latency for the Chat Performance dashboard (JCLAW-515). |
 | `CompressionMetric` | `compression_metrics` | Compression/inflation/CCR telemetry (`Kind`, tokens before/after, algorithm). |
+
+## Mapped superclasses
+
+Three `@MappedSuperclass` bases carry state that concrete entities were otherwise duplicating byte-for-byte. Each subclass keeps its own `@Table`, indexes, `@Cache` and typed finders — only the shared columns and lifecycle callbacks move up.
+
+| Base | Extracted by | Holds | Subclasses |
+|---|---|---|---|
+| `TimestampedModel` | — | `created_at`/`updated_at` and their callbacks: stamp both on insert, bump `updated_at` on update. Nine entities carried an identical copy. | the two below, plus entities with plain timestamp handling |
+| `AgentFeatureConfig` | JCLAW-408 | The common `agent` FK + `enabled` flag for per-agent feature config | `AgentSkillConfig`, `AgentToolConfig` |
+| `AgentBoundBinding` | JCLAW-723 | The same `agent` FK + `enabled` flag for per-agent channel bindings | `TelegramBinding`, `SlackBinding`, `WhatsAppBinding` |
+
+`AgentBoundBinding` mirrors `AgentFeatureConfig`'s approach and inherits its timestamps from `TimestampedModel` one level further up.
 
 ## Enums
 

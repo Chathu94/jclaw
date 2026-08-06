@@ -2,8 +2,8 @@
   "repository_type": "monorepo",
   "name": "jclaw",
   "version": "see conf/application.conf (application.version)",
-  "generated": "2026-06-29",
-  "generator": "bmad-document-project (deep rescan)",
+  "generated": "2026-08-07",
+  "generator": "bmad-document-project (full rescan, deep)",
   "parts": [
     {
       "part_id": "backend",
@@ -14,20 +14,33 @@
       "framework": "Play Framework 1.13.x (fork tsukhani/play1, exact patch pinned in .play-version)",
       "tech": [
         "JPA/Hibernate on H2 (dev, MODE=MYSQL) / PostgreSQL (prod template)",
-        "OkHttp 5 (okhttp-jvm + okhttp-sse) — single outbound HTTP stack",
-        "Apache Lucene 10 — full-text search",
-        "db-scheduler 16.x — persistent task scheduling",
-        "JTokkit — tokenization",
+        "OkHttp 5 (okhttp-jvm + okhttp-sse) \u2014 single outbound HTTP stack",
+        "Apache Lucene 10 \u2014 full-text search",
+        "db-scheduler 16.x \u2014 persistent task scheduling",
+        "JTokkit \u2014 tokenization",
         "Apache Tika 3 + Tesseract OCR",
         "Microsoft Playwright for Java",
         "Caffeine L2 cache (JCache)"
       ],
       "build": "Gradle (org.playframework.play1 plugin); play dist / gradle playBundle",
       "test": "JUnit 6, Play UnitTest/FunctionalTest, `play autotest`",
-      "entry_points": ["conf/routes", "app/controllers/Application.java"],
+      "entry_points": [
+        "conf/routes",
+        "app/controllers/Application.java"
+      ],
       "critical_directories": [
-        "app/controllers", "app/models", "app/agents", "app/llm", "app/channels",
-        "app/tools", "app/mcp", "app/memory", "app/jobs", "app/services", "app/utils", "conf"
+        "app/controllers",
+        "app/models",
+        "app/agents",
+        "app/llm",
+        "app/channels",
+        "app/tools",
+        "app/mcp",
+        "app/memory",
+        "app/jobs",
+        "app/services",
+        "app/utils",
+        "conf"
       ]
     },
     {
@@ -48,11 +61,67 @@
       "build": "nuxi generate -> public/spa/",
       "test": "Vitest 4 (jsdom), @nuxt/test-utils, Playwright (e2e)",
       "package_manager": "pnpm (exact version + +sha512 hash pinned in package.json packageManager)",
-      "entry_points": ["frontend/app.vue", "frontend/pages"],
+      "entry_points": [
+        "frontend/app.vue",
+        "frontend/pages"
+      ],
       "critical_directories": [
-        "frontend/pages", "frontend/components", "frontend/composables",
-        "frontend/middleware", "frontend/plugins", "frontend/utils", "frontend/types"
+        "frontend/pages",
+        "frontend/components",
+        "frontend/composables",
+        "frontend/middleware",
+        "frontend/plugins",
+        "frontend/utils",
+        "frontend/types"
       ]
+    },
+    {
+      "part_id": "sidecar",
+      "display_name": "JClaw Local ML Sidecars",
+      "project_type_id": "backend",
+      "root_path": "/sidecar",
+      "language": "Python >=3.11 (PEP 723 inline script envs, resolved by uv)",
+      "framework": "stdlib http.server supervisor + per-worker ML stacks (torch / mlx / transformers / pyannote / diffusers)",
+      "tech": [
+        "uv",
+        "PEP 723 inline script metadata",
+        "faster-whisper / mlx-whisper",
+        "MERaLiON-3-3B-ASR",
+        "torchaudio MMS forced alignment",
+        "pyannote speaker-diarization-community-1",
+        "MERaLiON-SER-v1",
+        "mlx-audio / chatterbox-tts",
+        "diffusers (FLUX.2 klein)",
+        "LTX-2.3 MLX / ltx_pipelines / WAN"
+      ],
+      "daemons": [
+        {
+          "name": "asr",
+          "port": 9529,
+          "manager": "services.transcription.AsrSidecarManager"
+        },
+        {
+          "name": "diarize",
+          "port": 9530,
+          "manager": "services.transcription.DiarizeSidecarManager"
+        },
+        {
+          "name": "image",
+          "port": 9527,
+          "manager": "services.imagegen.LocalImageSidecarManager"
+        },
+        {
+          "name": "tts",
+          "port": 9531,
+          "manager": "services.tts.TtsSidecarManager"
+        },
+        {
+          "name": "video",
+          "port": 9528,
+          "manager": "services.videogen.LocalVideoSidecarManager"
+        }
+      ],
+      "notes": "Loopback-only, launched on demand, not shipped in jclaw-bundle.zip. uv.lock is gitignored per sidecar because the right torch build is host-dependent."
     }
   ],
   "integration_points": [

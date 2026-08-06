@@ -10,12 +10,13 @@ Current version: see `application.version` in `conf/application.conf` (the sourc
 
 ## Repository type
 
-**Multi-part monorepo**. One git repo, two runtimes that ship as a single deploy unit. The Play backend serves the prebuilt Nuxt SPA from `public/spa/`; the self-contained `jclaw-bundle.zip` (and the GHCR container image) bake in the framework, resolved deps, precompiled classes, and the built SPA so the only host requirement is a Java 25 JRE.
+**Multi-part monorepo**. One git repo, three runtimes. Backend and frontend ship as a single deploy unit: the Play backend serves the prebuilt Nuxt SPA from `public/spa/`, and the self-contained `jclaw-bundle.zip` (plus the GHCR container image) bakes in the framework, resolved deps, precompiled classes and the built SPA, so the only host requirement is a Java 25 JRE. The sidecars are **not** bundled — they are opt-in local ML, launched on demand on hosts that install `uv`.
 
 | Part | Root | Type | Runtime |
 |---|---|---|---|
 | `backend` | `/` (Play convention: `app/`, `conf/`) | backend | Play 1.x fork / Java 25 / JDK Zulu |
 | `frontend` | `/frontend` | web | Nuxt 4 / Vue 3 / TypeScript / Tailwind v4 |
+| `sidecar` | `/sidecar` | backend | Python ≥3.11, PEP 723 script envs resolved by `uv`; five loopback daemons (asr, diarize, image, tts, video) |
 
 ## Technology stack summary
 

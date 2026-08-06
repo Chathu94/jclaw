@@ -75,6 +75,17 @@ Play backend
 - `app/services/scanners/` integrations (VirusTotal, MetaDefender, MalwareBazaar, etc.) scan skill binaries before promotion/allowlisting.
 - Local image/video generation runs in Python `sidecar/` daemons launched on demand and reached over `127.0.0.1`.
 
+### Local ML sidecars (`sidecar/`)
+
+A third internal integration tier, alongside REST and SSE: five Python daemons the JVM launches on demand and reaches over **plain HTTP on `127.0.0.1`** — image `:9527`, video `:9528`, asr `:9529`, diarize `:9530`, tts `:9531`.
+
+Two properties distinguish it from the external integrations below:
+
+- **Files pass by path, not by upload.** The daemon runs on the same host and attachments are already on disk, so requests carry `{audio_path: "/abs/path"}` rather than bytes.
+- **One inference at a time.** Concurrent callers get `409` and queue on a JVM-wide fair lock, so a second request never triggers a second model load.
+
+Video generation is the one asynchronous member: `POST /jobs` returns `202 {job_id}` and the JVM polls `GET /jobs/<id>`. Everything else is request/response. See [architecture-sidecar.md](architecture-sidecar.md).
+
 ## Data sharing
 
 - **No shared schema** across parts. `frontend/types/api.ts` mirrors backend JSON shapes (compile-time); `frontend/types/schemas.ts` carries the Zod runtime schemas for boundary-validated reads. No cross-language code generation today.
