@@ -130,9 +130,12 @@ class McpConnectionManagerTest extends UnitTest {
         McpConnectionManager.connect(server);
         awaitState("fixture", McpServer.Status.CONNECTED, 10);
 
-        EventLogger.flush();
-        var connectEvents = Tx.run(() -> EventLog.find(
-                "category = ?1 ORDER BY timestamp DESC", "MCP_CONNECT").<EventLog>fetch());
+        // Polled, not read once: the connect path flips status to CONNECTED
+        // (McpConnectionManager L385) and only then writes the event (L390), two DB
+        // writes later. awaitState returning therefore does not mean the event is
+        // queued, so a single flush-then-read races that window and fails on a loaded
+        // machine. The guarantee the flip does carry is tools + allowlist, not this.
+        var connectEvents = awaitEvents("MCP_CONNECT", 10);
         assertFalse(connectEvents.isEmpty(),
                 "MCP_CONNECT event must be persisted on successful connection");
         assertTrue(connectEvents.get(0).message.contains("fixture"),
@@ -627,6 +630,19 @@ class McpConnectionManagerTest extends UnitTest {
         fail("Timed out waiting for " + name + " to reach " + target
                 + " (current=" + McpConnectionManager.status(name)
                 + ", lastError=" + McpConnectionManager.lastError(name) + ")");
+    }
+
+    /** Events for {@code category}, newest first, once any exist — empty if none arrive in time. */
+    private List<EventLog> awaitEvents(String category, long maxSeconds) throws InterruptedException {
+        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(maxSeconds);
+        while (System.currentTimeMillis() < deadline) {
+            EventLogger.flush();
+            var found = Tx.run(() -> EventLog.find(
+                    "category = ?1 ORDER BY timestamp DESC", category).<EventLog>fetch());
+            if (!found.isEmpty()) return found;
+            Thread.sleep(50);
+        }
+        return List.of();
     }
 
     private static boolean toolRegistered(String name) {
