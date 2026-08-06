@@ -815,6 +815,13 @@ export interface McpServer {
   tools: McpToolInfo[]
   createdAt: string | null
   updatedAt: string | null
+  /**
+   * Name of the older server this one duplicates — same transport, same config — or
+   * null (JCLAW-982). A duplicate spawns a second process and puts every one of its
+   * tools into the catalogue twice, which is invisible unless two long endpoint
+   * strings are compared by eye.
+   */
+  duplicateOf: string | null
 }
 
 /** JCLAW-813: a saved prompt in the Prompts Library. The category glyph is a

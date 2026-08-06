@@ -568,6 +568,12 @@ function removeHeaderRow(i: number) {
             <tr>
               <td class="px-4 py-2.5 text-fg-primary font-medium">
                 {{ server.name }}
+                <span
+                  v-if="server.duplicateOf"
+                  class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1 whitespace-nowrap"
+                  :title="`Same transport and configuration as ${server.duplicateOf}. It runs a second process and lists every action twice.`"
+                  data-testid="mcp-duplicate-of"
+                >duplicate of {{ server.duplicateOf }}</span>
               </td>
               <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
                 {{ server.transport }}

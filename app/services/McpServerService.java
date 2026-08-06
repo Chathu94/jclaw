@@ -78,7 +78,9 @@ public final class McpServerService {
                        String lastConnectedAt, String lastDisconnectedAt,
                        int toolCount,
                        List<ToolInfo> tools,
-                       String createdAt, String updatedAt) {
+                       String createdAt, String updatedAt,
+                       /** JCLAW-982: name of the older server this one duplicates, else null. */
+                       String duplicateOf) {
 
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
@@ -124,13 +126,44 @@ public final class McpServerService {
                     tools,
                     toolInfo,
                     row.createdAt != null ? row.createdAt.toString() : null,
-                    row.updatedAt != null ? row.updatedAt.toString() : null);
+                    row.updatedAt != null ? row.updatedAt.toString() : null,
+                    null);
+        }
+
+        /** {@link #of} sees one row; only the caller holding the whole list can spot a twin. */
+        public View withDuplicateOf(String original) {
+            return new View(id, name, enabled, requiresApproval, transport, command, args, env,
+                    url, headers, status, lastError, lastConnectedAt, lastDisconnectedAt,
+                    toolCount, tools, createdAt, updatedAt, original);
         }
     }
 
     public static List<View> listAll() {
         var rows = McpServer.<McpServer>find("ORDER BY name ASC").<McpServer>fetch();
-        return rows.stream().map(View::of).toList();
+        return rows.stream().map(row -> View.of(row).withDuplicateOf(originalFor(row, rows))).toList();
+    }
+
+    /**
+     * The older server this one duplicates, or null (JCLAW-982).
+     *
+     * <p>Two byte-identical registrations sat side by side for two days before anyone
+     * noticed, because telling them apart meant reading two long endpoint strings and
+     * finding them equal. Same transport and same config is the whole test — a duplicate
+     * spawns a second process and puts every one of its tools into the catalogue twice.
+     *
+     * <p>Compares against the earliest-created match so exactly one of a pair is flagged:
+     * the newer one, which is the one to remove.
+     */
+    private static String originalFor(McpServer row, List<McpServer> all) {
+        return all.stream()
+                .filter(other -> !other.id.equals(row.id))
+                .filter(other -> other.transport == row.transport)
+                .filter(other -> java.util.Objects.equals(other.configJson, row.configJson))
+                .filter(other -> other.createdAt != null && row.createdAt != null
+                        && other.createdAt.isBefore(row.createdAt))
+                .min(java.util.Comparator.comparing(other -> other.createdAt))
+                .map(other -> other.name)
+                .orElse(null);
     }
 
     /**
