@@ -192,7 +192,23 @@ modules/*
 # from _bmad/<module>/<skill>/SKILL.md to .claude/skills/<skill>/SKILL.md)
 # — produce zero git diffs. The setup script re-runs the install on
 # every fresh clone, restoring slash commands without committed churn.
-_bmad/
+#
+# _bmad/custom/config.toml is the one exception, and it is deliberate: BMAD
+# never writes it (the installer regenerates _bmad/config.toml and
+# _bmad/bmm/config.yaml around it), and it is the only durable place to pin a
+# project-level value. Without it tracked, every clone silently reverts to the
+# installed defaults — e.g. project_knowledge points at docs/ root, so the next
+# /bmad-document-project writes a competing doc set beside docs/architecture/
+# instead of updating it. BMAD ships _bmad/custom/.gitignore (`*.user.toml`)
+# expecting that directory to be tracked; a blanket `_bmad/` rule makes that
+# file inert, because git never descends into an excluded directory.
+#
+# Each level must be re-included explicitly for the same reason — a bare
+# `!_bmad/custom/config.toml` under `_bmad/` is a silent no-op.
+_bmad/*
+!_bmad/custom/
+_bmad/custom/*
+!_bmad/custom/config.toml
 _bmad-output/
 
 # Global skills (track all skills in the registry)

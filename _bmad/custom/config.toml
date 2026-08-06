@@ -1,0 +1,14 @@
+# Team / enterprise overrides for _bmad/config.toml.
+# Committed to the repo — applies to every developer on the project.
+# Tables deep-merge over base config; keyed entries merge by key.
+# Example: override an agent descriptor, or add a new agent.
+#
+# [agents.bmad-agent-pm]
+# description = "Prefers short, bulleted PRDs over narrative drafts."
+
+# bmad-document-project writes every artifact to {project_knowledge}/, and its
+# generated docs live in docs/architecture/. Left at the installed default of
+# {project-root}/docs it writes a competing second doc set to the docs/ root
+# instead of updating them.
+[modules.bmm]
+project_knowledge = "{project-root}/docs/architecture"
