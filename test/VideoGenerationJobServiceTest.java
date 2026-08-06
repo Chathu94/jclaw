@@ -1,5 +1,6 @@
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
+import models.Agent;
 import models.VideoGenerationJob;
 import models.VideoGenerationJob.State;
 import okio.Buffer;
@@ -46,15 +47,37 @@ class VideoGenerationJobServiceTest extends UnitTest {
         return new VideoGenRequest("a dog skateboarding", null, 5, "16:9", null);
     }
 
+    private Agent seedAgent() {
+        var agent = new Agent();
+        agent.name = "videogen-agent";
+        agent.modelProvider = "replicate";
+        agent.modelId = "test-model";
+        agent.save();
+        return agent;
+    }
+
     @Test
     void submitCreatesRunningJobWithProviderId() {
+        var agent = seedAgent();
         server.enqueue(json("{\"id\":\"pred_1\",\"status\":\"starting\"}"));
-        var job = VideoGenerationJobService.submit(7L, 9L, req());
+        var job = VideoGenerationJobService.submit(agent.id, null, req());
         assertNotNull(job.id);
         assertEquals(State.RUNNING, job.state);
         assertEquals("pred_1", job.providerJobId);
         assertEquals("replicate", job.provider);
-        assertEquals(Long.valueOf(7L), job.agentId);
+        assertEquals(agent.id, job.agent.id);
+    }
+
+    @Test
+    void submitResolvesAnIdNamingNothingToNullRatherThanStoringIt() {
+        // JCLAW-984: agent_id is a foreign key now, so an id with no row behind it cannot be
+        // written. Recording null keeps the job — losing the link is better than losing the
+        // record that it ran, and a dangling id would block the constraint outright.
+        server.enqueue(json("{\"id\":\"pred_2\",\"status\":\"starting\"}"));
+        var job = VideoGenerationJobService.submit(999999L, 999999L, req());
+        assertEquals(State.RUNNING, job.state);
+        assertNull(job.agent);
+        assertNull(job.conversation);
     }
 
     @Test

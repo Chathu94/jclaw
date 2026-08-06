@@ -1,5 +1,7 @@
 package services.videogen;
 
+import models.Agent;
+import models.Conversation;
 import models.MessageAttachment;
 import models.VideoGenerationJob;
 import models.VideoGenerationJob.State;
@@ -44,8 +46,10 @@ public final class VideoGenerationJobService {
     public static VideoGenerationJob submit(Long agentId, Long conversationId, VideoGenRequest request) {
         var provider = ConfigService.get("videogen.provider");
         var job = new VideoGenerationJob();
-        job.agentId = agentId;
-        job.conversationId = conversationId;
+        // Resolved rather than stored raw (JCLAW-984): the columns are foreign keys now, so an
+        // id naming nothing has to become null here instead of a row the cascade cannot reach.
+        job.agent = agentId == null ? null : Agent.findById(agentId);
+        job.conversation = conversationId == null ? null : Conversation.findById(conversationId);
         job.prompt = request.prompt();
         job.provider = provider;
         job.state = State.PENDING;

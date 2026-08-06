@@ -109,7 +109,7 @@ public class ApiVideogenController extends Controller {
             m.put("prompt", job.prompt);
             m.put("percent", job.percent); // real 0..100 for the local engine (JCLAW-232); null for cloud (SV-1)
             m.put("errorMessage", job.errorMessage);
-            m.put("conversationId", job.conversationId);
+            m.put("conversationId", job.conversation == null ? null : job.conversation.id);
             m.put("createdAt", job.createdAt != null ? job.createdAt.toString() : null);
             out.add(m);
         }

@@ -53,9 +53,13 @@ public final class CascadeFkMigrator {
                              String parentTable, String parentColumn) {}
 
     /**
-     * The 26 ownership FKs JClaw relies on the cascade for (JCLAW-135). Every
+     * The 29 ownership FKs JClaw relies on the cascade for (JCLAW-135). Every
      * parent PK column is {@code ID}. Scoped deliberately: the migration touches
      * only these constraints and never any unrelated FK.
+     *
+     * <p>{@code VIDEO_GENERATION_JOB.RESULT_ATTACHMENT_ID} is deliberately absent
+     * (JCLAW-984): it is the job's result rather than its owner, and stays an unconstrained
+     * id for the reason recorded on {@code VideoGenerationJob#resultAttachmentId}.
      */
     private static final String AGENT = "AGENT";
     private static final String AGENT_ID = "AGENT_ID";
@@ -88,7 +92,10 @@ public final class CascadeFkMigrator {
             new ForeignKey("TELEGRAM_TOPIC_BINDING", AGENT_ID, AGENT, "ID"),
             new ForeignKey("TELEGRAM_TOPIC_BINDING", "BINDING_ID", "TELEGRAM_BINDING", "ID"),
             new ForeignKey("TOOL_APPROVAL_GRANT", AGENT_ID, AGENT, "ID"),
-            new ForeignKey("WHATSAPP_BINDING", AGENT_ID, AGENT, "ID"));
+            new ForeignKey("VIDEO_GENERATION_JOB", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("VIDEO_GENERATION_JOB", "CONVERSATION_ID", CONVERSATION, "ID"),
+            new ForeignKey("WHATSAPP_BINDING", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("WHATSAPP_CONVERSATION_WINDOW", "BINDING_ID", "WHATSAPP_BINDING", "ID"));
 
     /**
      * Resolve the FK's constraint name and current {@code delete_rule} by its

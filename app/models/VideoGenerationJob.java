@@ -4,10 +4,15 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -40,11 +45,17 @@ public class VideoGenerationJob extends Model {
 
     public enum State { PENDING, RUNNING, SUCCEEDED, FAILED }
 
-    @Column(name = "agent_id")
-    public Long agentId;
+    /** The agent that requested the video. Cascades: the job describes work done for this agent. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "agent_id")
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    public Agent agent;
 
-    @Column(name = "conversation_id")
-    public Long conversationId;
+    /** The conversation the request came from. Cascades for the same reason as {@link #agent}. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "conversation_id")
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    public Conversation conversation;
 
     @Column(columnDefinition = "TEXT")
     public String prompt;
@@ -84,7 +95,22 @@ public class VideoGenerationJob extends Model {
     @Column(name = "error_message", columnDefinition = "TEXT")
     public String errorMessage;
 
-    /** Set by JCLAW-234 once the produced video is stored as a MessageAttachment. */
+    /**
+     * Set by JCLAW-234 once the produced video is stored as a MessageAttachment.
+     *
+     * <p>A plain id, not a foreign key (JCLAW-984), unlike {@link #agent} and
+     * {@link #conversation} beside it. This is the job's <em>result</em>, not its owner, and
+     * {@code Message.attachments} is mapped {@code cascade = ALL, orphanRemoval = true} — so
+     * an attachment is removed through Hibernate, not only by the database. A managed
+     * association here fails the flush with {@code TransientPropertyValueException} whenever
+     * a job is dirty in the same session as the attachment being removed, which no DDL rule
+     * can prevent. The authoritative link is the reverse one,
+     * {@link MessageAttachment#findByGenerationJobId}, and it cascades correctly.
+     *
+     * <p>A dangling id therefore behaves exactly as null does at the only reader
+     * ({@code ApiVideogenController}, which null-guards the lookup) — the same trade
+     * {@code Notification.sourceTaskId} makes.
+     */
     @Column(name = "result_attachment_id")
     public Long resultAttachmentId;
 

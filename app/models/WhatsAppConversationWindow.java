@@ -2,9 +2,14 @@ package models;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -29,11 +34,13 @@ import java.time.Instant;
         indexes = @Index(name = "idx_wa_window_binding_peer", columnList = "binding_id,peer_id"))
 public class WhatsAppConversationWindow extends Model {
 
-    /** The {@link WhatsAppBinding} id this window belongs to. Stored as a plain id
-     *  (not a FK association) — the window is a lightweight per-peer marker written
-     *  off the webhook thread, and we never navigate from it back to the binding. */
-    @Column(name = "binding_id", nullable = false)
-    public Long bindingId;
+    /** The {@link WhatsAppBinding} this window belongs to. Lazy because nothing navigates
+     *  from the window back to the binding; the association exists for the cascade, so a
+     *  deleted binding cannot leave behind a window whose non-null id names nothing. */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "binding_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
+    public WhatsAppBinding binding;
 
     /** The peer (the user's E.164 phone number / wa-id) that messaged the binding. */
     @Column(name = "peer_id", nullable = false)
@@ -54,8 +61,12 @@ public class WhatsAppConversationWindow extends Model {
         }
         var existing = findRow(bindingId, peerId);
         if (existing == null) {
+            WhatsAppBinding owner = WhatsAppBinding.findById(bindingId);
+            // The binding can be deleted between the webhook arriving and this write; a
+            // window for one that no longer exists is what the FK is here to prevent.
+            if (owner == null) return;
             existing = new WhatsAppConversationWindow();
-            existing.bindingId = bindingId;
+            existing.binding = owner;
             existing.peerId = peerId;
         }
         existing.lastUserMessageAt = at;
@@ -68,7 +79,7 @@ public class WhatsAppConversationWindow extends Model {
     public static WhatsAppConversationWindow findRow(Long bindingId, String peerId) {
         if (bindingId == null || peerId == null) return null;
         return WhatsAppConversationWindow.find(
-                "bindingId = ?1 and peerId = ?2", bindingId, peerId).first();
+                "binding.id = ?1 and peerId = ?2", bindingId, peerId).first();
     }
 
     /**

@@ -126,8 +126,8 @@ public class ConversationSink implements AgentExecutionSink {
         // JCLAW-236: backfill the job's conversation (the tool submits without one) so the Settings jobs
         // panel can link each job back into its chat.
         VideoGenerationJob job = VideoGenerationJob.findById(videoJob.jobId());
-        if (job != null && job.conversationId == null) {
-            job.conversationId = managed.id;
+        if (job != null && job.conversation == null) {
+            job.conversation = managed;
             job.save();
         }
         // JCLAW-234/235: a zero-byte placeholder linked to the job; the runner fills it on completion
