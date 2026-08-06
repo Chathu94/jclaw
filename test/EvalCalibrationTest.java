@@ -91,7 +91,7 @@ class EvalCalibrationTest extends UnitTest {
     private static List<String> grantedTo(Long agentId) {
         return commitInFreshTx(() -> AgentToolConfig.findByAgent((Agent) Agent.findById(agentId)).stream()
                 .filter(c -> c.enabled)
-                .map(c -> c.toolName)
+                .map(c -> c.handle())
                 .sorted()
                 .toList());
     }

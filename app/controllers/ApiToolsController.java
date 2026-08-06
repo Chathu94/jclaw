@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
 import play.mvc.Controller;
@@ -151,12 +152,8 @@ public class ApiToolsController extends Controller {
                     + " to enable or disable the entire '" + tool.group() + "' server.");
         }
 
-        var config = AgentToolConfig.findByAgentAndTool(agent, name);
-        if (config == null) {
-            config = new AgentToolConfig();
-            config.agent = agent;
-            config.toolName = name;
-        }
+        var config = McpGrants.find(agent, name);
+        if (config == null) config = McpGrants.newRow(agent, name);
         config.enabled = enabled;
         config.save();
 
@@ -177,8 +174,8 @@ public class ApiToolsController extends Controller {
      * server (and therefore every action it advertises) for one agent.
      * Body: {@code {"enabled": boolean}}.
      *
-     * <p>Writes a single {@link AgentToolConfig} row keyed by the
-     * server-level handle name ({@code mcp_<group>}). The LLM's
+     * <p>Writes a single {@link AgentToolConfig} row addressing the server
+     * with an empty action (JCLAW-983). The LLM's
      * function-calling schema only exposes the server-level handle
      * — actions are addressed via {@code mcp_<group>}'s {@code tool}
      * parameter at execution time — so a single row is sufficient to
@@ -214,12 +211,8 @@ public class ApiToolsController extends Controller {
         if (serverLevel == null) notFound();
 
         // Write the single server-level row.
-        var config = AgentToolConfig.findByAgentAndTool(agent, serverLevel.name());
-        if (config == null) {
-            config = new AgentToolConfig();
-            config.agent = agent;
-            config.toolName = serverLevel.name();
-        }
+        var config = McpGrants.find(agent, serverLevel.name());
+        if (config == null) config = McpGrants.newRow(agent, serverLevel.name());
         config.enabled = enabled;
         config.save();
 
@@ -230,12 +223,9 @@ public class ApiToolsController extends Controller {
         // future refactor. One bulk DELETE per group toggle (rather than
         // one per action) keeps the table tidy as the operator naturally
         // cycles through their servers.
-        var perActionNames = ToolRegistry.listTools().stream()
-                .filter(t -> group.equals(t.group()) && !t.isServerLevel())
-                .map(ToolRegistry.Tool::name)
-                .toList();
-        if (!perActionNames.isEmpty()) {
-            AgentToolConfig.delete("agent = ?1 AND toolName IN (?2)", agent, perActionNames);
+        if (config.mcpServer != null) {
+            AgentToolConfig.delete("agent = ?1 AND mcpServer = ?2 AND mcpAction <> ''",
+                    agent, config.mcpServer);
         }
 
         SkillLoader.clearCache();

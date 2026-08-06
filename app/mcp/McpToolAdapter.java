@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.EventLog;
+import models.McpServer;
 import services.Tx;
 
 import java.io.IOException;
@@ -50,7 +51,7 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
 
     @Override
     public String name() {
-        return "mcp_" + serverName + "_" + def.name();
+        return McpServer.toolName(serverName, def.name());
     }
 
     @Override

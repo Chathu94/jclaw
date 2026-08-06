@@ -348,14 +348,23 @@ class SubagentSpawnToolTest extends UnitTest {
             startLlmServer(simpleResponse("Subagent reply: done."));
             configureProvider();
 
+            // The server row the handle is published from: JCLAW-983 keys the grant by its
+            // id, so without it both parent and child fall back to name keying and the test
+            // stops exercising the path it names.
+            var server = new models.McpServer();
+            server.name = "testsvc";
+            server.transport = models.McpServer.Transport.STDIO;
+            server.configJson = "{\"command\":\"true\",\"args\":[]}";
+            server.enabled = false;
+            server.save();
+
             // Non-main parent with the MCP handle explicitly enabled (the operator
             // opt-in shape). A bare non-main agent would have it default-disabled.
             var parent = createAgent("p-mcp", "test-provider", "test-model");
-            var grant = new AgentToolConfig();
-            grant.agent = parent;
-            grant.toolName = mcpHandle;
+            var grant = mcp.McpGrants.newRow(parent, mcpHandle);
             grant.enabled = true;
             grant.save();
+            assertNotNull(grant.mcpServer, "test premise: the grant must be keyed by server id");
             ConversationService.create(parent, "web", "u-mcp");
             commitAndReopen();
             ToolRegistry.invalidateDisabledToolsCache(parent);

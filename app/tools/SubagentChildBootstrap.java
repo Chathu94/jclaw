@@ -2,6 +2,7 @@ package tools;
 
 import agents.ToolRegistry;
 import llm.ProviderRegistry;
+import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
@@ -388,8 +389,8 @@ final class SubagentChildBootstrap {
             // stale rows referencing a removed tool — flipping a stale row
             // would be lying about the registry's current shape.
             if (!row.enabled
-                    && !parentDisabled.contains(row.toolName)
-                    && isStillRegistered(allRegistered, row.toolName)) {
+                    && !parentDisabled.contains(row.handle())
+                    && isStillRegistered(allRegistered, row.handle())) {
                 row.enabled = true;
                 row.save();
                 anyFlipped = true;
@@ -419,19 +420,13 @@ final class SubagentChildBootstrap {
     private static void grantParentMcpGrants(Agent parentAgent, Agent childAgent) {
         var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
         var childDisabled = ToolRegistry.loadDisabledTools(childAgent);
-        boolean anyGranted = false;
-        for (var tool : ToolRegistry.listTools()) {
-            if (tool.group() == null) continue;                 // MCP-grouped tools only
-            if (parentDisabled.contains(tool.name())) continue; // parent doesn't grant it
-            if (!childDisabled.contains(tool.name())) continue; // child already has it
-            var row = new AgentToolConfig();
-            row.agent = childAgent;
-            row.toolName = tool.name();
-            row.enabled = true;
-            row.save();
-            anyGranted = true;
-        }
-        if (anyGranted) {
+        var toGrant = ToolRegistry.listTools().stream()
+                .filter(t -> t.group() != null)                     // MCP-grouped tools only
+                .filter(t -> !parentDisabled.contains(t.name()))    // parent doesn't grant it
+                .filter(t -> childDisabled.contains(t.name()))      // child already has it
+                .toList();
+        if (!toGrant.isEmpty()) {
+            McpGrants.grantAll(childAgent, toGrant);
             ToolRegistry.invalidateDisabledToolsCache(childAgent);
         }
     }
@@ -458,15 +453,17 @@ final class SubagentChildBootstrap {
      */
     private static void copyParentToolRestrictions(Agent parentAgent, Agent childAgent) {
         var childByName = new HashMap<String, AgentToolConfig>();
-        for (var r : AgentToolConfig.findByAgent(childAgent)) childByName.put(r.toolName, r);
+        for (var r : AgentToolConfig.findByAgent(childAgent)) childByName.put(r.handle(), r);
         boolean any = false;
         for (var pr : AgentToolConfig.findByAgent(parentAgent)) {
             if (pr.enabled) continue;                       // copy restrictions only
-            var existing = childByName.get(pr.toolName);
+            var existing = childByName.get(pr.handle());
             if (existing == null) {
                 var row = new AgentToolConfig();
                 row.agent = childAgent;
                 row.toolName = pr.toolName;
+                row.mcpServer = pr.mcpServer;
+                row.mcpAction = pr.mcpAction;
                 row.enabled = false;
                 row.save();
                 any = true;

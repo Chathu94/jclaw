@@ -1,137 +1,87 @@
 package mcp;
 
+import agents.ToolRegistry;
+import models.Agent;
 import models.AgentToolConfig;
-import play.db.jpa.JPA;
-import services.EventLogger;
+import models.McpServer;
 
+import java.util.HashMap;
 import java.util.List;
 
 /**
- * Keeps per-agent MCP grants in step with the servers they name (JCLAW-982).
+ * How a per-agent grant row addresses the tool it grants (JCLAW-983).
  *
- * <p>A grant row is keyed by the tool's name, and an MCP tool's name is built from its
- * server's name — {@code mcp_<server>} for the server-level handle,
- * {@code mcp_<server>_<tool>} for each action. So the join between a grant and its server
- * is a string prefix, and nothing was maintaining it: deleting a server removed the row
- * and its allowlist entries but left every grant behind, and renaming one stranded the
- * old set while granting nothing under the new name.
+ * <p>An MCP tool's name is built from its server's name, so keying the grant row by that
+ * name made the join between the two a string prefix that nothing maintained: a rename
+ * stranded every grant and a delete left them behind. JCLAW-982 patched both with explicit
+ * handlers; this keys the row by the server's id instead, so a rename writes no row at all
+ * and a delete cascades in the database.
  *
- * <p>Measured on a live instance before this existed: 49,018 of 139,687 grant rows — 35% —
- * named a server that no longer existed, 48,803 of them from a single rename. Not a
- * privilege leak, because a grant for an absent server grants nothing; the cost is that a
- * third of the table described nothing, and the agent editor reads that table.
- *
- * <p>Deliberately not wired into {@link McpConnectionManager#stop}, which is the obvious
- * place and the wrong one: stop also runs when a server is merely disabled or renamed, so
- * sweeping there would silently revoke an operator's grants on a toggle.
+ * <p>Native tools are unaffected and stay keyed by name — they are the fallback here, taken
+ * whenever a tool names no MCP server.
  */
 public final class McpGrants {
 
     private McpGrants() {}
 
-    private static final String EVENT_CATEGORY = "MCP_TOOL_UNREGISTER";
-
-    /** The server-level handle, exactly as {@code McpServerTool.name()} builds it. */
-    public static String handle(String serverName) {
-        return "mcp_" + serverName;
-    }
-
-    /** True when {@code toolName} is the handle for {@code serverName} or one of its actions. */
-    static boolean belongsTo(String toolName, String serverName) {
-        var h = handle(serverName);
-        return toolName.equals(h) || toolName.startsWith(h + "_");
+    /** The existing grant row for {@code toolName}, or {@code null}. */
+    public static AgentToolConfig find(Agent agent, String toolName) {
+        var server = serverFor(toolName);
+        if (server == null) return AgentToolConfig.findByAgentAndTool(agent, toolName);
+        return AgentToolConfig.find("agent = ?1 AND mcpServer = ?2 AND mcpAction = ?3",
+                agent, server, actionOf(toolName, server.name)).first();
     }
 
     /**
-     * Drop every grant naming {@code serverName}. Call from the delete path only.
-     *
-     * @return rows removed
+     * An unsaved grant row addressing {@code toolName} — by {@code (server, action)} when the
+     * name resolves to a live MCP tool, by name otherwise. The caller sets {@code enabled}
+     * and saves.
      */
-    public static int deleteForServer(String serverName) {
-        var removed = namesFor(serverName);
-        if (removed.isEmpty()) return 0;
-        int n = deleteByToolName(removed);
-        if (n > 0) {
-            EventLogger.info(EVENT_CATEGORY,
-                    "Removed %d agent grant(s) for deleted MCP server '%s'".formatted(n, serverName));
-        }
-        return n;
+    public static AgentToolConfig newRow(Agent agent, String toolName) {
+        var row = new AgentToolConfig();
+        row.agent = agent;
+        assign(row, toolName, serverFor(toolName));
+        return row;
     }
 
     /**
-     * Re-point grants from {@code oldName} to {@code newName}, preserving each agent's
-     * choice across a rename rather than stranding it under a handle nothing will emit.
-     *
-     * @return rows moved
+     * Grant {@code agent} every tool in {@code tools}, resolving each MCP server once rather
+     * than once per action — a server advertising 280 actions is the ordinary case, and this
+     * runs on the subagent-spawn path.
      */
-    public static int renameServer(String oldName, String newName) {
-        if (oldName.equals(newName)) return 0;
-        var affected = namesFor(oldName);
-        if (affected.isEmpty()) return 0;
-        int oldPrefix = handle(oldName).length();
-        int n = 0;
-        for (var row : rowsByToolName(affected)) {
-            row.toolName = handle(newName) + row.toolName.substring(oldPrefix);
+    public static void grantAll(Agent agent, List<ToolRegistry.Tool> tools) {
+        var servers = new HashMap<String, McpServer>();
+        for (var tool : tools) {
+            var row = new AgentToolConfig();
+            row.agent = agent;
+            assign(row, tool.name(),
+                    tool.group() == null ? null : servers.computeIfAbsent(tool.group(), McpServer::findByName));
+            row.enabled = true;
             row.save();
-            n++;
         }
-        EventLogger.info(EVENT_CATEGORY,
-                "Moved %d agent grant(s) from MCP server '%s' to '%s'".formatted(n, oldName, newName));
-        return n;
+    }
+
+    /** Populate exactly one of the two addressing forms and clear the other. */
+    private static void assign(AgentToolConfig row, String toolName, McpServer server) {
+        row.toolName = server == null ? toolName : null;
+        row.mcpServer = server;
+        row.mcpAction = server == null ? null : actionOf(toolName, server.name);
     }
 
     /**
-     * Remove grants whose handle names no configured server — the accumulated residue of
-     * deletes and renames that happened before either was maintained.
-     *
-     * <p>Keeps a grant if it matches <em>any</em> live server, so a server name that is a
-     * prefix of another cannot strand the longer one's rows.
-     *
-     * @return rows removed
+     * The MCP server {@code toolName} belongs to, or {@code null} when it names none. Resolved
+     * through the live registry rather than by parsing the name, so a server whose name is a
+     * prefix of another's cannot claim its tools.
      */
-    public static int sweepOrphans() {
-        List<String> live = JPA.em()
-                .createQuery("select s.name from McpServer s", String.class).getResultList();
-        var orphans = distinctMcpToolNames().stream()
-                .filter(t -> live.stream().noneMatch(s -> belongsTo(t, s)))
-                .toList();
-        if (orphans.isEmpty()) return 0;
-        int n = deleteByToolName(orphans);
-        // Logged rather than silent: a sweep that removes tens of thousands of rows on a
-        // boot nobody asked about should be visible in the record.
-        EventLogger.info(EVENT_CATEGORY,
-                "Swept %d orphaned MCP grant row(s) across %d handle(s) naming no server"
-                        .formatted(n, orphans.size()));
-        return n;
+    private static McpServer serverFor(String toolName) {
+        var tool = ToolRegistry.lookupTool(toolName);
+        if (tool == null || tool.group() == null) return null;
+        return McpServer.findByName(tool.group());
     }
 
-    private static List<String> distinctMcpToolNames() {
-        return JPA.em().createQuery(
-                        "select distinct c.toolName from AgentToolConfig c where c.toolName like 'mcp!_%' escape '!'",
-                        String.class)
-                .getResultList();
-    }
-
-    private static List<String> namesFor(String serverName) {
-        return distinctMcpToolNames().stream().filter(t -> belongsTo(t, serverName)).toList();
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<AgentToolConfig> rowsByToolName(List<String> toolNames) {
-        return JPA.em().createQuery("select c from AgentToolConfig c where c.toolName in :names")
-                .setParameter("names", toolNames)
-                .getResultList();
-    }
-
-    /** Chunked because a single server can span every agent — 489 here, 280 tools each. */
-    private static int deleteByToolName(List<String> toolNames) {
-        int n = 0;
-        for (int i = 0; i < toolNames.size(); i += 200) {
-            var chunk = toolNames.subList(i, Math.min(i + 200, toolNames.size()));
-            n += JPA.em().createQuery("delete from AgentToolConfig c where c.toolName in :names")
-                    .setParameter("names", chunk)
-                    .executeUpdate();
-        }
-        return n;
+    /** The action within {@code serverName}; empty for the server-level handle. */
+    static String actionOf(String toolName, String serverName) {
+        var handle = McpServer.toolName(serverName, "");
+        return toolName.equals(handle) ? "" : toolName.substring(handle.length() + 1);
     }
 }

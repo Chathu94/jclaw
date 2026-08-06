@@ -339,32 +339,44 @@ class ApiToolsControllerTest extends FunctionalTest {
     // --- Bulk per-action cleanup delete (JCLAW-408) ---
 
     @Test
-    void bulkDeleteByToolNameInClauseRemovesOnlyNamedRows() {
-        // updateGroupForAgent's legacy-cleanup path issues one bulk
-        // AgentToolConfig.delete("... toolName IN (?2)", agent, names). Verify
-        // Hibernate expands the List-valued positional parameter inside IN (?2):
-        // only the named rows are removed; an unrelated row survives.
+    void bulkDeleteOfPerActionRowsSparesTheServerHandleAndNativeGrants() {
+        // updateGroupForAgent's legacy-cleanup path issues one bulk delete over the toggled
+        // server's per-action rows. Since JCLAW-983 those rows are addressed by
+        // (mcpServer, mcpAction) rather than by name, and the empty action that marks the
+        // server-level row is what keeps it out of the delete.
         login();
         var id = createAgent("bulk-delete-agent");
         Integer deleted = fetchInFreshTx(() -> {
             Agent agent = Agent.findById(id);
-            for (var n : java.util.List.of("mcp_jira_create", "mcp_jira_search", "keep_me")) {
+            var server = new models.McpServer();
+            server.name = "jira";
+            server.transport = models.McpServer.Transport.STDIO;
+            server.configJson = "{\"command\":\"true\",\"args\":[]}";
+            server.enabled = false;
+            server.save();
+            for (var action : java.util.List.of("", "create", "search")) {
                 var c = new AgentToolConfig();
                 c.agent = agent;
-                c.toolName = n;
+                c.mcpServer = server;
+                c.mcpAction = action;
                 c.enabled = true;
                 c.save();
             }
-            return AgentToolConfig.delete("agent = ?1 AND toolName IN (?2)",
-                    agent, java.util.List.of("mcp_jira_create", "mcp_jira_search"));
+            var keep = new AgentToolConfig();
+            keep.agent = agent;
+            keep.toolName = "keep_me";
+            keep.enabled = true;
+            keep.save();
+            return AgentToolConfig.delete("agent = ?1 AND mcpServer = ?2 AND mcpAction <> ''",
+                    agent, server);
         });
-        assertEquals(2, deleted.intValue(), "both named rows must be deleted in one statement");
-        Boolean survivorIntact = fetchInFreshTx(() -> {
+        assertEquals(2, deleted.intValue(), "both per-action rows must go in one statement");
+        Boolean survivorsIntact = fetchInFreshTx(() -> {
             Agent agent = Agent.findById(id);
-            return AgentToolConfig.findByAgentAndTool(agent, "mcp_jira_create") == null
-                    && AgentToolConfig.findByAgentAndTool(agent, "mcp_jira_search") == null
+            return AgentToolConfig.count("agent = ?1 AND mcpAction = ?2", agent, "") == 1
                     && AgentToolConfig.findByAgentAndTool(agent, "keep_me") != null;
         });
-        assertTrue(survivorIntact, "only the named rows are removed; the unrelated row survives");
+        assertTrue(survivorsIntact,
+                "the server-level row and the unrelated native row both survive");
     }
 }

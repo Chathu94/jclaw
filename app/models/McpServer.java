@@ -104,6 +104,21 @@ public class McpServer extends TimestampedModel {
     @Column(name = "last_disconnected_at")
     public Instant lastDisconnectedAt;
 
+    /**
+     * The registry tool name for {@code action} on the server named {@code serverName} —
+     * {@code mcp_<server>} for the server-level handle (empty or null action),
+     * {@code mcp_<server>_<action>} for one of its actions.
+     *
+     * <p>The flat-underscore form keeps the result a valid identifier across LLM tool-call
+     * schemas (some OpenAI-style schemas reject {@code .}). Derived from the name on every
+     * read rather than stored: JCLAW-983 keys a grant by {@link #id}, so the name a rename
+     * changes is display only.
+     */
+    public static String toolName(String serverName, String action) {
+        var handle = "mcp_" + serverName;
+        return action == null || action.isEmpty() ? handle : handle + "_" + action;
+    }
+
     public static List<McpServer> findEnabled() {
         return McpServer.find("enabled = true ORDER BY name").fetch();
     }

@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import io.swagger.v3.oas.annotations.Operation;
@@ -9,7 +10,6 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import mcp.McpConnectionManager;
-import mcp.McpGrants;
 import models.McpServer;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -150,10 +150,8 @@ public class ApiMcpServersController extends Controller {
             // Renamed. Disconnect under the old name FIRST so the registry
             // doesn't carry both. syncRuntime then connects under the new name.
             McpConnectionManager.stop(priorName);
-            // JCLAW-982: carry each agent's grants across with it. Without this the rename
-            // strands them under a handle nothing will ever emit again, and grants nothing
-            // under the new one — the single largest source of orphans observed live.
-            McpGrants.renameServer(priorName, row.name);
+            // No grant fix-up: JCLAW-983 keys them by this row's id, so the rename cannot
+            // strand any. Restoring one here would reintroduce the coupling it removed.
         }
         McpServerService.syncRuntime(row);
         renderJSON(gson.toJson(McpServerService.View.of(row)));
@@ -179,11 +177,11 @@ public class ApiMcpServersController extends Controller {
         // and emits MCP_TOOL_UNREGISTER. Doing it here means even a failed
         // row.delete() leaves the runtime clean.
         McpConnectionManager.stop(row.name);
-        // JCLAW-982: grants are keyed by the tool's name, which is built from the server's
-        // name, so nothing else drops them — stop() cannot, because it also runs on a
-        // disable or a rename and would revoke the operator's choices on a toggle.
-        McpGrants.deleteForServer(row.name);
         row.delete();
+        // The FK cascade takes this server's grant rows out from under Hibernate, which
+        // cannot know its per-agent disabled-tool sets are now stale. stop() clears them
+        // too, but only when the server was connected — a disabled one never reaches that.
+        ToolRegistry.clearDisabledToolsCache();
         ApiResponses.ok("deleted", true);
     }
 

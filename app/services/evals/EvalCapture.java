@@ -4,6 +4,7 @@ import agents.AgentExecutionSink;
 import agents.AgentRunner;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
+import mcp.McpGrants;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Task;
@@ -206,9 +207,7 @@ public final class EvalCapture {
         commitInFreshTx("calibrate", () -> {
             AgentToolConfig.delete("agent = ?1", agent);
             for (var tool : suite.requiredTools()) {
-                var config = new AgentToolConfig();
-                config.agent = agent;
-                config.toolName = tool;
+                var config = McpGrants.newRow(agent, tool);
                 config.enabled = true;
                 config.save();
             }

@@ -691,7 +691,9 @@ public class ToolRegistry {
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
         var explicitState = new HashMap<String, Boolean>();
-        for (var c : configs) explicitState.put(c.toolName, c.enabled);
+        // handle() derives an MCP row's name from the server it points at (JCLAW-983), so a
+        // renamed server's grants keep matching without a row ever being rewritten.
+        for (var c : configs) explicitState.put(c.handle(), c.enabled);
 
         var disabled = new HashSet<String>();
         for (var entry : explicitState.entrySet()) {
@@ -746,10 +748,10 @@ public class ToolRegistry {
      * MCP tools default-disabled for non-main agents (operator opts-in per
      * server via PUT /api/agents/:id/tool-groups/:group). MCP enablement is
      * server-level only: {@code updateGroupForAgent} writes a single
-     * {@link AgentToolConfig} row keyed by the server-level handle name
-     * ({@code mcp_<group>}) and the LLM's schema only exposes that handle,
-     * so there's no per-action bridging to do — every grouped tool without
-     * an explicit row gets added to {@code disabled}, full stop.
+     * {@link AgentToolConfig} row for the server with an empty action, and the
+     * LLM's schema only exposes the server-level handle, so there's no
+     * per-action bridging to do — every grouped tool without an explicit row
+     * gets added to {@code disabled}, full stop.
      */
     private static void addMcpDefaultDisabled(HashSet<String> disabled, HashMap<String, Boolean> explicitState) {
         for (var tool : tools.values()) {

@@ -6,6 +6,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.McpServer;
 import utils.GsonHolder;
 
 import java.util.ArrayList;
@@ -49,7 +50,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
 
     @Override
     public String name() {
-        return "mcp_" + serverName;
+        return McpServer.toolName(serverName, "");
     }
 
     @Override
@@ -170,8 +171,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
         // registry. The adapter carries the allowlist gate + audit trail,
         // so server-level invocations get the same JCLAW-32 safety
         // guarantees as legacy direct-action invocations.
-        var adapterName = "mcp_" + serverName + "_" + actionName;
-        var adapter = ToolRegistry.lookupTool(adapterName);
+        var adapter = ToolRegistry.lookupTool(McpServer.toolName(serverName, actionName));
         if (adapter == null) {
             // Tool not registered: server may not be connected, action may
             // be misspelled, or the server's tool list may have changed

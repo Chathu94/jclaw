@@ -53,7 +53,7 @@ public final class CascadeFkMigrator {
                              String parentTable, String parentColumn) {}
 
     /**
-     * The 25 ownership FKs JClaw relies on the cascade for (JCLAW-135). Every
+     * The 26 ownership FKs JClaw relies on the cascade for (JCLAW-135). Every
      * parent PK column is {@code ID}. Scoped deliberately: the migration touches
      * only these constraints and never any unrelated FK.
      */
@@ -68,6 +68,7 @@ public final class CascadeFkMigrator {
             new ForeignKey("AGENT_SKILL_ALLOWED_TOOL", AGENT_ID, AGENT, "ID"),
             new ForeignKey("AGENT_SKILL_CONFIG", AGENT_ID, AGENT, "ID"),
             new ForeignKey("AGENT_TOOL_CONFIG", AGENT_ID, AGENT, "ID"),
+            new ForeignKey("AGENT_TOOL_CONFIG", "MCP_SERVER_ID", "MCP_SERVER", "ID"),
             new ForeignKey("CHAT_MESSAGE_ATTACHMENT", "MESSAGE_ID", "MESSAGE", "ID"),
             new ForeignKey(CONVERSATION, AGENT_ID, AGENT, "ID"),
             new ForeignKey(CONVERSATION, "PARENT_CONVERSATION_ID", CONVERSATION, "ID"),
