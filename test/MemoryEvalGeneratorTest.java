@@ -168,7 +168,7 @@ class MemoryEvalGeneratorTest extends UnitTest {
                 writerReturning("q?", new ArrayList<>())).corpusFingerprint();
 
         assertNotSame(before, after);
-        assertFalse(before.equals(after), "a grown corpus must not report the old fingerprint");
+        assertNotEquals(before, after, "a grown corpus must not report the old fingerprint");
         assertTrue(before.startsWith("1:") && after.startsWith("2:"), before + " / " + after);
     }
 

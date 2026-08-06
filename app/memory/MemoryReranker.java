@@ -59,17 +59,17 @@ public final class MemoryReranker {
 
     private MemoryReranker() {}
 
-    /**
-     * Whether a rerank pass should run: enabled by config, or a test override
-     * is installed (the override implies "active" the same way
-     * {@code JpaMemoryStore.embedderOverride} implies canned embeddings).
-     */
     /** Config keys backing the Settings Memory panel's Reranker subsection. */
     public static final String KEY_PREFIX = "memory.rerank.";
     public static final String KEY_ENABLED = KEY_PREFIX + "enabled";
     public static final String KEY_PROVIDER = KEY_PREFIX + "provider";
     public static final String KEY_MODEL = KEY_PREFIX + "model";
 
+    /**
+     * Whether a rerank pass should run: enabled by config, or a test override
+     * is installed (the override implies "active" the same way
+     * {@code JpaMemoryStore.embedderOverride} implies canned embeddings).
+     */
     public static boolean active() {
         return rankCallOverride != null
                 || ConfigService.getBoolean(KEY_ENABLED, false);

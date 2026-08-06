@@ -90,10 +90,6 @@ public final class CoreMemoryCapMigration {
     private static volatile String lastErrorFor;
 
     /**
-     * What the Limits panel polls. {@code overCap} is what turns the button on, and is not
-     * derivable from {@code running} — a corpus can be over the cap with nothing in flight.
-     */
-    /**
      * What one agent's Memory card polls. {@code overCap} is what turns its button on, and
      * is not derivable from {@code running} — an agent can be over the cap with nothing in
      * flight.
