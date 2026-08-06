@@ -173,7 +173,7 @@ Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `G
 
 - JDK 25+ (Zulu recommended)
 - `play` command in PATH (custom fork: github.com/tsukhani/play1)
-- Node.js 20+
+- Node.js 22.19+ (the dev container ships 24; Nuxt's `engines` rejects Node 20)
 - pnpm
 
 

@@ -1,6 +1,6 @@
 # Settings
 
-The [Settings](/settings) page is the operator's control panel. Configuration is split into sections you reach from a grouped table-of-contents rail — **System**, **Providers**, **Audio**, **Image**, **Video**, **Agents & Automation**, and **Security** — and selecting a section shows just that panel. Most knobs apply live — sections that need a JVM restart say so inline.
+The [Settings](/settings) page is the operator's control panel. Configuration is split into sections you reach from a grouped table-of-contents rail — **System**, **Providers**, **Audio**, **Image**, **Video**, **Agents & Automation**, **Memory**, and **Security** — and selecting a section shows just that panel. Most knobs apply live — sections that need a JVM restart say so inline.
 
 This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
 
@@ -59,8 +59,10 @@ Cloud backends are disabled in the radio group until their underlying provider k
 
 Below the backend picker, a **Diarization** subsection covers the who-spoke-when pipeline (independent of the master transcription toggle, since the `diarize_audio` tool runs its own local pipeline):
 
-- **Diarization** — who-said-what transcripts are produced by an **audio-capable cloud chat model**: turn the subsection on, pick a provider (OpenAI or OpenRouter, using the API keys from LLM Providers) and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names. Ordinary voice-note transcription stays local (whisper) and works without any of this. A greyed-out **Local audio model (on-device)** option marks planned functionality: fully offline diarization will return once local audio models mature (JCLAW-656 tracks the survey and revival criteria).
-- **Emotion labels on diarized transcripts** — each diarized turn is tagged with how it was said (happy, sad, angry, disgust, fear, surprised or neutral), classified locally from the voice's tone by a multilingual emotion2vec+ model (~360 MB, downloads from Hugging Face on first use; holds up on non-English speech). Ordinary voice-note transcription is unaffected.
+- **Diarization** — who-said-what transcripts come from one of two providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
+  - **Audio-capable cloud chat model** — pick a provider (OpenAI or OpenRouter, using the API keys from LLM Providers) and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
+  - **On-device (`pyannote-local`)** — fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the cloud path remains the option when you need named speakers. The gated weights need a Hugging Face token — the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
+- **Emotion labels on diarized transcripts** — when the `diarize_audio` tool asks for them, each turn on the on-device path is tagged with how it was said (7 categories plus valence / arousal / dominance), classified locally from the voice's tone. The model is operator-selectable (`transcription.diarization.emotionModel`) from a fixed set: **MERaLiON-SER v1** (the default — multilingual, covering English, Chinese, Malay, Tamil and Indonesian), or one of two English-trained wav2vec2 alternatives. Match the model to your audio: the English models load fine on other languages but misclassify them. Best-effort — a failure returns turns without labels. Ordinary voice-note transcription is unaffected.
 
 ## Speech
 
@@ -227,6 +229,16 @@ Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIM
 
 Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
 
+## Printers
+
+The default printer the `printer` tool targets, and the job options that default carries. Per-agent enable/disable lives on the [Agents](/agents) page — printing is off for every agent until you turn it on. See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the tool itself.
+
+**Find printers** runs an mDNS browse of the local network and lists what answers; pick one to make it the default. Discovery is an explicit action rather than something the page does on open — a browse takes seconds, and opening Settings to change the timezone shouldn't pay for it. You can also enter a host and port directly, which is the fallback when mDNS is blocked (it's link-local, so VPNs and containers without a multicast route routinely drop it).
+
+A reachability badge probes the saved default and reports whether it still answers. This matters because a default outlives the DHCP lease it was saved under; without the probe the only symptom of a moved printer is a print that times out with no hint why.
+
+**Job options** are read from the selected printer, not from a list JClaw carries — the page offers `sides`, `media`, `copies`, quality and whatever else the device announces, with its own default preselected. Leave any of them blank to use the printer's default. Options are re-queried whenever you change the selected printer, so a device that reports one-sided-only never lets you save a duplex default it would have to reject.
+
 ## Skills Promotion
 
 LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that strips installation scripts and external network calls.
@@ -237,6 +249,35 @@ LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) pag
 | `skillsPromotion.model`            | (main agent's model)       | Model id paired with the above.                                               |
 | `skillsPromotion.timeoutSeconds`   | 180                        | Hard timeout for one sanitization pass (30–900 s).                            |
 | `skillsPromotion.batchSizeKb`      | 200                        | Source-text batch size sent to the LLM in one pass (10–1000 KB).              |
+
+## Memory: Limits
+
+How many memories reach the prompt. These two counts are the *only* bound on their blocks, so between them they decide memory's entire footprint in a turn — which is why they sit here rather than in the config table alone. Both count whole memories; a value below 1 disables that block.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `memory.coreload.maxCount` | 20 | Core memories auto-loaded at session start. |
+| `memory.recall.limit` | 10 | Memories recalled per turn. |
+
+## Memory: Embeddings
+
+Vector memory — recall finds a memory by meaning rather than wording, and capture recognizes a fact you already stored even when you phrase it differently. Off by default; with it off memory still works, falling back to keyword matching for both recall and duplicate detection.
+
+Enable the toggle, then pick a provider and model. **Only local providers are offered** — Ollama, LM Studio, or anything else with a local base URL. Embedding a memory sends its full text to the provider, so the model has to run on this machine for memory text never to leave it; the backend rejects a non-local provider even if the key is set directly through `POST /api/config`. If no local provider is configured the panel says so instead of listing models.
+
+Models are discovered live from the provider rather than read from the stored catalog, because embedding models generally aren't registered there. Saving is gated on a probe that confirms the model actually embeds and records its dimension. Changing the model later marks the corpus **needs re-embedding** and offers a re-embed action that rewrites existing vectors against the new model.
+
+## Memory: Reranker
+
+An optional second pass that re-orders the shortlist recall produced, before it reaches the prompt. Off by default.
+
+Restricted to local providers for the same reason embeddings are: the reranker renders the whole candidate shortlist into its prompt, so whatever serves it sees memory text.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `memory.rerank.enabled` | `false` | Turn the rerank pass on. |
+| `memory.rerank.provider` | (unset) | Local provider serving the rerank call. |
+| `memory.rerank.model` | (unset) | Model id paired with the above. |
 
 ## Shell Execution
 

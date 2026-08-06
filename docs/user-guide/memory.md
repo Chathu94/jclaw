@@ -62,27 +62,27 @@ The **Export** action downloads the currently filtered view as a JSON snapshot. 
 
 ## Tuning
 
-Day-to-day knobs (per-agent capture toggle, extractor model) live on the [Agents](/agents) page. The rest are server config keys with sensible defaults — they live in the config store (`POST /api/config`) rather than a [Settings](/settings) section:
+Day-to-day knobs (per-agent capture toggle, extractor model) live on the [Agents](/agents) page. The three memory sections under [Settings](/settings) › Memory cover the rest:
+
+- **Limits** — how many memories reach the prompt. `memory.coreload.maxCount` (default `20`) caps the core-memory block loaded at session start; `memory.recall.limit` (default `10`) caps the memories recalled per turn. These two counts are the *only* bound on their blocks, so between them they decide memory's whole footprint in a turn. Both are counts of whole memories — a value below 1 disables the block.
+- **Embeddings** — the vector-memory toggle plus its provider and model. See below.
+- **Reranker** — an optional second pass that re-orders the shortlist recall found, before it reaches the prompt (`memory.rerank.enabled`, `.provider`, `.model`; off by default).
+
+The remaining knobs have no Settings section and live in the config store (`POST /api/config`):
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `memory.coreload.enabled` | `true` | Auto-load `core` memories at session start. |
 | `memory.coreload.minImportance` | `0.8` | Importance floor for auto-load. |
-| `memory.coreload.maxCount` | `20` | Max core memories per session. |
-| `memory.coreload.tokenBudget` | `400` | Token cap on the core-memory block. |
-| `memory.recall.limit` | `10` | Max memories recalled per turn. |
 | `memory.autocapture.maxPerTurn` | `5` | Max memories captured from one turn. |
 | `memory.autocapture.maxTokens` | `1024` | Output budget for the extractor call. |
 | `memory.autocapture.dedup.threshold` | `0.85` | Similarity above which a candidate is a duplicate. |
 | `memory.autocapture.dedup.scanLimit` | `100` | Recent memories compared during dedup. |
 
-Vector search is opt-in via `conf/application.conf` (JVM restart required):
+Vector search is opt-in from **Settings › Memory › Embeddings** — the Vector memory toggle, then a provider and model. It is not a `conf/application.conf` edit and needs no restart; the keys (`memory.jpa.vector.enabled`, `.provider`, `.model`, `.dimensions`) live in the config store like any other setting.
 
-```properties
-memory.jpa.vector.enabled=true
-memory.jpa.vector.provider=openai
-memory.jpa.vector.model=text-embedding-3-small
-memory.jpa.vector.dimensions=1536
-```
+**The provider must be a local one** — Ollama, LM Studio, or anything else with a local base URL. Embedding a memory sends its full text to the provider, and reranking renders the whole candidate shortlist into a prompt, so both are restricted to a model running on this machine and memory text never leaves it. The picker lists only local providers, and the backend rejects a non-local value even if the key is set directly. Models are discovered live from the provider, because embedding models are usually absent from the stored catalog.
 
-When the embedding provider is unavailable, recall degrades gracefully to keyword-only — memory never blocks the agent.
+Save is gated on a probe (**Check the model before saving**) that confirms the model embeds and records its dimension. Changing the model afterwards marks the corpus **needs re-embedding**, with a re-embed action that rewrites the existing vectors against the new model.
+
+When the embedding provider is unavailable, recall degrades gracefully to keyword-only — memory never blocks the agent. The same is true with vector memory off entirely: recall and duplicate detection fall back to keyword matching.

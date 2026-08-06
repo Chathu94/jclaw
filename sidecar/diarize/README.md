@@ -13,6 +13,8 @@ that's the ASR sidecar's job.
 |---|---|---|
 | GET | `/health` | → `{status, model, loaded}` |
 | POST | `/diarize` | `{audio_path, num_speakers?, emotions?}` → `{turns: [{startMs, endMs, speaker, emotion?}, ...]}` (`emotions=true` runs a MERaLiON-SER pass per turn — best-effort) |
+| GET | `/diarize/models?ids=repo1,repo2` | → per-repo cached/bytesOnDisk download status (pyannote + the operator's SER model) for the Settings page |
+| POST | `/diarize/prefetch` | `{model}` (an HF repo) → kicks a **detached** download and returns immediately, so `/diarize/models` keeps reporting live progress |
 | POST | `/shutdown` | graceful exit (JVM shutdown hook) |
 
 The audio file is passed **by path** (same host; attachments are already on

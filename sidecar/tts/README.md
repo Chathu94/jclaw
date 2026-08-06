@@ -1,7 +1,7 @@
 # TTS sidecar (JCLAW-789)
 
 Text-to-speech worker for jclaw's read-aloud / voice mode. `serve.py` is a
-stdlib HTTP supervisor (`POST /synthesize`, `GET /health`) that shells each
+stdlib HTTP supervisor (`POST /synthesize`, `GET /health`, `POST /shutdown`) that shells each
 request to a persistent PEP-723 worker (`synth.py --worker`) over a stdin/stdout
 JSON line protocol, so the model loads once. The Java side (`app/services/tts/`)
 drives it via `TtsSidecarClient` → `TtsSidecarManager` (default port 9531).

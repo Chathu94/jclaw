@@ -3,9 +3,12 @@
 Lifecycle-owned by `services.transcription.AsrSidecarManager`. GPU speech
 recognition for jclaw — the ingest transcript behind every uploaded audio
 attachment (search, previews, and the text a non-audio chat model sees).
-Local speaker diarization was removed in JCLAW-654 after the measured tier
-comparison; speaker attribution now runs through an audio-capable cloud
-chat model (the `diarize_audio` tool). Missing prerequisites surface as
+Speaker diarization was removed from *this* sidecar in JCLAW-654 after the
+measured tier comparison. Speaker attribution now runs through the
+`diarize_audio` tool, on either of two paths: an audio-capable cloud chat
+model, or the separate on-device `sidecar/diarize` (pyannote, the JCLAW-565
+revival), whose turns are fused with this sidecar's transcript. Missing
+prerequisites surface as
 actionable errors — nothing silently degrades (the JCLAW-614 pattern,
 matching the image/video sidecar architecture).
 
@@ -14,7 +17,7 @@ matching the image/video sidecar architecture).
 | Method | Path | Body → Response |
 |---|---|---|
 | GET | `/health` | → `{status, model, loaded}` |
-| POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — mlx-whisper (Apple silicon) / faster-whisper (CUDA, CPU int8), persistent worker in its own uv script env (JCLAW-627/650) |
+| POST | `/transcribe` | `{audio_path, model, language?}` → `{segments: [{startMs, endMs, text}...]}` — `model` selects the engine (see below); persistent worker in its own uv script env (JCLAW-627/650) |
 | GET | `/asr/models?ids=a,b` | → per-model cached/bytesOnDisk/engine status for the Settings page |
 | POST | `/asr/prefetch` | `{model}` → downloads the host engine's weights ahead of use |
 | POST | `/shutdown` | graceful exit (JVM shutdown hook) |
@@ -23,11 +26,37 @@ The audio file is passed **by path** (same host; attachments are already on
 disk). One inference at a time; concurrent callers get `409` and queue on
 the JVM-wide fair lock.
 
+## Engines
+
+`serve.py` routes on the requested model id — the `MERALION_HF` map decides,
+everything not in it is Whisper. The two engines live in separate PEP 723
+script envs (MERaLiON pins `transformers==4.50.1`, which the model requires)
+so they never share a venv.
+
+| Engine | Model ids | How it produces segments |
+|---|---|---|
+| **Whisper** (default) | `tiny`…`large` variants | mlx-whisper on Apple silicon, faster-whisper (CTranslate2) on CUDA / CPU int8. Emits segment times natively. |
+| **MERaLiON** | `meralion-3-3b` → `MERaLiON/MERaLiON-3-3B-ASR` | A Southeast-Asia-tuned speech LLM (`meralion.py`). Produces a **plain transcript with no timestamps**, so it is paired with forced alignment (`align.py`) to recover the segment times Whisper gives for free. |
+
+**MERaLiON pipeline.** Audio is transcoded to 16 kHz mono, then silero-VAD
+extracts speech regions (≤30 s each, the window the model was trained on) and
+only those are transcribed. Dropping the silence is what stops the model
+hallucinating — it fabricates text, often in another language, on silent tails.
+GPU when available (CUDA/MPS), else CPU.
+
+**Forced alignment** (`align.py`) maps each transcript word back onto the audio
+with torchaudio's MMS multilingual aligner, then re-groups words into
+pause-delimited segments — re-imposing the pause structure the segment-level
+diarization fusion keys on (per-word fusion measured noisier). It also drops
+silence-hallucinated words, which have no acoustic evidence to align to. CPU by
+design: MMS is small and fast.
+
 ## Requirements
 
 - `uv` on PATH (shared prerequisite with the image/video sidecars). That is
   the ONLY prerequisite — whisper weights are ungated, no Hugging Face
-  token needed.
+  token needed. The MERaLiON weights are ungated too.
+- `ffmpeg` on PATH for the MERaLiON path (16 kHz mono transcode before VAD).
 - First launch resolves the Python env (mlx-whisper or faster-whisper) and
   downloads the selected model's weights into `data/asr-models` on first
   use (or ahead of time via the Settings page).
@@ -35,6 +64,8 @@ the JVM-wide fair lock.
 ## Licenses / attribution
 
 - ASR: [mlx-whisper](https://github.com/ml-explore/mlx-examples) (MIT) on Apple silicon; [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (MIT) elsewhere — OpenAI Whisper weights (MIT), same as whisper.cpp (JCLAW-627).
+- MERaLiON: [`MERaLiON/MERaLiON-3-3B-ASR`](https://huggingface.co/MERaLiON/MERaLiON-3-3B-ASR) — **not MIT**; ships under the MERaLiON Public License (the same license family flagged in `sidecar/diarize/README.md` for MERaLiON-SER). Check the model card's commercial terms before a paid-edition ship.
+- Forced alignment: torchaudio MMS multilingual aligner (part of [torchaudio](https://github.com/pytorch/audio), BSD-2-Clause).
 
 ## Running by hand (debugging)
 
