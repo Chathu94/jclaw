@@ -108,7 +108,15 @@ public class MessageAttachment extends Model {
     /** JCLAW-234: links a generated-video placeholder to its {@code VideoGenerationJob} (JCLAW-230) so the
      *  runner can fill it on completion and the chat UI can poll the job's progress. Null for every
      *  uploaded / non-video attachment. Nullable, so the ALTER is safe on the populated table without a
-     *  {@code @ColumnDefault} (only NOT NULL adds need one). */
+     *  {@code @ColumnDefault} (only NOT NULL adds need one).
+     *
+     *  <p>A plain id rather than a foreign key (JCLAW-984), the mirror of
+     *  {@code VideoGenerationJob#resultAttachmentId}. Neither side owns the other: the job is owned by
+     *  its agent and conversation, this row by its message, and both chains cascade from the same
+     *  conversation — so the pair is normally deleted together and a constraint would buy nothing. What
+     *  it would cost is real: this class is mapped {@code cascade = ALL, orphanRemoval = true} on
+     *  {@code Message.attachments}, so an association across this link fails the flush with
+     *  {@code TransientPropertyValueException} before any {@code ON DELETE} rule is consulted. */
     @Column(name = "generation_job_id")
     public Long generationJobId;
 

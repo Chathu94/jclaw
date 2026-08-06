@@ -143,6 +143,9 @@ class UnconstrainedParentRefCascadeTest extends UnitTest {
         assertNull(deleteRule("VIDEO_GENERATION_JOB", "RESULT_ATTACHMENT_ID"),
                 "a job's result pointer is not ownership, and Message.attachments is mapped "
                         + "orphanRemoval=true, so a managed association here breaks the flush");
+        assertNull(deleteRule("CHAT_MESSAGE_ATTACHMENT", "GENERATION_JOB_ID"),
+                "the mirror of the same link, and unconstrained for the same reason — neither the "
+                        + "job nor the attachment owns the other, and both cascade from the conversation");
     }
 
     @Test
