@@ -102,6 +102,11 @@ public final class LocalSidecarDaemon {
      *  Volatile so the {@link #awaitHealthy()} poll can read it lock-free. */
     private volatile long stopGeneration;
 
+    /** The sidecar entry point. Shared so the spawn command and
+     *  {@link #argvIdentifiesSidecar} cannot drift apart — a rename that missed the
+     *  matcher would leave the reaper silently never matching anything again. */
+    private static final String SERVE_SCRIPT = "serve.py";
+
     private volatile Process process;
     private volatile Thread outDrain;
     private volatile Thread errDrain;
@@ -206,14 +211,14 @@ public final class LocalSidecarDaemon {
 
     private void spawnNow(String model, String hfToken) {
         var sidecarDir = new File(Play.applicationPath, cfg.sidecarSubdir());
-        var serve = new File(sidecarDir, "serve.py");
+        var serve = new File(sidecarDir, SERVE_SCRIPT);
         if (!serve.isFile()) {
             throw cfg.fail().apply(
                     "%s script not found at %s".formatted(cfg.displayName(), serve.getAbsolutePath()), null);
         }
         reapOrphanedSquatter();
         int idleMin = ConfigService.getInt(cfg.configPrefix() + ".idleTimeoutMinutes", 15);
-        var cmd = List.of("uv", "run", "serve.py",
+        var cmd = List.of("uv", "run", SERVE_SCRIPT,
                 "--host", "127.0.0.1",
                 "--port", String.valueOf(port()),
                 "--model", model,
@@ -406,7 +411,7 @@ public final class LocalSidecarDaemon {
         boolean onPort = false;
         boolean ourCache = false;
         for (int i = 0; i < args.length; i++) {
-            if (args[i].endsWith("serve.py")) {
+            if (args[i].endsWith(SERVE_SCRIPT)) {
                 serve = true;
             } else if ("--port".equals(args[i]) && i + 1 < args.length) {
                 onPort |= args[i + 1].equals(String.valueOf(port));
