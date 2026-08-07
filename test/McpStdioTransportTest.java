@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -138,6 +139,35 @@ class McpStdioTransportTest extends UnitTest {
         // close() must not throw and must not surface a spurious onError for the EOF.
         Thread.sleep(100);
         assertNull(error.get(), "EOF after explicit close must not surface as error");
+    }
+
+    @Test
+    void closeDoesNotInterruptTheReaderMidDispatch() throws Exception {
+        // JCLAW-752: destroying the process and closing the streams is what
+        // unblocks the reader — an interrupt cannot. Interrupting it only lands
+        // the flag on whatever the dispatch is doing at the time, and an
+        // onMessage handler mid-DB-write takes that as an NIO channel close.
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var interrupted = new AtomicBoolean(false);
+        transport.start(msg -> {
+            received.add(msg);
+            entered.countDown();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                interrupted.set(true);
+                Thread.currentThread().interrupt();
+            }
+        }, error::set);
+
+        transport.send(new JsonRpc.Request(1L, "ping", null));
+        assertTrue(entered.await(5, TimeUnit.SECONDS), "ping response must reach the handler");
+
+        transport.close();
+        Thread.sleep(200);  // an interrupt fired by close() would have landed by now
+        release.countDown();
+        assertFalse(interrupted.get(), "close() must not interrupt the reader mid-dispatch");
     }
 
     @Test

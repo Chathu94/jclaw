@@ -93,4 +93,19 @@ class LuceneIndexerTest extends UnitTest {
         assertEquals(1, hits.size(), "new content must match the same id exactly once, not duplicated");
         assertEquals(Long.valueOf(99L), hits.getFirst());
     }
+
+    @Test
+    void closeStopsTheCommitSchedulerAndKeepsUncommittedWritesDurable() throws Exception {
+        // JCLAW-752: close() now shuts the periodic-commit daemon down and waits
+        // for an in-flight commit instead of interrupting it mid-fsync. The
+        // observable contract either way is that nothing buffered is lost across
+        // the shutdown and the next open() re-reads it from disk.
+        LuceneIndexer.upsert(SCOPE, 4242L, "shutdownsurvivortoken");
+        LuceneIndexer.close();
+        assertFalse(LuceneIndexer.isOpen(), "close() must publish the closed state");
+
+        LuceneIndexer.open();
+        assertEquals(1, repo.searchIds(SCOPE, "shutdownsurvivortoken", 10).size(),
+                "close() must commit the in-RAM segment, not abandon it");
+    }
 }

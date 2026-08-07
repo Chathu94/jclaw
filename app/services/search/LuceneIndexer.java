@@ -188,10 +188,7 @@ public final class LuceneIndexer {
             // mid-loop failure leaves writers holding FS locks and the
             // next open() can't grab them. Closes the local maps directly —
             // they may or may not have been published above.
-            if (commitScheduler != null) {
-                commitScheduler.shutdownNow();
-                commitScheduler = null;
-            }
+            stopCommitScheduler();
             closeMaps(newSearchers, newWriters);
             writers = Map.of();
             searchers = Map.of();
@@ -208,6 +205,24 @@ public final class LuceneIndexer {
         });
         commitScheduler.scheduleWithFixedDelay(
                 LuceneIndexer::commitAll, interval, interval, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Stop the periodic-commit daemon, giving an in-flight {@link #commitAll} a
+     * bounded window to finish. {@code shutdownNow} alone interrupts it mid-fsync,
+     * and the JDK answers an interrupt during a blocked channel op by closing the
+     * channel — a tragic {@code IndexWriter} error. Forced only on timeout.
+     */
+    private static void stopCommitScheduler() {
+        if (commitScheduler == null) return;
+        commitScheduler.shutdown();
+        try {
+            if (!commitScheduler.awaitTermination(5, TimeUnit.SECONDS)) commitScheduler.shutdownNow();
+        } catch (InterruptedException _) {
+            commitScheduler.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        commitScheduler = null;
     }
 
     private static long commitIntervalSeconds() {
@@ -281,10 +296,7 @@ public final class LuceneIndexer {
         // doesn't fire a commit into a half-closed writer. IndexWriter.close()
         // below flushes and commits any segments buffered since the last
         // cadence tick, so durability is preserved across the shutdown.
-        if (commitScheduler != null) {
-            commitScheduler.shutdownNow();
-            commitScheduler = null;
-        }
+        stopCommitScheduler();
         closeMaps(searchers, writers);
         // Republish empty snapshots so isOpen()/lookups observe the closed state.
         searchers = Map.of();

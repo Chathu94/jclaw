@@ -6,8 +6,11 @@ import services.SubagentRegistry;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * In-memory state-transition coverage for {@link SubagentRegistry} (JCLAW-707).
@@ -157,9 +160,35 @@ class SubagentRegistryStateTest extends UnitTest {
         var id = reg(707_1011L, cf);
         assertTrue(SubagentRegistry.scheduleYieldTimeout(id, 60),
                 "a live CompletableFuture + positive timeout arms the watchdog");
-        // Complete it now so the watchdog VT observes isDone() and exits without
+        // Complete it now so the watchdog observes isDone() and exits without
         // firing a synthetic timeout during the suite.
         cf.complete(null);
+    }
+
+    @Test
+    void unregisterDisarmsAPendingYieldTimeout() throws Exception {
+        var cf = new CompletableFuture<>();
+        var id = reg(707_1013L, cf);
+        assertTrue(SubagentRegistry.scheduleYieldTimeout(id, 1));
+
+        SubagentRegistry.unregister(id);
+        Thread.sleep(1_500);  // well past the 1 s budget
+
+        assertFalse(cf.isDone(),
+                "a subagent that returned before its yield budget must leave no armed watchdog");
+    }
+
+    @Test
+    void armedYieldTimeoutCompletesTheFutureExceptionally() {
+        // Known-zero guard for the test above: proves the watchdog still fires
+        // when the run is NOT unregistered, so a no-op scheduler couldn't pass both.
+        var cf = new CompletableFuture<>();
+        var id = reg(707_1014L, cf);
+        assertTrue(SubagentRegistry.scheduleYieldTimeout(id, 1));
+
+        var thrown = assertThrows(ExecutionException.class, () -> cf.get(5, TimeUnit.SECONDS));
+        assertInstanceOf(TimeoutException.class, thrown.getCause(),
+                "the watchdog completes the future with a synthetic TimeoutException");
     }
 
     // ─── DB-free null guards on the scoping helpers ──────────────────────────

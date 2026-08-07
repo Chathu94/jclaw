@@ -4,6 +4,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
@@ -32,6 +33,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Owner of all live MCP server connections (JCLAW-31).
@@ -338,7 +340,8 @@ public final class McpConnectionManager {
 
         McpTransport transport;
         try {
-            transport = buildTransport(server);
+            transport = withDisconnectHook(buildTransport(server), server.name,
+                    () -> handleDisconnect(entry, server));
         } catch (RuntimeException e) {
             handleFailure(entry, server, attempt, "transport build failed: " + e.getMessage());
             signalFirstAttemptResolved(entry, attempt);
@@ -389,11 +392,10 @@ public final class McpConnectionManager {
             persistTimestamp(server.id, "lastConnectedAt");
             EventLogger.info(CATEGORY_CONNECT,
                     "MCP server '%s' connected (%d tools)".formatted(server.name, client.tools().size()));
-            // Watch for transport-driven disconnects: after connect returns,
-            // the McpClient runs READY until either close() or transport
-            // error trips it back to DISCONNECTED. Spawn a tiny watchdog VT
-            // that polls the state and reconnects when it changes.
-            startWatchdog(entry, server);
+            // An error that beat the CONNECTED publish above found the hook's
+            // guard closed, so it skipped the teardown and left a dead
+            // connection marked CONNECTED.
+            if (client.state() != McpClient.State.READY) handleDisconnect(entry, server);
             signalFirstAttemptResolved(entry, attempt);
         } catch (Exception e) {
             try { client.close(); } catch (RuntimeException _) {}
@@ -412,37 +414,66 @@ public final class McpConnectionManager {
         if (future != null && !future.isDone()) future.complete(null);
     }
 
-    private static void startWatchdog(Entry entry, McpServer server) {
-        Thread.ofVirtual().name("mcp-watchdog-" + server.name).start(() -> {
-            var client = entry.client;
-            try {
-                while (client != null && client.state() == McpClient.State.READY
-                        && connections.get(server.name) == entry) {
-                    Thread.sleep(250);
-                }
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                return;
+    /**
+     * Wrap a transport so {@code hook} runs once the client has finished
+     * processing an unrecoverable transport error. That error path and
+     * manager-driven {@code close()} are the only two ways a client leaves
+     * READY, so this sees every disconnect a state poll would have. The hook
+     * gets its own VT: the caller is the transport's reader thread.
+     */
+    private static McpTransport withDisconnectHook(McpTransport delegate, String serverName, Runnable hook) {
+        return new McpTransport() {
+            @Override
+            public void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) throws IOException {
+                delegate.start(onMessage, error -> {
+                    onError.accept(error);
+                    Thread.ofVirtual().name("mcp-disconnect-" + serverName).start(hook);
+                });
             }
-            // Reached here because state changed off READY OR entry was replaced/stopped.
-            if (connections.get(server.name) != entry) return;  // we were stopped or replaced
-            if (client.state() == McpClient.State.READY) return;  // false alarm
 
-            ToolRegistry.unpublishExternal(server.name);
-            clearAllowlistAndAudit(server.name);
-            EventLogger.warn(CATEGORY_DISCONNECT,
-                    "MCP server '%s' disconnected: %s".formatted(server.name, client.lastError()));
+            @Override
+            public void send(JsonRpc.Message msg) throws IOException {
+                delegate.send(msg);
+            }
+
+            @Override
+            public void close() {
+                delegate.close();
+            }
+        };
+    }
+
+    /**
+     * Tear a dead connection down and re-arm the backoff loop. The CONNECTED
+     * guard under the entry monitor admits exactly one teardown per connect
+     * cycle, so the transport-error hook and {@link #doConnect}'s post-publish
+     * re-check cannot start two competing backoff chains for one entry.
+     */
+    private static void handleDisconnect(Entry entry, McpServer server) {
+        McpClient client;
+        synchronized (entry) {
+            // Identity, not presence: an admin toggle/delete replaces the entry
+            // under the same name, and this orphan must not unpublish the live
+            // replacement's tools or clobber its row.
+            if (connections.get(server.name) != entry) return;
+            if (entry.status != McpServer.Status.CONNECTED) return;  // already torn down, or not yet published
+            client = entry.client;
+            if (client == null || client.state() == McpClient.State.READY) return;  // false alarm
             entry.status = McpServer.Status.DISCONNECTED;
-            entry.lastError = client.lastError();
-            persistStatus(server.id, McpServer.Status.DISCONNECTED, client.lastError());
-            persistTimestamp(server.id, TIMESTAMP_LAST_DISCONNECTED);
-            // Re-verify identity after the teardown above: an admin toggle/delete
-            // could have replaced this entry between the initial guard and here.
-            // Rescheduling an orphan would race the live replacement's own
-            // backoff loop against the same server name.
-            if (connections.get(server.name) != entry) return;  // stopped or replaced during teardown
-            scheduleConnect(entry, server, entry.attempts + 1);
-        });
+        }
+        ToolRegistry.unpublishExternal(server.name);
+        clearAllowlistAndAudit(server.name);
+        EventLogger.warn(CATEGORY_DISCONNECT,
+                "MCP server '%s' disconnected: %s".formatted(server.name, client.lastError()));
+        entry.lastError = client.lastError();
+        persistStatus(server.id, McpServer.Status.DISCONNECTED, client.lastError());
+        persistTimestamp(server.id, TIMESTAMP_LAST_DISCONNECTED);
+        // Re-verify identity after the teardown above: an admin toggle/delete
+        // could have replaced this entry between the initial guard and here.
+        // Rescheduling an orphan would race the live replacement's own
+        // backoff loop against the same server name.
+        if (connections.get(server.name) != entry) return;  // stopped or replaced during teardown
+        scheduleConnect(entry, server, entry.attempts + 1);
     }
 
     private static void handleFailure(Entry entry, McpServer server, int attempt, String error) {

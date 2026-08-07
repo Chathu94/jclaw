@@ -40,8 +40,6 @@ public final class McpStdioTransport implements McpTransport {
     private Process process;
     private BufferedWriter stdin;
     private BufferedReader stdout;
-    private Thread readerThread;
-    private Thread errReaderThread;
     private Consumer<JsonRpc.Message> onMessage;
     private Consumer<Throwable> onError;
     private volatile boolean closed;
@@ -69,8 +67,8 @@ public final class McpStdioTransport implements McpTransport {
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
         stdout = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
         var stderr = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8));
-        readerThread = Thread.ofVirtual().name("mcp-stdio-" + name).start(this::readLoop);
-        errReaderThread = Thread.ofVirtual().name("mcp-stderr-" + name).start(() -> drainStderr(stderr));
+        Thread.ofVirtual().name("mcp-stdio-" + name).start(this::readLoop);
+        Thread.ofVirtual().name("mcp-stderr-" + name).start(() -> drainStderr(stderr));
     }
 
     @Override
@@ -109,8 +107,6 @@ public final class McpStdioTransport implements McpTransport {
                 process.destroyForcibly();
             }
         }
-        if (readerThread != null) readerThread.interrupt();
-        if (errReaderThread != null) errReaderThread.interrupt();
         try { if (stdout != null) stdout.close(); } catch (IOException _) { /* best effort */ }
     }
 

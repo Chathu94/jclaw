@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
@@ -69,6 +70,14 @@ class McpConnectionManagerTest extends UnitTest {
      *  tools/list always lands first. */
     private static final String DIES_AFTER_HANDSHAKE_SCRIPT =
             FIXTURE_SCRIPT + "setTimeout(() => process.exit(0), 300);\n";
+
+    /** Handshakes normally, then exits the instant a {@code die} tool call arrives.
+     *  Lets a test time disconnect detection from a known instant rather than
+     *  guessing when the subprocess died. */
+    private static final String DIES_ON_TOOL_CALL_SCRIPT = FIXTURE_SCRIPT.replace(
+            "if (m.method === 'tools/call') {",
+            "if (m.method === 'tools/call' && m.params.name === 'die') { process.exit(0); }"
+                    + " else if (m.method === 'tools/call') {");
 
     private Path fixturePath;
 
@@ -206,6 +215,43 @@ class McpConnectionManagerTest extends UnitTest {
         // Known-zero guard: without a single non-CONNECTED sample the loop above
         // asserted nothing, and a vacuous pass would read as coverage.
         assertTrue(sawNotConnected, "fixture should have died at least once");
+    }
+
+    @Test
+    void disconnectDetectionIsEventDrivenNotPolled() throws Exception {
+        // JCLAW-752: the watchdog used to be a VT per server parked in
+        // Thread.sleep(250) polling client.state(), so detection landed a uniform
+        // 0-250 ms after the server died — under 60 ms roughly one death in four.
+        // The transport-error callback lands in single-digit ms every time, so a
+        // 6-of-8 quorum discriminates the two sharply while still absorbing a
+        // couple of scheduling hiccups on a loaded box.
+        var server = seedStdioServer("dies", DIES_ON_TOOL_CALL_SCRIPT);
+        McpConnectionManager.connect(server);
+
+        var prompt = 0;
+        var latencies = new ArrayList<Long>();
+        for (var cycle = 0; cycle < 8; cycle++) {
+            awaitState("dies", McpServer.Status.CONNECTED, 10);
+            var killedAt = System.nanoTime();
+            // The fixture exits without answering, so the in-flight call fails as
+            // the transport dies — that failure is our zero point.
+            assertThrows(Exception.class,
+                    () -> McpConnectionManager.callTool("dies", "die", new JsonObject()));
+            var deadline = System.currentTimeMillis() + 3_000;
+            while (McpConnectionManager.status("dies") == McpServer.Status.CONNECTED
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(1);
+            }
+            assertNotEquals(McpServer.Status.CONNECTED, McpConnectionManager.status("dies"),
+                    "cycle " + cycle + ": the manager never noticed the dead server");
+            var millis = (System.nanoTime() - killedAt) / 1_000_000L;
+            latencies.add(millis);
+            if (millis < 60) prompt++;
+        }
+
+        assertTrue(prompt >= 6,
+                "disconnect must land on the transport-error callback, not a poll tick; "
+                        + "only " + prompt + "/8 deaths were noticed within 60 ms " + latencies);
     }
 
     /** Status and tools are two reads, so one disagreeing sample can be an

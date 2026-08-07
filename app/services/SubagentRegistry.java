@@ -3,13 +3,16 @@ package services;
 import models.Agent;
 import models.SubagentRun;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -95,6 +98,20 @@ public final class SubagentRegistry {
      */
     private static final Map<Long, AutoCloseable> HARNESS_CLOSERS = new ConcurrentHashMap<>();
 
+    /** Shared timer backing {@link #scheduleYieldTimeout}. Daemon PLATFORM thread,
+     *  not a VT per yield: a watchdog parks for its whole budget, and per
+     *  JDK-8373224 many VTs parked in {@link Thread#sleep} starve the FJP carriers. */
+    private static final ScheduledExecutorService YIELD_TIMERS =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                var t = new Thread(r, "subagent-yield-watchdog");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** Armed yield watchdogs by runId, so {@link #unregister} can disarm one
+     *  whose subagent finished before its budget elapsed. */
+    private static final Map<Long, ScheduledFuture<?>> YIELD_TIMEOUTS = new ConcurrentHashMap<>();
+
     /** Register the VT-bearing Future under {@code runId}. Called by the
      *  spawn path right after dispatching the VT. The cancellation flag is
      *  allocated here so {@link #isCancelled} works the instant the entry
@@ -153,6 +170,15 @@ public final class SubagentRegistry {
     public static void unregister(Long runId) {
         if (runId == null) return;
         ACTIVE.remove(runId);
+        cancelYieldTimeout(runId);
+    }
+
+    /** Disarm the pending yield watchdog for {@code runId}, if any. Never
+     *  {@code cancel(true)}: a watchdog already inside its callback is
+     *  completing a future, and this class does not interrupt running work. */
+    private static void cancelYieldTimeout(Long runId) {
+        var timer = YIELD_TIMEOUTS.remove(runId);
+        if (timer != null) timer.cancel(false);
     }
 
     /**
@@ -218,6 +244,7 @@ public final class SubagentRegistry {
         ACTIVE.clear();
         HARNESS_PROCS.clear();
         HARNESS_CLOSERS.clear();
+        YIELD_TIMEOUTS.keySet().forEach(SubagentRegistry::cancelYieldTimeout);
     }
 
     /**
@@ -417,12 +444,16 @@ public final class SubagentRegistry {
     }
 
     /**
-     * JCLAW-326: arm a watchdog VT that fires a synthetic
+     * JCLAW-326: arm a watchdog on the shared timer that fires a synthetic
      * {@link TimeoutException} into the in-flight future after
      * {@code timeoutSeconds} elapse, so the async-spawn await wakes up and
      * the parent's logical turn resumes with a TIMEOUT announce instead of
      * parking for the spawn-time budget. Called by
      * {@code subagent_yield} after the yield is installed.
+     *
+     * <p>{@link #unregister} disarms it, so a subagent that returns before its
+     * budget leaves nothing pending; re-arming for the same run replaces the
+     * prior watchdog.
      *
      * <p>Only the {@link CompletableFuture} half of the registered Future is
      * accepted as a target — the future must support
@@ -441,18 +472,14 @@ public final class SubagentRegistry {
         if (entry == null) return false;
         var future = entry.future();
         if (!(future instanceof CompletableFuture<?> cf) || cf.isDone()) return false;
-        Thread.ofVirtual().name("yield-watchdog-" + runId).start(() -> {
-            try {
-                Thread.sleep(Duration.ofSeconds(timeoutSeconds));
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                return;
-            }
+        var timer = YIELD_TIMERS.schedule(() -> {
             if (!cf.isDone()) {
                 cf.completeExceptionally(new TimeoutException(
                         "Yield timeout after " + timeoutSeconds + "s"));
             }
-        });
+        }, timeoutSeconds, TimeUnit.SECONDS);
+        var prior = YIELD_TIMEOUTS.put(runId, timer);
+        if (prior != null) prior.cancel(false);
         return true;
     }
 
