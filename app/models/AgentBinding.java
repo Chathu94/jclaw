@@ -41,10 +41,14 @@ public class AgentBinding extends Model {
     public int priority = 0;
 
     public static AgentBinding findByChannelAndPeer(String channelType, String peerId) {
-        return AgentBinding.find("channelType = ?1 AND peerId = ?2", channelType, peerId).first();
+        return AgentBinding.find(
+                "channelType = ?1 AND peerId = ?2 ORDER BY priority DESC, id ASC",
+                channelType, peerId).first();
     }
 
     public static AgentBinding findByChannel(String channelType) {
-        return AgentBinding.find("channelType = ?1 AND peerId IS NULL", channelType).first();
+        return AgentBinding.find(
+                "channelType = ?1 AND peerId IS NULL ORDER BY priority DESC, id ASC",
+                channelType).first();
     }
 }

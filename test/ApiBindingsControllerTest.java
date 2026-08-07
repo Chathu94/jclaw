@@ -363,4 +363,57 @@ class ApiBindingsControllerTest extends FunctionalTest {
         var r = DELETE("/api/bindings/999999");
         assertEquals(404, r.status.intValue());
     }
+
+    // ==========================================================
+    // Resolution order — AgentRouter routes every inbound channel
+    // message through these two finders, so the priority this
+    // controller persists has to decide which binding wins.
+    // ==========================================================
+
+    /** Run a finder on a fresh tx, since the seeds committed on other threads. */
+    private static String resolvedAgentName(java.util.function.Supplier<AgentBinding> finder) {
+        var holder = new java.util.concurrent.atomic.AtomicReference<String>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    var b = finder.get();
+                    holder.set(b == null ? null : b.agent.name);
+                });
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return holder.get();
+    }
+
+    @Test
+    void peerResolutionPicksHighestPriorityBinding() {
+        var lowId = seedAgent("low");
+        var highId = seedAgent("high");
+        // Seeded low-first so insertion order and priority order disagree.
+        seedBinding(lowId, "telegram", "shared-peer", 0);
+        seedBinding(highId, "telegram", "shared-peer", 7);
+
+        assertEquals("high", resolvedAgentName(
+                () -> AgentBinding.findByChannelAndPeer("telegram", "shared-peer")));
+    }
+
+    @Test
+    void channelWideResolutionPicksHighestPriorityBinding() {
+        var lowId = seedAgent("low");
+        var highId = seedAgent("high");
+        seedBinding(lowId, "web", null, 0);
+        seedBinding(highId, "web", null, 4);
+
+        assertEquals("high", resolvedAgentName(
+                () -> AgentBinding.findByChannel("web")));
+    }
 }
