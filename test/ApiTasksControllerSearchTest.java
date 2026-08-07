@@ -154,6 +154,19 @@ class ApiTasksControllerSearchTest extends FunctionalTest {
     }
 
     @Test
+    void hitCarriesTheLowercaseRoleWireValue() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "rolecasing-task");
+        seedTranscript(taskId, "a distinctive rolecasingtoken phrase");
+
+        var resp = GET("/api/task-runs/search?q=rolecasingtoken");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"role\":\"assistant\""),
+                "search hits must use the same wire value as /api/conversations messages; got: " + body);
+    }
+
+    @Test
     void noResultsReturnsEmptyArray() {
         var agent = seedAgent();
         var taskId = seedTask(agent, "noresults-task");
