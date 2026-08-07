@@ -15,8 +15,10 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
@@ -209,13 +211,13 @@ public final class LocalSidecarDaemon {
             throw cfg.fail().apply(
                     "%s script not found at %s".formatted(cfg.displayName(), serve.getAbsolutePath()), null);
         }
-        var cacheDir = new File(Play.applicationPath, cfg.cacheSubdir()).getAbsolutePath();
+        reapOrphanedSquatter();
         int idleMin = ConfigService.getInt(cfg.configPrefix() + ".idleTimeoutMinutes", 15);
         var cmd = List.of("uv", "run", "serve.py",
                 "--host", "127.0.0.1",
                 "--port", String.valueOf(port()),
                 "--model", model,
-                "--cache-dir", cacheDir,
+                "--cache-dir", cacheDir(),
                 "--idle-timeout-min", String.valueOf(idleMin));
         // JCLAW-830: snapshot the stop generation before launching. If stop()
         // bumps it while the child is starting, the publish below aborts and
@@ -323,6 +325,117 @@ public final class LocalSidecarDaemon {
         } catch (IOException _) {
             return true;
         }
+    }
+
+    /** JCLAW-990: SIGTERM grace, then the bound on waiting for the socket to actually clear. */
+    private static final long REAP_GRACE_MS = 2_000;
+    private static final long REAP_RELEASE_MS = 5_000;
+
+    /** The absolute cache directory handed to the child — and the argv token that pins a
+     *  running sidecar to this application and this domain. Shared with {@link #spawnNow}
+     *  so the spawn command and the match predicate cannot drift apart. */
+    private String cacheDir() {
+        return new File(Play.applicationPath, cfg.cacheSubdir()).getAbsolutePath();
+    }
+
+    /**
+     * JCLAW-990: terminate a sidecar of ours that is squatting {@link #port()} with no live
+     * owner and no answer on {@code /health}. JCLAW-989 removed the one known way to reach
+     * that state; this recovers from any other wedge without an operator running kill(1).
+     *
+     * <p>Runs inside the single-flight section, immediately before the launch that would
+     * otherwise die of EADDRINUSE — so the first attempt after a wedge succeeds rather than
+     * poisoning the {@code spawnFailedUntil} cooldown.
+     *
+     * <p>Never touches a process that answers {@code /health}: that is either an adopted
+     * sidecar (JCLAW-637) or one busy with a long inference, which still answers because
+     * {@code /health} does not take the sidecar's run lock.
+     *
+     * @return whether anything was reaped
+     */
+    public boolean reapOrphanedSquatter() {
+        if (!portOccupied(port()) || isHealthy()) return false;
+        var doomed = orphanedSquatterProcesses();
+        if (doomed.isEmpty()) return false;
+        EventLogger.warn(cfg.logChannel(),
+                "%s: reaping orphaned sidecar squatting port %d".formatted(cfg.displayName(), port()),
+                doomed.stream()
+                        .map(h -> "pid=%d %s".formatted(h.pid(), h.info().commandLine().orElse("<argv unavailable>")))
+                        .collect(Collectors.joining("\n")));
+        doomed.forEach(ProcessHandle::destroy);
+        if (!awaitPortRelease(REAP_GRACE_MS)) {
+            doomed.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
+            awaitPortRelease(REAP_RELEASE_MS);
+        }
+        return true;
+    }
+
+    /**
+     * Every process to kill so the port is actually released: each ownerless sidecar of ours
+     * plus its descendants. The descendants matter — the daemon launches {@code uv run
+     * serve.py}, which forks the python that holds the socket, and killing only the launcher
+     * leaves that child reparented and still listening.
+     */
+    private List<ProcessHandle> orphanedSquatterProcesses() {
+        var doomed = new LinkedHashSet<ProcessHandle>();
+        ProcessHandle.allProcesses()
+                .filter(this::matchesThisSidecar)
+                .filter(LocalSidecarDaemon::hasNoLiveOwner)
+                .forEach(root -> {
+                    doomed.add(root);
+                    root.descendants().forEach(doomed::add); // snapshot before any kill
+                });
+        return List.copyOf(doomed);
+    }
+
+    /** Whether {@code h} is unambiguously this daemon's sidecar. Reads {@code arguments()},
+     *  never {@code command()}: for a process launched through a shim the latter is the shim. */
+    private boolean matchesThisSidecar(ProcessHandle h) {
+        return h.info().arguments()
+                .map(args -> argvIdentifiesSidecar(args, port(), cacheDir()))
+                .orElse(false); // unreadable argv — never kill what cannot be identified
+    }
+
+    /**
+     * Whether {@code args} identifies a sidecar serving {@code port} out of {@code cacheDir}.
+     * The cache directory is what pins the match to one application and one domain, so a
+     * sibling clone's sidecar on the same fixed port never matches.
+     */
+    public static boolean argvIdentifiesSidecar(String[] args, int port, String cacheDir) {
+        boolean serve = false;
+        boolean onPort = false;
+        boolean ourCache = false;
+        for (int i = 0; i < args.length; i++) {
+            if (args[i].endsWith("serve.py")) {
+                serve = true;
+            } else if ("--port".equals(args[i]) && i + 1 < args.length) {
+                onPort |= args[i + 1].equals(String.valueOf(port));
+            } else if ("--cache-dir".equals(args[i]) && i + 1 < args.length) {
+                ourCache |= args[i + 1].equals(cacheDir);
+            }
+        }
+        return serve && onPort && ourCache;
+    }
+
+    /** No live owner: reparented to init or gone entirely. A sidecar whose parent is a running
+     *  process belongs to that JVM — possibly a sibling worktree's — and is never ours to kill. */
+    public static boolean hasNoLiveOwner(ProcessHandle h) {
+        return h.parent().map(p -> p.pid() == 1).orElse(true);
+    }
+
+    /** Poll until the port clears — a kill is asynchronous and the socket outlives the process. */
+    private boolean awaitPortRelease(long budgetMs) {
+        long deadline = System.nanoTime() + budgetMs * 1_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (!portOccupied(port())) return true;
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return !portOccupied(port());
     }
 
     /** Cheap liveness check: GET /health with a short per-call deadline. */
