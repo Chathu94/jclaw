@@ -12,15 +12,35 @@ import java.time.temporal.ChronoUnit;
 @Every("24h")
 public class EventLogCleanupJob extends Job<Void> {
 
+    private static final String CONFIG_KEY = "jclaw.logs.retention.days";
+    private static final int DEFAULT_RETENTION_DAYS = 30;
+
     @Override
     public void doJob() {
-        var retentionDays = Integer.parseInt(
-                Play.configuration.getProperty("jclaw.logs.retention.days", "30"));
+        var retentionDays = resolveRetentionDays(Play.configuration.getProperty(CONFIG_KEY));
         var cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
         var deleted = EventLog.deleteOlderThan(cutoff);
         if (deleted > 0) {
             EventLogger.info("system", "Cleaned up %s event log entries older than %s days"
                     .formatted(deleted, retentionDays));
+        }
+    }
+
+    /**
+     * Retention window for {@code jclaw.logs.retention.days}: absent, blank or
+     * non-numeric falls back to {@link #DEFAULT_RETENTION_DAYS} with a warn, so
+     * an operator typo cannot throw out of every 24h run and stop retention.
+     * Takes the raw value rather than reading config so the fallback is
+     * testable without mutating the process-global {@link Play#configuration}.
+     */
+    public static int resolveRetentionDays(String raw) {
+        if (raw == null || raw.isBlank()) return DEFAULT_RETENTION_DAYS;
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException _) {
+            EventLogger.warn("system", "%s is not numeric ('%s'); using default %d"
+                    .formatted(CONFIG_KEY, raw, DEFAULT_RETENTION_DAYS));
+            return DEFAULT_RETENTION_DAYS;
         }
     }
 }
