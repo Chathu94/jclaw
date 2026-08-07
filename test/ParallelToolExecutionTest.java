@@ -1,22 +1,31 @@
+import agents.AgentExecutionSink;
 import agents.AgentRunner;
+import agents.ConversationSink;
 import agents.ToolRegistry;
+import jakarta.persistence.EntityManager;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
 import models.Agent;
+import models.Conversation;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConversationService;
 import services.Tx;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Exercises {@link AgentRunner#executeToolsParallel}'s scheduling model:
@@ -111,9 +120,13 @@ class ParallelToolExecutionTest extends UnitTest {
     /** Create agent + conversation in the DB so the commit phase of
      *  executeToolsParallel has real rows to write to. */
     private long[] seedAgentAndConversation() {
+        return seedAgentAndConversation("parallel-tool-test");
+    }
+
+    private long[] seedAgentAndConversation(String agentName) {
         return Tx.run(() -> {
             var agent = new Agent();
-            agent.name = "parallel-tool-test";
+            agent.name = agentName;
             agent.modelProvider = "test";
             agent.modelId = "test";
             agent.save();
@@ -125,28 +138,33 @@ class ParallelToolExecutionTest extends UnitTest {
     private static void invokeParallel(List<ToolCall> calls, Agent agent, long convId,
                                         List<ChatMessage> messages, AtomicBoolean cancelled)
             throws Exception {
+        // JCLAW-21 commit 1: trailing AgentExecutionSink parameter wires
+        // per-tool-call assistant + tool-result writes through the sink
+        // abstraction. Construct a ConversationSink from the test's persisted
+        // conversation so the writes hit the same conversation_message rows the
+        // pre-sink tests assert on.
+        var conv = (Conversation) Tx.run(() -> ConversationService.findById(convId));
+        invokeParallel(calls, agent, convId, messages, cancelled, new ConversationSink(conv));
+    }
+
+    private static void invokeParallel(List<ToolCall> calls, Agent agent, long convId,
+                                        List<ChatMessage> messages, AtomicBoolean cancelled,
+                                        AgentExecutionSink sink)
+            throws Exception {
         // JCLAW-170: signature gained the onToolCall Consumer<ToolCallEvent>
         // parameter ahead of the image collector. We pass null here since
         // these tests exercise scheduling semantics, not the per-call event
         // stream — the production code tolerates null onToolCall.
         // JCLAW-299 Phase 2: executeToolsParallel lives on
         // agents.ParallelToolExecutor.
-        // JCLAW-21 commit 1: trailing AgentExecutionSink parameter wires
-        // per-tool-call assistant + tool-result writes through the sink
-        // abstraction. Reflection-construct a ConversationSink from the
-        // test's persisted conversation so the writes hit the same
-        // conversation_message rows the pre-sink tests assert on.
-        var conv = (models.Conversation) services.Tx.run(() ->
-                services.ConversationService.findById(convId));
-        var sink = new agents.ConversationSink(conv);
         // JCLAW-883: trailing Set is the turn's offered tool names, which the
         // dispatch guard checks against. null = unrestricted; these tests exercise
         // scheduling semantics, not the guard.
         var m = agents.ParallelToolExecutor.class.getDeclaredMethod("executeToolsParallel",
                 List.class, Agent.class, Long.class, List.class,
                 java.util.function.Consumer.class, java.util.function.Consumer.class,
-                List.class, AtomicBoolean.class, agents.AgentExecutionSink.class,
-                java.util.Set.class);
+                List.class, AtomicBoolean.class, AgentExecutionSink.class,
+                Set.class);
         m.setAccessible(true);
         m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled, sink, null);
     }
@@ -484,5 +502,62 @@ class ParallelToolExecutionTest extends UnitTest {
         // With isCancelled true going in, no tool should have run.
         assertEquals(0, peakConcurrency.get());
         assertEquals(0, messages.size());
+    }
+
+    /** Records which JPA EntityManager each persisted write ran under. Play binds
+     *  exactly one EntityManager per transaction, so the distinct count is the
+     *  number of transactions the commit phase opened. */
+    private static final class TxRecordingSink extends ConversationSink {
+        private final Set<EntityManager> ems = Collections.newSetFromMap(new IdentityHashMap<>());
+        private int writes;
+
+        TxRecordingSink(Conversation conversation) {
+            super(conversation);
+        }
+
+        @Override
+        public void appendToolResult(String toolCallId, String result, String structuredJson) {
+            ems.add(JPA.em());
+            writes++;
+            super.appendToolResult(toolCallId, result, structuredJson);
+        }
+    }
+
+    @Test
+    void toolRoundCommitsOnceForTheWholeBatch() throws Exception {
+        // JCLAW-751: the commit phase runs where dispatch leaves it — a background
+        // thread with no ambient transaction — so a Tx.run per tool call cost a
+        // connection checkout, begin and commit per call. Three calls, one commit.
+        var sinkRef = new AtomicReference<TxRecordingSink>();
+        var failure = new AtomicReference<Throwable>();
+        var messages = new ArrayList<ChatMessage>();
+        var calls = List.of(
+                new ToolCall("t1", "function", new FunctionCall("safe_x", "{}")),
+                new ToolCall("t2", "function", new FunctionCall("safe_x", "{}")),
+                new ToolCall("t3", "function", new FunctionCall("safe_x", "{}")));
+
+        // The test method itself runs inside Play's per-invocation transaction, which
+        // would swallow the distinction (Tx.run joins an ambient one). Seed AND run on
+        // a thread that has none, which is also the production shape. The unique agent
+        // name keeps the committed row clear of concurrently-running test classes.
+        var runner = Thread.ofPlatform().start(() -> {
+            try {
+                var ids = seedAgentAndConversation("one-tx-" + System.nanoTime());
+                Agent agent = Tx.run(() -> Agent.findById(ids[0]));
+                Conversation conv = Tx.run(() -> ConversationService.findById(ids[1]));
+                var sink = new TxRecordingSink(conv);
+                sinkRef.set(sink);
+                invokeParallel(calls, agent, ids[1], messages, new AtomicBoolean(false), sink);
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        });
+        runner.join();
+        if (failure.get() != null) throw new IllegalStateException(failure.get());
+
+        assertEquals(3, messages.size());
+        assertEquals(3, sinkRef.get().writes, "every call must still be persisted");
+        assertEquals(1, sinkRef.get().ems.size(),
+                "the whole round must commit in ONE transaction; saw " + sinkRef.get().ems.size());
     }
 }

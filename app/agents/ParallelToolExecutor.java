@@ -17,7 +17,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static utils.GsonHolder.GSON;
@@ -345,68 +344,71 @@ public final class ParallelToolExecutor {
     /**
      * Commit phase: append to message history and persist to DB in
      * original order, preserving LLM tool_result ordering invariants.
+     *
+     * <p>The whole round persists in ONE transaction — dispatch runs on a
+     * background virtual thread with no ambient one, so a {@code Tx.run} per
+     * call cost a connection checkout, begin and commit per tool call.
      */
     private static void commitToolResults(List<ToolCall> toolCalls, ToolRegistry.ToolResult[] results,
                                           List<ChatMessage> currentMessages,
                                           Consumer<AgentRunner.ToolCallEvent> onToolCall,
                                           List<String> imageCollector, AgentExecutionSink sink) {
-        for (int i = 0; i < toolCalls.size(); i++) {
-            var result = results[i];
-            if (result == null) continue; // skipped due to cancellation
-            var tc = toolCalls.get(i);
-            var text = result.text();
-            var structured = result.structuredJson();
-            // JCLAW-836 stage 1: judge the result, do not change it. The model still
-            // receives exactly what the tool returned — including its errors, which it
-            // needs in order to react — and the verdict becomes a per-turn metric so
-            // the failure rate is a number before anything acts on it. This is the
-            // single chokepoint for both the sync and streaming tool paths, and it
-            // runs on the turn's thread, so the LatencyTrace binding is in scope.
-            verifyAndCount(tc.function().name(), result);
-            currentMessages.add(ChatMessage.toolResult(tc.id(), tc.function().name(), text));
-            if (imageCollector != null) {
-                MessageDeduplicator.extractImageUrls(text, imageCollector);
-            }
-            final String r = text;
-            final String s = structured;
-            // JCLAW-228/562: a tool result may carry produced attachments (generate_image's image,
-            // diarize_audio's per-speaker voice clips); the sink inlines them on the ONE assistant
-            // turn that called the tool (empty list for every ordinary tool) and returns the
-            // persisted rows so we can push them onto the live SSE tool_call frame.
-            final var attachments = result.attachments();
-            final var videoJob = result.videoJob();
-            final var attHolder = new AtomicReference<List<MessageAttachment>>(List.of());
-            Tx.run(() -> {
+        var frames = new ArrayList<AgentRunner.ToolCallEvent>();
+        Tx.run(() -> {
+            for (int i = 0; i < toolCalls.size(); i++) {
+                var result = results[i];
+                if (result == null) continue; // skipped due to cancellation
+                var tc = toolCalls.get(i);
+                var text = result.text();
+                var structured = result.structuredJson();
+                // JCLAW-836 stage 1: judge the result, do not change it. The model still
+                // receives exactly what the tool returned — including its errors, which it
+                // needs in order to react — and the verdict becomes a per-turn metric so
+                // the failure rate is a number before anything acts on it. This is the
+                // single chokepoint for both the sync and streaming tool paths, and it
+                // runs on the turn's thread, so the LatencyTrace binding is in scope.
+                verifyAndCount(tc.function().name(), result);
+                currentMessages.add(ChatMessage.toolResult(tc.id(), tc.function().name(), text));
+                if (imageCollector != null) {
+                    MessageDeduplicator.extractImageUrls(text, imageCollector);
+                }
+                // JCLAW-228/562: a tool result may carry produced attachments (generate_image's image,
+                // diarize_audio's per-speaker voice clips); the sink inlines them on the ONE assistant
+                // turn that called the tool (empty list for every ordinary tool) and returns the
+                // persisted rows so we can push them onto the live SSE tool_call frame.
+                List<MessageAttachment> persisted = List.of();
+                var videoJob = result.videoJob();
                 // JCLAW-235: a generate_video result carries a submitted-job ref instead of bytes — the
                 // sink creates a zero-byte placeholder linked to it; every other tool takes the
                 // attachments path (no-op for ordinary calls).
                 if (videoJob != null) {
                     var placeholder = sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob);
-                    if (placeholder != null) attHolder.set(List.of(placeholder));
+                    if (placeholder != null) persisted = List.of(placeholder);
                 } else {
-                    attHolder.set(sink.appendAssistantMessage(null, gson.toJson(tc), attachments));
+                    persisted = sink.appendAssistantMessage(null, gson.toJson(tc), result.attachments());
                 }
-                sink.appendToolResult(tc.id(), r, s);
+                sink.appendToolResult(tc.id(), text, structured);
                 // JCLAW-883: the sink already has the name (from the assistant turn
                 // above) and the text; this is the third fact — whether a tool ran.
                 sink.noteToolOutcome(tc.id(), result.outcome());
-            });
-            // JCLAW-170: surface the completed call to the SSE stream so the
-            // chat UI can render a per-call row with the structured result
-            // payload (search-result chips, favicons). Fired post-persist so
-            // a reload mid-turn would still see the same row.
-            if (onToolCall != null) {
-                onToolCall.accept(new AgentRunner.ToolCallEvent(
-                        tc.id(),
-                        tc.function().name(),
-                        ToolRegistry.iconFor(tc.function().name()),
-                        tc.function().arguments(),
-                        text,
-                        structured,
-                        generatedAttachmentsJson(attHolder.get()),
-                        attHolder.get().stream().map(a -> a.uuid).toList()));
+                if (onToolCall != null) {
+                    frames.add(new AgentRunner.ToolCallEvent(
+                            tc.id(),
+                            tc.function().name(),
+                            ToolRegistry.iconFor(tc.function().name()),
+                            tc.function().arguments(),
+                            text,
+                            structured,
+                            generatedAttachmentsJson(persisted),
+                            persisted.stream().map(a -> a.uuid).toList()));
+                }
             }
-        }
+        });
+        // JCLAW-170: surface the completed calls to the SSE stream so the
+        // chat UI can render a per-call row with the structured result
+        // payload (search-result chips, favicons). Fired post-commit so
+        // a reload mid-turn would still see the same rows.
+        if (onToolCall != null) frames.forEach(onToolCall);
     }
 
     /**
