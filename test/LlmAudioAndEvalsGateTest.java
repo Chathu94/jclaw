@@ -102,18 +102,23 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
 
     // ─── TtsSidecarManager: the surface that does not launch anything ────────
 
+    // JCLAW-991: assert hasProcess() — this JVM's own state — never isRunning().
+    // isRunning() probes the fixed tts.local.port, which unlike PLAY_TEST_PORT is not
+    // isolated per worktree, so any app holding 9531 turned these red; and it reports
+    // true for an adopted sidecar by design (JCLAW-637), the very thing they'd assert against.
+
     @Test
     void theTtsSidecarIsNotRunningUntilSomethingStartsIt() {
         // ensureRunning() is deliberately not called here — it would launch a real Python
         // process on the test host.
-        assertFalse(TtsSidecarManager.isRunning());
+        assertFalse(TtsSidecarManager.hasProcess());
     }
 
     @Test
     void stoppingASidecarThatWasNeverStartedIsANoOp() {
         // Called from the JVM shutdown hook, which runs whether or not TTS was ever used.
         assertDoesNotThrow(TtsSidecarManager::stop);
-        assertFalse(TtsSidecarManager.isRunning());
+        assertFalse(TtsSidecarManager.hasProcess());
     }
 
     // Deliberately no test pinning TtsSidecarManager.IDENTITY. Asserting a constant equals

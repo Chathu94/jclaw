@@ -128,6 +128,14 @@ public final class TtsSidecarManager {
         return DAEMON.isHealthy(IDENTITY);
     }
 
+    /** Whether <em>this JVM</em> launched a sidecar process. Distinct from
+     *  {@link #isRunning()}, which health-probes the fixed port and so also reports
+     *  true for a sidecar this JVM merely adopted (JCLAW-637) or that another
+     *  process owns entirely. */
+    public static boolean hasProcess() {
+        return DAEMON.hasProcess();
+    }
+
     /** Stop the sidecar if running. Wired into {@code jobs.ShutdownJob}. */
     public static void stop() {
         DAEMON.stop();
