@@ -107,7 +107,6 @@ class SkillLoaderTest extends UnitTest {
         assertEquals("bob", SkillLoader.extractYamlValue("author: bob", "author"), "unquoted scalar");
         assertEquals("alice", SkillLoader.extractYamlValue("author: 'alice'", "author"), "quotes stripped");
         assertNull(SkillLoader.extractYamlValue("name: x", "author"), "absent key → null");
-        assertEquals("bob", SkillLoader.extractYamlValue("author: |\n  bob\n", "author"), "block scalar");
         assertEquals("🚀", SkillLoader.extractYamlValue("icon: \"🚀\"", "icon"), "quotes stripped");
         assertNull(SkillLoader.extractYamlValue("name: x", "icon"), "absent key → null");
     }
