@@ -451,7 +451,7 @@ public final class McpConnectionManager {
      */
     private static void handleDisconnect(Entry entry, McpServer server) {
         McpClient client;
-        synchronized (entry) {
+        synchronized (entry.teardownLock) {
             // Identity, not presence: an admin toggle/delete replaces the entry
             // under the same name, and this orphan must not unpublish the live
             // replacement's tools or clobber its row.
@@ -679,6 +679,10 @@ public final class McpConnectionManager {
 
     /** Per-server runtime state. Lives in {@link #connections}. */
     private static final class Entry {
+        /** Monitor for the teardown guard in {@link #handleDisconnect}. Dedicated rather than
+         *  the Entry itself so the lock cannot be acquired by anything that merely holds the
+         *  reference, and so the guarded state is named at the lock site. */
+        final Object teardownLock = new Object();
         final String name;
         // McpClient manages its own internal thread-safety (state via AtomicReference,
         // ConcurrentHashMap for pending requests); volatile here just publishes the

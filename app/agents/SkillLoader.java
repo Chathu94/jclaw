@@ -95,6 +95,10 @@ public class SkillLoader {
     private static final String KEY_VERSION = "version";
     /** YAML key listing slash-commands the skill registers. */
     private static final String KEY_COMMANDS = "commands";
+    /** YAML key naming the skill's author. */
+    private static final String KEY_AUTHOR = "author";
+    /** YAML key holding the skill's display emoji. */
+    private static final String KEY_ICON = "icon";
     /** YAML key (JCLAW-281) listing MCP server dependencies the skill needs. */
     private static final String KEY_MCP_SERVERS = "mcp_servers";
 
@@ -434,8 +438,8 @@ public class SkillLoader {
         if (name == null) return null;
         var description = extractYamlValue(frontmatter, KEY_DESCRIPTION);
         var version = extractYamlValue(frontmatter, KEY_VERSION);
-        var author = extractYamlValue(frontmatter, "author");
-        var icon = extractYamlValue(frontmatter, "icon");
+        var author = extractYamlValue(frontmatter, KEY_AUTHOR);
+        var icon = extractYamlValue(frontmatter, KEY_ICON);
         // JCLAW-281: MCP server dependencies (sibling to tools:). Empty
         // list when the key is absent — extractYamlList returns List.of()
         // for that case, which matches the "no servers needed" intent.
@@ -565,8 +569,8 @@ public class SkillLoader {
             case KEY_DESCRIPTION -> DESCRIPTION_VALUE;
             case KEY_TOOLS -> TOOLS_VALUE;
             case KEY_VERSION -> VERSION_VALUE;
-            case "author" -> AUTHOR_VALUE;
-            case "icon" -> ICON_VALUE;
+            case KEY_AUTHOR -> AUTHOR_VALUE;
+            case KEY_ICON -> ICON_VALUE;
             default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
         };
         var matcher = valuePattern.matcher(yaml);
@@ -582,8 +586,8 @@ public class SkillLoader {
             case KEY_DESCRIPTION -> DESCRIPTION_MULTI;
             case KEY_TOOLS -> TOOLS_MULTI;
             case KEY_VERSION -> VERSION_MULTI;
-            case "author" -> AUTHOR_MULTI;
-            case "icon" -> ICON_MULTI;
+            case KEY_AUTHOR -> AUTHOR_MULTI;
+            case KEY_ICON -> ICON_MULTI;
             default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?: {2}.*\\n?)+)", Pattern.MULTILINE);
         };
         var multiMatcher = multiPattern.matcher(yaml);

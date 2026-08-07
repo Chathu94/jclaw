@@ -354,54 +354,12 @@ public final class ParallelToolExecutor {
                                           Consumer<AgentRunner.ToolCallEvent> onToolCall,
                                           List<String> imageCollector, AgentExecutionSink sink) {
         var frames = new ArrayList<AgentRunner.ToolCallEvent>();
+        var frameSink = onToolCall != null ? frames : null;
         Tx.run(() -> {
             for (int i = 0; i < toolCalls.size(); i++) {
                 var result = results[i];
                 if (result == null) continue; // skipped due to cancellation
-                var tc = toolCalls.get(i);
-                var text = result.text();
-                var structured = result.structuredJson();
-                // JCLAW-836 stage 1: judge the result, do not change it. The model still
-                // receives exactly what the tool returned — including its errors, which it
-                // needs in order to react — and the verdict becomes a per-turn metric so
-                // the failure rate is a number before anything acts on it. This is the
-                // single chokepoint for both the sync and streaming tool paths, and it
-                // runs on the turn's thread, so the LatencyTrace binding is in scope.
-                verifyAndCount(tc.function().name(), result);
-                currentMessages.add(ChatMessage.toolResult(tc.id(), tc.function().name(), text));
-                if (imageCollector != null) {
-                    MessageDeduplicator.extractImageUrls(text, imageCollector);
-                }
-                // JCLAW-228/562: a tool result may carry produced attachments (generate_image's image,
-                // diarize_audio's per-speaker voice clips); the sink inlines them on the ONE assistant
-                // turn that called the tool (empty list for every ordinary tool) and returns the
-                // persisted rows so we can push them onto the live SSE tool_call frame.
-                List<MessageAttachment> persisted = List.of();
-                var videoJob = result.videoJob();
-                // JCLAW-235: a generate_video result carries a submitted-job ref instead of bytes — the
-                // sink creates a zero-byte placeholder linked to it; every other tool takes the
-                // attachments path (no-op for ordinary calls).
-                if (videoJob != null) {
-                    var placeholder = sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob);
-                    if (placeholder != null) persisted = List.of(placeholder);
-                } else {
-                    persisted = sink.appendAssistantMessage(null, gson.toJson(tc), result.attachments());
-                }
-                sink.appendToolResult(tc.id(), text, structured);
-                // JCLAW-883: the sink already has the name (from the assistant turn
-                // above) and the text; this is the third fact — whether a tool ran.
-                sink.noteToolOutcome(tc.id(), result.outcome());
-                if (onToolCall != null) {
-                    frames.add(new AgentRunner.ToolCallEvent(
-                            tc.id(),
-                            tc.function().name(),
-                            ToolRegistry.iconFor(tc.function().name()),
-                            tc.function().arguments(),
-                            text,
-                            structured,
-                            generatedAttachmentsJson(persisted),
-                            persisted.stream().map(a -> a.uuid).toList()));
-                }
+                commitOneResult(toolCalls.get(i), result, currentMessages, imageCollector, sink, frameSink);
             }
         });
         // JCLAW-170: surface the completed calls to the SSE stream so the
@@ -409,6 +367,59 @@ public final class ParallelToolExecutor {
         // payload (search-result chips, favicons). Fired post-commit so
         // a reload mid-turn would still see the same rows.
         if (onToolCall != null) frames.forEach(onToolCall);
+    }
+
+    /**
+     * Persist one tool call's result inside the caller's transaction, appending its SSE frame to
+     * {@code frameSink} when the caller wants frames ({@code null} skips the frame work entirely,
+     * as the inline version did).
+     */
+    private static void commitOneResult(ToolCall tc, ToolRegistry.ToolResult result,
+                                        List<ChatMessage> currentMessages, List<String> imageCollector,
+                                        AgentExecutionSink sink, List<AgentRunner.ToolCallEvent> frameSink) {
+        var text = result.text();
+        var structured = result.structuredJson();
+        // JCLAW-836 stage 1: judge the result, do not change it. The model still
+        // receives exactly what the tool returned — including its errors, which it
+        // needs in order to react — and the verdict becomes a per-turn metric so
+        // the failure rate is a number before anything acts on it. This is the
+        // single chokepoint for both the sync and streaming tool paths, and it
+        // runs on the turn's thread, so the LatencyTrace binding is in scope.
+        verifyAndCount(tc.function().name(), result);
+        currentMessages.add(ChatMessage.toolResult(tc.id(), tc.function().name(), text));
+        if (imageCollector != null) {
+            MessageDeduplicator.extractImageUrls(text, imageCollector);
+        }
+        // JCLAW-228/562: a tool result may carry produced attachments (generate_image's image,
+        // diarize_audio's per-speaker voice clips); the sink inlines them on the ONE assistant
+        // turn that called the tool (empty list for every ordinary tool) and returns the
+        // persisted rows so we can push them onto the live SSE tool_call frame.
+        List<MessageAttachment> persisted;
+        var videoJob = result.videoJob();
+        // JCLAW-235: a generate_video result carries a submitted-job ref instead of bytes — the
+        // sink creates a zero-byte placeholder linked to it; every other tool takes the
+        // attachments path (no-op for ordinary calls).
+        if (videoJob != null) {
+            var placeholder = sink.appendVideoPlaceholder(null, gson.toJson(tc), videoJob);
+            persisted = placeholder != null ? List.of(placeholder) : List.of();
+        } else {
+            persisted = sink.appendAssistantMessage(null, gson.toJson(tc), result.attachments());
+        }
+        sink.appendToolResult(tc.id(), text, structured);
+        // JCLAW-883: the sink already has the name (from the assistant turn
+        // above) and the text; this is the third fact — whether a tool ran.
+        sink.noteToolOutcome(tc.id(), result.outcome());
+        if (frameSink != null) {
+            frameSink.add(new AgentRunner.ToolCallEvent(
+                    tc.id(),
+                    tc.function().name(),
+                    ToolRegistry.iconFor(tc.function().name()),
+                    tc.function().arguments(),
+                    text,
+                    structured,
+                    generatedAttachmentsJson(persisted),
+                    persisted.stream().map(a -> a.uuid).toList()));
+        }
     }
 
     /**

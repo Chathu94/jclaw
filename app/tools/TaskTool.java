@@ -843,17 +843,18 @@ public class TaskTool implements ToolRegistry.Tool {
             var tasks = findTasks("name = ?1 AND agent = ?2", name, agent);
             var ids = new ArrayList<Long>(tasks.size());
             var em = JPA.em();
+            final String taskIdParam = "taskId";
             for (var task : tasks) {
                 var taskId = task.id;
                 // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
                 @SuppressWarnings("unchecked")
                 List<Long> transcriptIds = em.createQuery(
                                 "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
-                        .setParameter("taskId", taskId).getResultList();
+                        .setParameter(taskIdParam, taskId).getResultList();
                 em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
-                        .setParameter("taskId", taskId).executeUpdate();
+                        .setParameter(taskIdParam, taskId).executeUpdate();
                 em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
-                        .setParameter("taskId", taskId).executeUpdate();
+                        .setParameter(taskIdParam, taskId).executeUpdate();
                 task.delete();
                 ids.add(taskId);
                 LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
