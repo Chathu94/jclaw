@@ -21,7 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code getMe} failure (bad/revoked token, network blip) we fall back to
  * {@code (userId from token, username = null)} so mention-by-handle simply stays
  * dormant for that token rather than aborting the inbound turn — a reply-to-bot
- * mention (matched by id) still works.
+ * mention (matched by id) still works. Because {@code resolve} runs once per
+ * inbound update, a failure is held for {@link #FAILURE_BACKOFF_MS} so a revoked
+ * token costs one blocking {@code getMe} per minute rather than one per message.
  */
 public final class TelegramBotIdentity {
 
@@ -29,6 +31,12 @@ public final class TelegramBotIdentity {
     private static final String LOG_SOURCE = "telegram";
 
     private static final ConcurrentHashMap<String, Identity> CACHE = new ConcurrentHashMap<>();
+
+    /** Short enough that mention-by-handle recovers on its own after a blip. */
+    private static final long FAILURE_BACKOFF_MS = 60_000L;
+
+    /** Token → epoch-ms before which a failed {@code getMe} must not be retried. */
+    private static final ConcurrentHashMap<String, Long> RETRY_AFTER = new ConcurrentHashMap<>();
 
     /**
      * Resolved bot identity.
@@ -46,28 +54,36 @@ public final class TelegramBotIdentity {
      * Resolve (and cache) the {@link Identity} for {@code botToken}. The username
      * is fetched via {@code getMe} on first call for a token and reused thereafter;
      * the user id is parsed from the token with no API call. Never throws — a
-     * {@code getMe} failure degrades to {@code (userId, null)}.
+     * {@code getMe} failure degrades to {@code (userId, null)} and suppresses the
+     * next attempt for {@link #FAILURE_BACKOFF_MS}.
      */
     public static Identity resolve(String botToken) {
         if (botToken == null || botToken.isBlank()) return new Identity(null, null);
         Identity cached = CACHE.get(botToken);
         if (cached != null) return cached;
+        Long retryAfter = RETRY_AFTER.get(botToken);
+        if (retryAfter != null && System.currentTimeMillis() < retryAfter) {
+            return new Identity(userIdFromToken(botToken), null);
+        }
         // Resolve OUTSIDE computeIfAbsent: resolveUncached makes a blocking getMe HTTP
         // call, which must not run while holding a ConcurrentHashMap bin lock.
         Identity fresh = resolveUncached(botToken);
-        // Only cache a fully-resolved identity. A null username means getMe failed
-        // (bots always have a username), so leave it uncached and retry next time
-        // rather than permanently disabling mention-by-handle for this token.
-        if (fresh.username() != null) {
-            Identity prior = CACHE.putIfAbsent(botToken, fresh);
-            return prior != null ? prior : fresh;
+        // Only cache a fully-resolved identity permanently. A null username means getMe
+        // failed (bots always have a username), so hold it for the backoff window only —
+        // a blip must not permanently disable mention-by-handle for this token.
+        if (fresh.username() == null) {
+            RETRY_AFTER.put(botToken, System.currentTimeMillis() + FAILURE_BACKOFF_MS);
+            return fresh;
         }
-        return fresh;
+        Identity prior = CACHE.putIfAbsent(botToken, fresh);
+        return prior != null ? prior : fresh;
     }
 
-    /** Test-only: drop the cached identity for {@code botToken} so the next resolve re-fetches. */
+    /** Test-only: drop the cached identity and failure backoff for {@code botToken} so the next resolve re-fetches. */
     static void clearForTest(String botToken) {
-        if (botToken != null) CACHE.remove(botToken);
+        if (botToken == null) return;
+        CACHE.remove(botToken);
+        RETRY_AFTER.remove(botToken);
     }
 
     private static Identity resolveUncached(String botToken) {

@@ -390,12 +390,16 @@ public class SkillLoader {
     private static final Pattern DESCRIPTION_VALUE = Pattern.compile("^description:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     private static final Pattern TOOLS_VALUE = Pattern.compile("^tools:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     private static final Pattern VERSION_VALUE = Pattern.compile("^version:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+    private static final Pattern AUTHOR_VALUE = Pattern.compile("^author:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+    private static final Pattern ICON_VALUE = Pattern.compile("^icon:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     // S5998: possessive `++` prevents catastrophic backtracking on pathological YAML
     // input. Equivalent for any valid frontmatter; just refuses to backtrack.
     private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern AUTHOR_MULTI = Pattern.compile("^author:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern ICON_MULTI = Pattern.compile("^icon:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern TOOLS_INLINE_LIST = Pattern.compile("^tools:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
     private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern COMMANDS_INLINE_LIST = Pattern.compile("^commands:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
@@ -559,6 +563,8 @@ public class SkillLoader {
             case KEY_DESCRIPTION -> DESCRIPTION_VALUE;
             case KEY_TOOLS -> TOOLS_VALUE;
             case KEY_VERSION -> VERSION_VALUE;
+            case "author" -> AUTHOR_VALUE;
+            case "icon" -> ICON_VALUE;
             default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
         };
         var matcher = valuePattern.matcher(yaml);
@@ -571,6 +577,8 @@ public class SkillLoader {
             case KEY_DESCRIPTION -> DESCRIPTION_MULTI;
             case KEY_TOOLS -> TOOLS_MULTI;
             case KEY_VERSION -> VERSION_MULTI;
+            case "author" -> AUTHOR_MULTI;
+            case "icon" -> ICON_MULTI;
             default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?: {2}.*\\n?)+)", Pattern.MULTILINE);
         };
         var multiMatcher = multiPattern.matcher(yaml);

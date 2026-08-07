@@ -90,19 +90,36 @@ class TelegramBotIdentityTest extends FunctionalTest {
     }
 
     @Test
-    void retriesGetMeAfterAFailureRatherThanCachingTheNull() {
-        // A failed getMe must NOT be cached: a later resolve re-fetches and can pick
-        // up the username once Telegram recovers (else a startup blip permanently
-        // disables mention-by-handle for the bot).
+    void suppressesGetMeForTheBackoffWindowAfterAFailure() {
+        // resolve runs once per inbound update, so an un-backed-off failure means a
+        // blocking getMe on every message for as long as the token stays broken.
         server.enqueueResponse("getMe", 401, UNAUTHORIZED); // first call fails
-        server.respondWith("getMe", 200, GET_ME_OK);        // subsequent calls succeed
+        server.respondWith("getMe", 200, GET_ME_OK);        // would succeed if re-called
         var first = TelegramBotIdentity.resolve(OK_TOKEN);
         assertNull(first.username(), "first resolve sees the getMe failure → null username");
         var second = TelegramBotIdentity.resolve(OK_TOKEN);
-        assertEquals("jclaw_id_bot", second.username(),
-                "the failed username must not be cached — the next resolve re-fetches");
+        assertNull(second.username(), "the backoff still degrades to (userId, null)");
+        assertEquals(Long.valueOf(424242L), second.userId(),
+                "the token-derived user id survives the backoff");
+        assertEquals(1, server.countRequests("getMe"),
+                "the second resolve must be served from the backoff, not re-call getMe");
+    }
+
+    @Test
+    void clearingTheBackoffLetsGetMeRunAgain() {
+        // The failure is held, not cached, so it must be droppable — otherwise a blip
+        // would permanently disable mention-by-handle. The window itself is wall-clock,
+        // so this covers the drop rather than waiting it out.
+        server.enqueueResponse("getMe", 401, UNAUTHORIZED);
+        server.respondWith("getMe", 200, GET_ME_OK);
+        assertNull(TelegramBotIdentity.resolve(OK_TOKEN).username(),
+                "first resolve sees the getMe failure → null username");
+
+        TelegramBotIdentityTestHooks.clear(OK_TOKEN);
+        assertEquals("jclaw_id_bot", TelegramBotIdentity.resolve(OK_TOKEN).username(),
+                "a dropped backoff must let getMe run again");
         assertEquals(2, server.countRequests("getMe"),
-                "the failed resolve must retry getMe, not serve a cached null");
+                "exactly one getMe per non-backed-off resolve");
     }
 
     @Test

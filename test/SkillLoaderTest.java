@@ -98,8 +98,18 @@ class SkillLoaderTest extends UnitTest {
         assertEquals("bar", SkillLoader.extractYamlValue("name: bar", "name"), "unquoted scalar");
         assertNull(SkillLoader.extractYamlValue("name:\n", "name"), "empty value → null");
         assertNull(SkillLoader.extractYamlValue("other: x", "name"), "absent key → null");
-        // "author" is not in the pre-compiled switch → default-branch pattern.
-        assertEquals("bob", SkillLoader.extractYamlValue("author: bob", "author"));
+        // "maintainer" is not in the pre-compiled switch → default-branch pattern.
+        assertEquals("bob", SkillLoader.extractYamlValue("maintainer: bob", "maintainer"));
+    }
+
+    @Test
+    void extractYamlValueAuthorAndIconParseIdenticallyWhenPrecompiled() {
+        assertEquals("bob", SkillLoader.extractYamlValue("author: bob", "author"), "unquoted scalar");
+        assertEquals("alice", SkillLoader.extractYamlValue("author: 'alice'", "author"), "quotes stripped");
+        assertNull(SkillLoader.extractYamlValue("name: x", "author"), "absent key → null");
+        assertEquals("bob", SkillLoader.extractYamlValue("author: |\n  bob\n", "author"), "block scalar");
+        assertEquals("🚀", SkillLoader.extractYamlValue("icon: \"🚀\"", "icon"), "quotes stripped");
+        assertNull(SkillLoader.extractYamlValue("name: x", "icon"), "absent key → null");
     }
 
     // ─── extractYamlList ─────────────────────────────────────────────────────
