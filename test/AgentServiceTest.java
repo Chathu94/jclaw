@@ -712,6 +712,30 @@ class AgentServiceTest extends UnitTest {
                 "agent with unregistered provider must be flipped to disabled");
     }
 
+    @Test
+    void syncEnabledStatesEnablesNonMainWithConfiguredProvider() {
+        // Pins the "provider:modelId" key format the enable path's bulk lookup relies on.
+        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
+        services.ConfigService.set("provider.openrouter.models",
+                "[{\"id\":\"sync-enable-model\",\"name\":\"X\",\"contextWindow\":1000,\"maxTokens\":100}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = AgentService.create("svc-sync-enable", "openrouter", "sync-enable-model");
+        // create() already enabled it — force disabled to set up the divergence.
+        services.Tx.run(() -> {
+            Agent a = (Agent) Agent.findById(agent.id);
+            a.enabled = false;
+            a.save();
+            return null;
+        });
+
+        AgentService.syncEnabledStates();
+        Agent reread = services.Tx.run(() -> (Agent) Agent.findById(agent.id));
+        assertTrue(reread.enabled,
+                "agent whose provider+model is configured must be flipped to enabled");
+    }
+
     // --- supportsVision branch coverage ---
 
     @Test

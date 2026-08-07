@@ -302,6 +302,7 @@ public class AgentService {
     public static void syncEnabledStates() {
         ProviderRegistry.refresh();
         List<Agent> agents = listAll();
+        var configuredKeys = configuredModelKeys();
 
         var toEnable = new ArrayList<Long>();
         var toDisable = new ArrayList<Long>();
@@ -311,7 +312,7 @@ public class AgentService {
                 if (!agent.enabled) toEnable.add(agent.id);
                 continue;
             }
-            var shouldBeEnabled = isProviderConfigured(agent.modelProvider, agent.modelId);
+            var shouldBeEnabled = configuredKeys.contains(agent.modelProvider + ":" + agent.modelId);
             if (agent.enabled != shouldBeEnabled) {
                 (shouldBeEnabled ? toEnable : toDisable).add(agent.id);
             }
