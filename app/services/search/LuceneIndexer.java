@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
@@ -422,6 +423,21 @@ public final class LuceneIndexer {
      */
     public static void remove(long id) {
         remove(Scope.TASK_RUN_MESSAGE, id);
+    }
+
+    /**
+     * JCLAW-673/994: evict the documents for rows a bulk JPQL DELETE removed, then
+     * commit once. A bulk delete never fires the entity's {@code @PostRemove}, so a
+     * caller must collect the ids <em>before</em> deleting and hand them here, or the
+     * docs orphan. Lives on the indexer rather than beside any one delete path because
+     * five callers across four classes need it.
+     */
+    public static void removeAll(Scope scope, Collection<Long> ids) {
+        if (ids == null || ids.isEmpty()) return;
+        for (Long id : ids) {
+            remove(scope, id);
+        }
+        commit(scope);
     }
 
     /**

@@ -12,6 +12,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConversationService;
 import services.TaskExecutor;
+import services.TaskWriteService;
 import services.Tx;
 import services.search.DirectLuceneMessageSearchRepository;
 import services.search.LuceneIndexer;
@@ -222,6 +223,44 @@ class CascadeLuceneCleanupTest extends UnitTest {
         assertEquals(TaskExecutor.MAX_RUNS_PER_TASK,
                 repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, keptToken, 20).size(),
                 "kept runs' transcript docs must survive the prune");
+    }
+
+    // ── TASK_RUN_MESSAGE via the bulk-delete paths outside TaskExecutor ───
+
+    @Test
+    void deleteWithHistoryEvictsTaskRunMessageDocs() throws Exception {
+        var token = "deletewithhistorytrmtoken";
+        long taskId = commitInFreshTx(() -> {
+            var agent = newAgent("cl-dwhagent");
+            agent.save();
+            var task = seedTask(agent, "delete-with-history-task");
+            seedRunWithMessage(task, Instant.now(), token);
+            return task.id;
+        });
+
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, token, 10).size(),
+                "the transcript must be indexed before the delete");
+
+        commitInFreshTx(() -> {
+            TaskWriteService.deleteWithHistory(Task.findById(taskId));
+            return null;
+        });
+
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, token, 10).isEmpty(),
+                "deleting a task through TaskWriteService must evict its TASK_RUN_MESSAGE docs — "
+                        + "the bulk JPQL DELETE never fires TaskRunMessage.@PostRemove");
+    }
+
+    private static Task seedTask(Agent agent, String name) {
+        var task = new Task();
+        task.agent = agent;
+        task.name = name;
+        task.type = Task.Type.IMMEDIATE;
+        task.status = Task.Status.PENDING;
+        task.scheduledAt = Instant.now();
+        task.nextRunAt = Instant.now();
+        task.save();
+        return task;
     }
 
     private static void seedRunWithMessage(Task task, Instant startedAt, String content) {

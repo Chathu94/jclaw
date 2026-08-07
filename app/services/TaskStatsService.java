@@ -4,8 +4,10 @@ import jakarta.persistence.Query;
 import models.Task;
 import models.TaskRun;
 import play.db.jpa.JPA;
+import services.search.LuceneIndexer;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * JCLAW-676: dashboard-KPI read aggregates and the stats-reset delete for the
@@ -87,6 +89,14 @@ public final class TaskStatsService {
      */
     public static int resetTerminalRuns(String payloadType, String excludePayloadType) {
         var em = JPA.em();
+        // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
+        var idQ = em.createQuery("SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
+                        + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
+                .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
+        bindPayloadType(idQ, payloadType, excludePayloadType);
+        @SuppressWarnings("unchecked")
+        List<Long> transcriptIds = idQ.getResultList();
+
         var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
                         + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
                 .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
@@ -99,6 +109,7 @@ public final class TaskStatsService {
         bindPayloadType(runQ, payloadType, excludePayloadType);
         int deleted = runQ.executeUpdate();
         em.flush();
+        LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
         return deleted;
     }
 

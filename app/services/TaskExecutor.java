@@ -286,7 +286,7 @@ public final class TaskExecutor {
                         .setParameter("tid", taskId)
                         .setParameter("keep", keepIds)
                         .executeUpdate();
-                evictTaskRunMessageDocs(prunedMessageIds);
+                LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, prunedMessageIds);
                 return null;
             });
         } catch (Exception e) {
@@ -544,21 +544,6 @@ public final class TaskExecutor {
     }
 
     /**
-     * JCLAW-673/811: evict the TASK_RUN_MESSAGE full-text docs for the message
-     * ids removed by a bulk JPQL DELETE (which never fires
-     * TaskRunMessage.@PostRemove), committing once if any were removed. Shared by
-     * the run-pruning and auto-delete paths so the invariant lives in one place.
-     */
-    private static void evictTaskRunMessageDocs(List<Long> messageIds) {
-        for (Long messageId : messageIds) {
-            LuceneIndexer.remove(messageId);
-        }
-        if (!messageIds.isEmpty()) {
-            LuceneIndexer.commit(LuceneIndexer.Scope.TASK_RUN_MESSAGE);
-        }
-    }
-
-    /**
      * JCLAW: auto-delete a one-shot reminder after a successful fire when it
      * opted in ({@link Task#autoDeleteOnComplete}). Hard-deletes the task and
      * its run history; the user-visible {@link models.Notification} (the nudge)
@@ -589,7 +574,7 @@ public final class TaskExecutor {
                 em.createQuery("DELETE FROM Task t WHERE t.id = :tid")
                         .setParameter("tid", task.id).executeUpdate();
                 em.flush();
-                evictTaskRunMessageDocs(messageIds);
+                LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, messageIds);
                 LuceneIndexer.remove(LuceneIndexer.Scope.TASK, task.id);
                 LuceneIndexer.commit(LuceneIndexer.Scope.TASK);
                 return null;

@@ -4,8 +4,10 @@ import com.google.gson.JsonObject;
 import models.Agent;
 import models.Task;
 import play.db.jpa.JPA;
+import services.search.LuceneIndexer;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * JCLAW-676: pure create/update entity-mapping and the FK-cascade delete for
@@ -192,6 +194,11 @@ public final class TaskWriteService {
         final String taskIdParam = "taskId";
 
         var em = JPA.em();
+        // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
+        @SuppressWarnings("unchecked")
+        List<Long> transcriptIds = em.createQuery(
+                        "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
+                .setParameter(taskIdParam, taskId).getResultList();
         em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
                 .setParameter(taskIdParam, taskId).executeUpdate();
         em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
@@ -211,5 +218,8 @@ public final class TaskWriteService {
         TaskSchedulingService.cancel(taskId);
 
         task.delete();
+        // Last, so a constraint failure in any DB work above aborts before the
+        // non-transactional index is touched.
+        LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
     }
 }

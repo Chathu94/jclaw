@@ -8,6 +8,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.TaskSchedulingService;
 import services.Tx;
+import services.search.LuceneIndexer;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -155,6 +156,11 @@ public class TaskCleanupJob extends Job<Void> {
         // Drop the FK descendants first, then scheduled_tasks rows, then
         // the Task rows themselves. Same dependency order the per-task
         // ApiTasksController.delete uses.
+        // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
+        @SuppressWarnings("unchecked")
+        List<Long> transcriptIds = em.createQuery(
+                        "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.id IN :ids")
+                .setParameter("ids", expiredIds).getResultList();
         em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id IN :ids")
                 .setParameter("ids", expiredIds).executeUpdate();
         em.createQuery("DELETE FROM TaskRun r WHERE r.task.id IN :ids")
@@ -169,6 +175,12 @@ public class TaskCleanupJob extends Job<Void> {
         em.createQuery("DELETE FROM Task t WHERE t.id IN :ids")
                 .setParameter("ids", expiredIds).executeUpdate();
         em.flush();
+
+        // After the flush, so a constraint failure aborts before the
+        // non-transactional index is touched. Both scopes orphan here: the Task
+        // rows go out by bulk DELETE too, so Task.@PostRemove never fires either.
+        LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
+        LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK, expiredIds);
 
         return expiredIds.size();
     }

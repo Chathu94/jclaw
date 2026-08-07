@@ -14,6 +14,7 @@ import services.EventLogger;
 import services.ScheduleShorthandParser;
 import services.TaskSchedulingService;
 import services.Tx;
+import services.search.LuceneIndexer;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -844,12 +845,18 @@ public class TaskTool implements ToolRegistry.Tool {
             var em = JPA.em();
             for (var task : tasks) {
                 var taskId = task.id;
+                // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
+                @SuppressWarnings("unchecked")
+                List<Long> transcriptIds = em.createQuery(
+                                "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
+                        .setParameter("taskId", taskId).getResultList();
                 em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
                         .setParameter("taskId", taskId).executeUpdate();
                 em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
                         .setParameter("taskId", taskId).executeUpdate();
                 task.delete();
                 ids.add(taskId);
+                LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
             }
             return ids;
         });
