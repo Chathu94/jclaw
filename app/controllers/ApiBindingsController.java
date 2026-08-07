@@ -14,6 +14,7 @@ import play.mvc.With;
 import services.AgentService;
 import services.BindingService;
 import utils.ApiResponses;
+import utils.JsonArgs;
 
 import java.util.List;
 
@@ -69,8 +70,7 @@ public class ApiBindingsController extends Controller {
         var binding = new AgentBinding();
         binding.agent = agent;
         binding.channelType = body.get(KEY_CHANNEL_TYPE).getAsString();
-        binding.peerId = body.has(KEY_PEER_ID) && !body.get(KEY_PEER_ID).isJsonNull()
-                ? body.get(KEY_PEER_ID).getAsString() : null;
+        binding.peerId = JsonArgs.optString(body, KEY_PEER_ID);
         binding.priority = body.has(KEY_PRIORITY) ? body.get(KEY_PRIORITY).getAsInt() : 0;
         binding.save();
 
@@ -102,7 +102,7 @@ public class ApiBindingsController extends Controller {
             binding.agent = agent;
         }
         if (body.has(KEY_CHANNEL_TYPE)) binding.channelType = body.get(KEY_CHANNEL_TYPE).getAsString();
-        if (body.has(KEY_PEER_ID)) binding.peerId = body.get(KEY_PEER_ID).isJsonNull() ? null : body.get(KEY_PEER_ID).getAsString();
+        if (body.has(KEY_PEER_ID)) binding.peerId = JsonArgs.optString(body, KEY_PEER_ID);
         if (body.has(KEY_PRIORITY)) binding.priority = body.get(KEY_PRIORITY).getAsInt();
         binding.save();
 

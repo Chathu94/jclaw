@@ -47,8 +47,7 @@ public final class JsonBodyReader {
      * aggregated {@code error()} so a single response can name every missing field.
      */
     public static String requiredString(JsonObject body, String key) {
-        var s = JsonArgs.optNonBlankString(body, key);
-        return s == null ? null : s.trim();
+        return optString(body, key, true);
     }
 
     /**

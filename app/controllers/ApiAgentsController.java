@@ -23,6 +23,7 @@ import services.compression.TextCompressor;
 import tools.ShellExecTool;
 import utils.ApiResponses;
 import utils.HttpKeys;
+import utils.JsonArgs;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -351,11 +352,7 @@ public class ApiAgentsController extends Controller {
      * like {@code thinkingMode} where the frontend sends {@code null} to clear.
      */
     private static String readOptionalString(JsonObject body, String key) {
-        if (!body.has(key)) return null;
-        var el = body.get(key);
-        if (el.isJsonNull()) return null;
-        var s = el.getAsString();
-        return (s == null || s.isBlank()) ? null : s;
+        return JsonArgs.optNonBlankString(body, key);
     }
 
     /**
@@ -375,9 +372,7 @@ public class ApiAgentsController extends Controller {
 
     /** Read an optional string, falling back when absent OR JSON null (no NPE on a present-but-null field). */
     private static String optStringOr(JsonObject body, String key, String fallback) {
-        if (!body.has(key)) return fallback;
-        var el = body.get(key);
-        return el.isJsonNull() ? fallback : el.getAsString();
+        return JsonArgs.optString(body, key, fallback);
     }
 
     @SuppressWarnings("java:S2259")

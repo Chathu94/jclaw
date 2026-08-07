@@ -15,6 +15,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.McpServerService;
 import utils.ApiResponses;
+import utils.JsonArgs;
 
 import java.util.List;
 import java.util.Map;
@@ -159,9 +160,8 @@ public class ApiMcpServersController extends Controller {
 
     @SuppressWarnings("java:S2259")
     private static void applyRenameIfPresent(McpServer row, JsonObject body) {
-        if (!body.has("name") || body.get("name").isJsonNull()) return;
-        var newName = body.get("name").getAsString();
-        if (newName.equals(row.name)) return;
+        var newName = JsonArgs.optString(body, "name");
+        if (newName == null || newName.equals(row.name)) return;
         var existing = McpServer.findByName(newName);
         if (existing != null && !existing.id.equals(row.id)) {
             ApiResponses.error(409, ApiResponses.CONFLICT, "An MCP server named '%s' already exists".formatted(newName));

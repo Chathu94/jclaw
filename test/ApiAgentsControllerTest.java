@@ -452,6 +452,19 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void updateExplicitNullNameKeepsCurrentName() {
+        // name is a fall-back-on-absent-or-null field, unlike thinkingMode which
+        // an explicit null clears: a null must not reach the rename validation.
+        login();
+        var id = createAgent("null-name-agent");
+        var resp = PUT("/api/agents/" + id, "application/json", """
+                {"name": null}
+                """);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"name\":\"null-name-agent\""), getContent(resp));
+    }
+
+    @Test
     void updateDescriptionRoundTrips() {
         login();
         var id = createAgent("desc-agent");

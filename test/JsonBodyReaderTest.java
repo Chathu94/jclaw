@@ -16,6 +16,9 @@ import play.test.UnitTest;
  * <p>{@code requiredOr400} signals the failure via {@link utils.ApiResponses#error},
  * which sets {@code Http.Response.current().status} and throws a {@link RenderJson},
  * so each test seeds a thread-local {@link Http.Response} and inspects it.
+ *
+ * <p>{@code requiredString} is the non-throwing sibling used by the aggregating
+ * callers, so its cases assert the returned value directly.
  */
 class JsonBodyReaderTest extends UnitTest {
 
@@ -81,5 +84,17 @@ class JsonBodyReaderTest extends UnitTest {
     void primitiveValueIsReturned() {
         // A plain string primitive succeeds and returns the raw value.
         assertEquals("hello", JsonBodyReader.requiredOr400(obj("{\"name\":\"hello\"}"), "name"));
+    }
+
+    @Test
+    void requiredStringTrimsTheValue() {
+        assertEquals("hello", JsonBodyReader.requiredString(obj("{\"name\":\"  hello  \"}"), "name"));
+    }
+
+    @Test
+    void requiredStringYieldsNullForAbsentNullAndBlank() {
+        assertNull(JsonBodyReader.requiredString(obj("{\"other\":\"x\"}"), "name"));
+        assertNull(JsonBodyReader.requiredString(obj("{\"name\":null}"), "name"));
+        assertNull(JsonBodyReader.requiredString(obj("{\"name\":\"   \"}"), "name"));
     }
 }

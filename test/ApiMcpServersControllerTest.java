@@ -158,6 +158,15 @@ class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
+    void updateWithExplicitNullNameKeepsCurrentName() {
+        login();
+        var id = createHttpServer("keepme", "http://127.0.0.1:1/mcp", false);
+        var resp = PUT("/api/mcp-servers/" + id, "application/json", "{\"name\":null}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"name\":\"keepme\""), getContent(resp));
+    }
+
+    @Test
     void updateUnknownIdReturns404() {
         login();
         var resp = PUT("/api/mcp-servers/999999", "application/json", "{\"enabled\":true}");

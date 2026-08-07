@@ -23,6 +23,7 @@ import services.search.MessageSearch;
 import tools.SubagentSpawnTool;
 import utils.ApiResponses;
 import utils.JpqlFilter;
+import utils.JsonArgs;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -472,9 +473,11 @@ public class ApiSubagentRunsController extends Controller {
     }
 
     private static String stringField(JsonObject obj, String key) {
-        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
+        return JsonArgs.optString(obj, key);
     }
 
+    // Deliberately not JsonArgs.optLong: that collapses a non-numeric id to null, which here
+    // would drop the filter and widen a bulk delete from one parent's runs to every run.
     private static Long longField(JsonObject obj, String key) {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsLong() : null;
     }
@@ -495,11 +498,8 @@ public class ApiSubagentRunsController extends Controller {
             return;
         }
         String reason = "Killed by operator via admin page";
-        var body = JsonBodyReader.readJsonBody();
-        if (body != null && body.has(KEY_REASON) && !body.get(KEY_REASON).isJsonNull()) {
-            var supplied = body.get(KEY_REASON).getAsString();
-            if (supplied != null && !supplied.isBlank()) reason = supplied;
-        }
+        var supplied = JsonArgs.optNonBlankString(JsonBodyReader.readJsonBody(), KEY_REASON);
+        if (supplied != null) reason = supplied;
         var result = SubagentRegistry.kill(id, reason);
         if (!result.killed() && result.finalStatus() == null) {
             // Row not found — surface as 404 so the admin page can present
@@ -609,14 +609,14 @@ public class ApiSubagentRunsController extends Controller {
         if (ev.details == null) return;
         try {
             var obj = JsonParser.parseString(ev.details).getAsJsonObject();
-            if (!obj.has(KEY_RUN_ID) || obj.get(KEY_RUN_ID).isJsonNull()) return;
-            Long parsedId = parseLongOrNull(obj.get(KEY_RUN_ID).getAsString());
+            var rawId = JsonArgs.optString(obj, KEY_RUN_ID);
+            if (rawId == null) return;
+            Long parsedId = parseLongOrNull(rawId);
             if (parsedId == null) return;
             if (!idSet.contains(parsedId)) return;
             if (result.containsKey(parsedId)) return; // keep first (most recent due to ORDER BY)
-            if (obj.has("mode") && !obj.get("mode").isJsonNull()) {
-                result.put(parsedId, obj.get("mode").getAsString());
-            }
+            var mode = JsonArgs.optString(obj, "mode");
+            if (mode != null) result.put(parsedId, mode);
         } catch (Exception _) {
             // Malformed details — skip, the row simply won't carry a mode.
         }
