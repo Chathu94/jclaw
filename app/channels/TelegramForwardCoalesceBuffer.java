@@ -72,14 +72,6 @@ public final class TelegramForwardCoalesceBuffer {
     private TelegramForwardCoalesceBuffer() {}
 
     /**
-     * Buffer key for {@code (chatId, messageThreadId, fromId)}. Threads and
-     * senders are kept distinct so concurrent forward bursts don't merge.
-     */
-    static String bufferKey(InboundMessage m) {
-        return m.chatId() + "|" + m.messageThreadId() + "|" + m.fromId();
-    }
-
-    /**
      * Buffer {@code incoming} (a forwarded message) for burst coalescing. The
      * first forward for a key opens a bucket and schedules the idle flush; later
      * forwards for the same key append and reset the timer. When the window
@@ -93,7 +85,7 @@ public final class TelegramForwardCoalesceBuffer {
      */
     public static void add(InboundMessage incoming,
                            Consumer<InboundMessage> dispatcher) {
-        BUFFER.offer(bufferKey(incoming), incoming, dispatcher);
+        BUFFER.offer(incoming.bufferKey(), incoming, dispatcher);
     }
 
     private static boolean accumulate(Bucket bucket, InboundMessage incoming, boolean freshBucket) {
@@ -111,15 +103,9 @@ public final class TelegramForwardCoalesceBuffer {
     private static InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
         if (first == null) return null;
-        // Keep the FIRST piece's metadata verbatim (messageId, threadId,
-        // botMentioned, replyContext, sender + chat fields); text is the joined
-        // forwarded bodies, attachments the accumulation of the whole burst.
-        // No media-group id: a forward burst is not a single album.
-        var merged = new InboundMessage(
-                first.chatId(), first.chatType(), bucket.text.toString(),
-                first.fromId(), first.fromUsername(), first.fromDisplayName(),
-                first.botMentioned(), List.copyOf(bucket.attachments), null,
-                first.messageId(), first.messageThreadId(), first.replyContext());
+        // A forwarded album arrives here, not on the media-group lane, so the
+        // merge must drop its media_group_id: a forward burst is not one album.
+        var merged = first.coalesced(bucket.text.toString(), List.copyOf(bucket.attachments));
         EventLogger.info("channel", null, "telegram",
                 "Forward coalesce buffer flushing burst as one inbound (%d chars, %d attachments)".formatted(
                         merged.text().length(), bucket.attachments.size()));
@@ -130,7 +116,7 @@ public final class TelegramForwardCoalesceBuffer {
      *  Keyed by a representative message (same {@code (chatId, threadId,
      *  fromId)} as the buffered pieces). */
     public static void flushForTest(InboundMessage representative) {
-        BUFFER.flushForTest(bufferKey(representative));
+        BUFFER.flushForTest(representative.bufferKey());
     }
 
     /** Visible for tests: clear all buffered state between test cases. */

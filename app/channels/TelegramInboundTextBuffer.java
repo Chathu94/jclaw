@@ -71,14 +71,6 @@ public final class TelegramInboundTextBuffer {
 
     private TelegramInboundTextBuffer() {}
 
-    /**
-     * Buffer key for {@code (chatId, messageThreadId, fromId)}. Threads and
-     * senders are kept distinct so concurrent long pastes don't merge.
-     */
-    static String bufferKey(InboundMessage m) {
-        return m.chatId() + "|" + m.messageThreadId() + "|" + m.fromId();
-    }
-
     /** True when {@code m} is a plain-text message eligible for reassembly:
      *  non-null text, no attachments, no media-group id. */
     public static boolean isEligible(InboundMessage m) {
@@ -106,7 +98,7 @@ public final class TelegramInboundTextBuffer {
      */
     public static void add(InboundMessage incoming,
                            Consumer<InboundMessage> dispatcher) {
-        BUFFER.offer(bufferKey(incoming), incoming, dispatcher);
+        BUFFER.offer(incoming.bufferKey(), incoming, dispatcher);
     }
 
     // dispatchNow is "no open bucket AND below threshold" — a normal short
@@ -129,16 +121,9 @@ public final class TelegramInboundTextBuffer {
     private static InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
         if (first == null) return null;
-        // Keep the FIRST piece's metadata verbatim (messageId, threadId,
-        // botMentioned, replyContext, sender fields, chat fields); only the
-        // text is the concatenation of all buffered pieces. Attachments are
-        // empty by construction (eligible pieces carry none) and there is no
-        // media-group id.
-        var merged = new InboundMessage(
-                first.chatId(), first.chatType(), bucket.text.toString(),
-                first.fromId(), first.fromUsername(), first.fromDisplayName(),
-                first.botMentioned(), List.<PendingAttachment>of(), null,
-                first.messageId(), first.messageThreadId(), first.replyContext());
+        // Attachments are empty rather than accumulated: isEligible admits only
+        // pieces that carry none.
+        var merged = first.coalesced(bucket.text.toString(), List.of());
         EventLogger.info("channel", null, "telegram",
                 "Inbound text buffer flushing %d chars as one inbound".formatted(
                         merged.text().length()));
@@ -149,7 +134,7 @@ public final class TelegramInboundTextBuffer {
      *  Keyed by a representative message (same {@code (chatId, threadId,
      *  fromId)} as the buffered pieces). */
     public static void flushForTest(InboundMessage representative) {
-        BUFFER.flushForTest(bufferKey(representative));
+        BUFFER.flushForTest(representative.bufferKey());
     }
 
     /** Visible for tests: clear all buffered state between test cases. */

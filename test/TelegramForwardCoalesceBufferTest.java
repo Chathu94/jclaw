@@ -139,6 +139,25 @@ class TelegramForwardCoalesceBufferTest extends UnitTest {
     }
 
     @Test
+    void forwardedAlbumDropsItsMediaGroupId() {
+        var dispatched = new AtomicReference<InboundMessage>();
+        // Forwards are routed before the media-group lane, so a forwarded album
+        // reaches THIS buffer with its media_group_id still set.
+        var photo = new InboundMessage(
+                "chat", "private", "cap", "user", "handle", "Display Name", false,
+                List.of(new PendingAttachment(
+                        "F1", null, "image/jpeg", 100L, models.MessageAttachment.KIND_IMAGE)),
+                "group-A", 100, 7, null);
+
+        TelegramForwardCoalesceBuffer.add(photo, dispatched::set);
+        TelegramForwardCoalesceBuffer.flushForTest(photo);
+
+        assertNotNull(dispatched.get());
+        assertNull(dispatched.get().mediaGroupId(),
+                "a coalesced forward burst is not one album — the group id is consumed");
+    }
+
+    @Test
     void noFlushWithoutBufferedBucket() {
         var count = new AtomicInteger();
         var stray = fwd("chat", null, "user", "x", 1, false, null);

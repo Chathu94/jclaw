@@ -108,4 +108,30 @@ public record InboundMessage(String chatId, String chatType, String text,
                 botMentioned, attachments, mediaGroupId, messageId,
                 messageThreadId, null);
     }
+
+    /**
+     * Coalescing key {@code (chatId, messageThreadId, fromId)} shared by the
+     * Telegram inbound-text and forward-coalesce lanes. Topics and senders stay
+     * distinct so concurrent bursts never interleave into one turn.
+     */
+    public String bufferKey() {
+        return chatId + "|" + messageThreadId + "|" + fromId;
+    }
+
+    /**
+     * This message as the flushed product of a coalescing buffer: every
+     * sender / chat / message component preserved, {@code text} and
+     * {@code attachments} replaced by the burst's merged content, and
+     * {@code mediaGroupId} cleared because the group has been consumed into
+     * this one inbound.
+     *
+     * <p>A wither rather than a 12-arg constructor re-listed at each lane: the
+     * media-group lane once merged through a 7-arg overload that silently
+     * dropped five components (JCLAW-397).
+     */
+    public InboundMessage coalesced(String text, List<PendingAttachment> attachments) {
+        return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
+                fromDisplayName, botMentioned, attachments, null,
+                messageId, messageThreadId, replyContext);
+    }
 }

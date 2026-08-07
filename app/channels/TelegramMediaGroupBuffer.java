@@ -82,16 +82,7 @@ public final class TelegramMediaGroupBuffer {
     private static InboundMessage merge(Bucket bucket) {
         var first = bucket.firstMessage;
         if (first == null) return null;
-        // JCLAW-397: build the merged inbound with the FULL sender/message shape
-        // so an album keeps the first piece's fromDisplayName / botMentioned /
-        // messageId / messageThreadId / replyContext. The previous 7-arg ctor
-        // silently dropped them, diverging from the text and forward lanes.
-        // mediaGroupId is null — the group has been consumed into one inbound.
-        var merged = new InboundMessage(
-                first.chatId(), first.chatType(), bucket.text,
-                first.fromId(), first.fromUsername(), first.fromDisplayName(),
-                first.botMentioned(), List.copyOf(bucket.attachments), null,
-                first.messageId(), first.messageThreadId(), first.replyContext());
+        var merged = first.coalesced(bucket.text, List.copyOf(bucket.attachments));
         EventLogger.info("channel", null, "telegram",
                 "Media group %s flushing %d attachments as one inbound".formatted(
                         bucket.mediaGroupId, bucket.attachments.size()));
