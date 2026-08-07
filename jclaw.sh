@@ -3438,7 +3438,12 @@ do_test() {
     # against a stale .nuxt / vite transform cache — the class of failure that
     # slipped a broken settings.vue past the local pre-push but failed the clean
     # CI build. Regenerating codegen makes the local gate match Jenkins (~15s).
-    (cd "$SCRIPT_DIR/frontend" && rm -rf .nuxt node_modules/.vite && npx nuxi prepare && pnpm test) 2>&1 | tee "$frontend_log"
+    # `pnpm exec`, not `npx`: npx resolves nuxi from its own cache when the tree has
+    # no node_modules (a fresh worktree), and that copy cannot resolve @nuxt/kit from
+    # the project — prepare then fails and && skips the suite, leaving .nuxt deleted
+    # so the later lint leg fails too. pnpm exec installs first, then runs the
+    # project's own nuxi.
+    (cd "$SCRIPT_DIR/frontend" && rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare && pnpm test) 2>&1 | tee "$frontend_log"
     frontend_rc=${PIPESTATUS[0]}
     set -e
     frontend_elapsed=$(_elapsed "$t0")
