@@ -1758,7 +1758,7 @@ function zoneForTaskRender(task: Task): string | undefined {
         <div
           v-for="msg in peekMessages"
           :key="msg.id"
-          :class="msg.role === 'USER' ? 'ml-8' : msg.role === 'TOOL' ? 'ml-4' : ''"
+          :class="msg.role === 'user' ? 'ml-8' : msg.role === 'tool' ? 'ml-4' : ''"
         >
           <div class="flex items-center gap-2 mb-0.5">
             <span class="text-[10px] font-mono uppercase text-fg-muted">{{ msg.role }}</span>

@@ -42,7 +42,7 @@ public class ApiTaskSearchController extends Controller {
             var agent = task != null ? task.agent : null;
             return new TranscriptSearchHit(
                     m.id,
-                    m.role != null ? m.role.name() : null,
+                    m.role != null ? m.role.wireValue() : null,
                     m.content,
                     m.createdAt != null ? m.createdAt.toString() : null,
                     run != null ? run.id : null,

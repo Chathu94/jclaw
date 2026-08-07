@@ -85,7 +85,7 @@ public class ApiTaskRunsController extends Controller {
         static TaskRunMessageView of(TaskRunMessage m) {
             return new TaskRunMessageView(
                     m.id, m.turnIndex,
-                    m.role != null ? m.role.name() : null,
+                    m.role != null ? m.role.wireValue() : null,
                     m.content, m.reasoning, m.toolCalls, m.toolResults,
                     m.truncated,
                     m.createdAt != null ? m.createdAt.toString() : null);

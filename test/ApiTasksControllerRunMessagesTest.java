@@ -116,7 +116,7 @@ class ApiTasksControllerRunMessagesTest extends FunctionalTest {
         assertTrue(body.contains("the assistant reply"), body);
         assertTrue(body.indexOf("the user prompt") < body.indexOf("the assistant reply"),
                 "turn 0 (USER) must appear before turn 1 (ASSISTANT); body=" + body);
-        assertTrue(body.contains("\"role\":\"USER\""), body);
+        assertTrue(body.contains("\"role\":\"user\""), body);
         assertTrue(body.contains("\"turnIndex\":0"), body);
     }
 
