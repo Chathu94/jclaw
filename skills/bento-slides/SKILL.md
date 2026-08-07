@@ -1,7 +1,6 @@
 ---
 name: bento-slides
 description: >-
-version: 1.0.1
   Create and edit Bento presentations — single-file .bento.html decks whose
   document is plain JSON in a "#bento-doc" script block. Use whenever the user
   wants a slide deck or presentation: starting from NOTHING (it downloads the
@@ -14,6 +13,7 @@ author: main
 tools: [exec, filesystem, web_fetch, browser]
 commands: []
 icon: 🍱
+version: 1.0.1
 ---
 # Authoring Bento decks
 

@@ -190,6 +190,26 @@ class SkillLoaderTest extends UnitTest {
 
     // ─── parseSkillFile (disk) ───────────────────────────────────────────────
 
+    // ─── block-scalar frontmatter (JCLAW-995) ────────────────────────────────
+
+    @Test
+    void blockScalarValueParsesInsteadOfYieldingTheIndicator() {
+        assertEquals("bob smith", SkillLoader.extractYamlValue("author: |\n  bob smith\n", "author"),
+                "`|` header must fall through to the block-scalar pattern");
+        assertEquals("bob smith", SkillLoader.extractYamlValue("author: >-\n  bob smith\n", "author"),
+                "a chomping indicator (`>-`) is part of the header, not the value");
+    }
+
+    @Test
+    void foldedDescriptionAcrossLinesJoinsIntoOneValue() {
+        var info = SkillLoader.parseSkillContent(
+                "---\nname: deck\ndescription: >-\n  Create decks whose document\n  is plain JSON.\n---\n# body",
+                LOC);
+        assertNotNull(info);
+        assertEquals("Create decks whose document\nis plain JSON.", info.description(),
+                "a folded description must reach the model, not \">-\"");
+    }
+
     @Test
     void parseSkillFileNonexistentReturnsNull() {
         assertNull(SkillLoader.parseSkillFile(Path.of("/no/such/dir/SKILL.md")),

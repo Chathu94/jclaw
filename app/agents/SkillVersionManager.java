@@ -206,11 +206,10 @@ public final class SkillVersionManager {
             }
         } else {
             var v = targetVersion != null ? targetVersion : INITIAL_VERSION;
-            if (frontmatter.contains("description:")) {
-                newFrontmatter = frontmatter.replaceFirst("(?m)(^description:.*$)", "$1\nversion: " + v);
-            } else {
-                newFrontmatter = frontmatter.stripTrailing() + "\nversion: " + v;
-            }
+            // Always append. Inserting after the `description:` line landed the version
+            // inside a block scalar (`description: >-`), splitting the header from its
+            // indented body and corrupting the description — see skills/bento-slides.
+            newFrontmatter = frontmatter.stripTrailing() + "\nversion: " + v;
         }
         return before + newFrontmatter + after;
     }

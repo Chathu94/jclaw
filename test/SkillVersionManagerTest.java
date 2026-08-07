@@ -185,6 +185,17 @@ class SkillVersionManagerTest extends UnitTest {
     }
 
     @Test
+    void ensureVersionNeverLandsInsideABlockScalarDescription() {
+        var input = "---\nname: x\ndescription: >-\n  line one\n  line two\nicon: z\n---\n# body";
+        var result = callEnsureVersion(input, "1.2.3");
+        assertTrue(result.contains("  line one\n  line two"),
+                "the block body must stay contiguous under its header: " + result);
+        assertEquals("line one\nline two",
+                agents.SkillLoader.extractYamlValue(result, "description"),
+                "the stamped frontmatter must still parse its description: " + result);
+    }
+
+    @Test
     void ensureVersionAppendsAtEndOfFrontmatterWhenNoDescription() {
         var input = "---\nname: x\n---\n# body";
         var result = callEnsureVersion(input, "4.0.0");

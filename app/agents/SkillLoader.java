@@ -394,12 +394,14 @@ public class SkillLoader {
     private static final Pattern ICON_VALUE = Pattern.compile("^icon:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     // S5998: possessive `++` prevents catastrophic backtracking on pathological YAML
     // input. Equivalent for any valid frontmatter; just refuses to backtrack.
-    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern AUTHOR_MULTI = Pattern.compile("^author:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern ICON_MULTI = Pattern.compile("^icon:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>][-+]?\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>][-+]?\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>][-+]?\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>][-+]?\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern AUTHOR_MULTI = Pattern.compile("^author:\\s*[|>][-+]?\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern ICON_MULTI = Pattern.compile("^icon:\\s*[|>][-+]?\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    /** A YAML block-scalar indicator (`|`, `>`) with its optional chomping modifier. */
+    private static final Pattern BLOCK_SCALAR_HEADER = Pattern.compile("[|>][-+]?");
     private static final Pattern TOOLS_INLINE_LIST = Pattern.compile("^tools:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
     private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern COMMANDS_INLINE_LIST = Pattern.compile("^commands:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
@@ -570,7 +572,10 @@ public class SkillLoader {
         var matcher = valuePattern.matcher(yaml);
         if (matcher.find()) {
             var value = matcher.group(1).strip();
-            return value.isEmpty() ? null : value;
+            // A block-scalar header (`key: |`, `key: >-`) matches the scalar pattern and
+            // captures the indicator itself, so returning here would yield ">-" as the
+            // value and leave every *_MULTI pattern below unreachable.
+            if (!value.isEmpty() && !BLOCK_SCALAR_HEADER.matcher(value).matches()) return value;
         }
         var multiPattern = switch (key) {
             case "name" -> NAME_MULTI;
