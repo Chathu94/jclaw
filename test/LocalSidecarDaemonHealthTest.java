@@ -2,6 +2,9 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.LocalSidecarDaemon;
 
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -9,7 +12,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** JCLAW-637: the /health identity-parsing path. JCLAW-830: the single-flight /
- *  safe-publication concurrency contract of the daemon lifecycle. */
+ *  safe-publication concurrency contract of the daemon lifecycle. JCLAW-989: the
+ *  startup-failure message that distinguishes a squatted port from a broken child. */
 class LocalSidecarDaemonHealthTest extends UnitTest {
 
     /** A side-effect-free config: none of the spawn/health paths that would touch
@@ -144,6 +148,56 @@ class LocalSidecarDaemonHealthTest extends UnitTest {
 
         assertTrue(stopReturned,
                 "stop() must not stall behind an in-flight spawn holding the single-flight lock");
+    }
+
+    /** As {@link #testConfig()} but on a caller-chosen port, so the JCLAW-989 message
+     *  tests can hold that port for the duration of the assertion. */
+    private static LocalSidecarDaemon.Config configOnPort(int port) {
+        return new LocalSidecarDaemon.Config(
+                "sidecar/none", "data/none", "test.sidecar.jclaw989", port, 5,
+                "test", "test-sidecar", "test sidecar", "hint", RuntimeException::new);
+    }
+
+    private static ServerSocket boundLoopbackSocket() throws Exception {
+        var s = new ServerSocket();
+        s.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 1);
+        return s;
+    }
+
+    /** JCLAW-989: the probe the startup message depends on — it must not read as
+     *  always-occupied, or every failure would blame a squatter. */
+    @Test
+    void portOccupied_distinguishesALiveListenerFromAFreePort() throws Exception {
+        int port;
+        try (var held = boundLoopbackSocket()) {
+            port = held.getLocalPort();
+            assertTrue(LocalSidecarDaemon.portOccupied(port), "a live listener must read as occupied");
+        }
+        assertFalse(LocalSidecarDaemon.portOccupied(port), "the port must read as free once released");
+    }
+
+    /** JCLAW-989: a child that died of EADDRINUSE must name the squatter. "check the logs"
+     *  is unactionable there — the logs belong to the squatter's long-dead JVM. */
+    @Test
+    void startupExitMessage_namesTheHeldPortWhenSomethingElseHasIt() throws Exception {
+        try (var held = boundLoopbackSocket()) {
+            var msg = new LocalSidecarDaemon(configOnPort(held.getLocalPort())).startupExitMessage(1);
+            assertTrue(msg.contains("already held"), msg);
+            assertTrue(msg.contains(String.valueOf(held.getLocalPort())), msg);
+        }
+    }
+
+    /** JCLAW-989: a child that died of its own startup error keeps the original message —
+     *  the port is free, so there is no squatter to blame. */
+    @Test
+    void startupExitMessage_fallsBackToTheLogHintWhenThePortIsFree() throws Exception {
+        int port;
+        try (var s = boundLoopbackSocket()) {
+            port = s.getLocalPort();
+        }
+        var msg = new LocalSidecarDaemon(configOnPort(port)).startupExitMessage(2);
+        assertTrue(msg.endsWith("check the logs"), msg);
+        assertFalse(msg.contains("already held"), msg);
     }
 
     /** JCLAW-830: stop() on a daemon that never spawned is a safe, idempotent no-op. */

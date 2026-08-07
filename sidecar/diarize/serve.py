@@ -495,7 +495,34 @@ def _idle_watcher(state: SidecarState):
             os._exit(0)
 
 
+class _ResilientStderr:
+    """stderr whose writes never raise. JCLAW-989: a sidecar that outlives its JVM has no
+    reader left on the pipe, and an unguarded BrokenPipeError there killed the idle watcher
+    before its os._exit (leaving the process immortal) and aborted send_response's access-log
+    line before any byte reached the socket (leaving it a port squatter that answered nothing)."""
+
+    def __init__(self, raw):
+        self._raw = raw
+
+    def write(self, s):
+        try:
+            return self._raw.write(s)
+        except (OSError, ValueError):
+            return len(s)
+
+    def flush(self):
+        try:
+            self._raw.flush()
+        except (OSError, ValueError):
+            pass
+
+    def __getattr__(self, name):
+        return getattr(self._raw, name)
+
+
 def main():
+    # An orphaned sidecar must stay adoptable (JCLAW-637), so install this before anything logs.
+    sys.stderr = _ResilientStderr(sys.stderr)
     ap = argparse.ArgumentParser(description="jclaw diarization sidecar")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, required=True)

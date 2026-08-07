@@ -11,6 +11,9 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -280,9 +283,7 @@ public final class LocalSidecarDaemon {
             }
             Process p = process; // volatile snapshot — stop() may null it under us
             if (p != null && !p.isAlive()) {
-                throw cfg.fail().apply(
-                        "%s exited during startup (exit %d) — check the logs"
-                                .formatted(cfg.displayName(), p.exitValue()), null);
+                throw cfg.fail().apply(startupExitMessage(p.exitValue()), null);
             }
             if (isHealthy()) return;
             try {
@@ -295,6 +296,33 @@ public final class LocalSidecarDaemon {
         throw cfg.fail().apply(
                 "%s did not become healthy within %ds — %s".formatted(cfg.displayName(), timeoutS, cfg.startupHint()),
                 null);
+    }
+
+    /**
+     * JCLAW-989: name the real cause when the child died because the port was taken —
+     * an unresponsive squatter is the one startup failure whose fix is not in the logs.
+     * Reports rather than evicting: on the fixed port the squatter may be a sibling
+     * worktree's healthy-but-busy sidecar, and killing that is worse than failing.
+     */
+    public String startupExitMessage(int exitValue) {
+        if (!portOccupied(port())) {
+            return "%s exited during startup (exit %d) — check the logs"
+                    .formatted(cfg.displayName(), exitValue);
+        }
+        return ("%s exited during startup (exit %d): port %d is already held by a process that is not "
+                + "answering /health — stop that process and retry")
+                .formatted(cfg.displayName(), exitValue, port());
+    }
+
+    /** Whether loopback {@code port} is already bound — the EADDRINUSE the child would have hit. */
+    public static boolean portOccupied(int port) {
+        try (var probe = new ServerSocket()) {
+            probe.setReuseAddress(false); // a live listener and a lingering TIME_WAIT must both read as occupied
+            probe.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 1);
+            return false;
+        } catch (IOException _) {
+            return true;
+        }
     }
 
     /** Cheap liveness check: GET /health with a short per-call deadline. */
