@@ -319,6 +319,32 @@ The page reconnects on its own: it waits for the backend to go down, then polls 
 
 If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
 
+## Source-only controls
+
+Two operator controls have no panel on this page. They're set and read through the API rather than the UI, so they're listed here to keep them findable.
+
+| Key / endpoint            | Default        | Meaning                                                                                       |
+|---------------------------|----------------|-----------------------------------------------------------------------------------------------|
+| `web_fetch.allowlist`     | (empty)        | Comma-separated hosts the `web_fetch` tool may reach. Empty means unrestricted.                |
+| `GET /api/metrics/db-pool`| —              | Current HikariCP occupancy: `active`, `idle`, `total`, `awaiting`, `max`. Admin session required. |
+
+Set the allowlist with `POST /api/config`:
+
+```bash
+curl -X POST http://localhost:9000/api/config \
+  -H 'Content-Type: application/json' \
+  --cookie 'PLAY_SESSION=…' \
+  -d '{"key": "web_fetch.allowlist", "value": "example.com, docs.example.org"}'
+```
+
+An entry matches that exact host and any subdomain of it, so `example.com` covers `docs.example.com` but not `notexample.com`. The check runs on the initial URL **and on every redirect hop**, so an allowed host can't bounce a fetch onward to one you never listed. Delete the key (or set it blank) to go back to unrestricted.
+
+:::gotcha
+The allowlist is off by default, and that default is the shipped state on every install. `SsrfGuard` already blocks `web_fetch` from reaching loopback, link-local and private ranges — but nothing constrains what *leaves*. An agent following a prompt injection can encode conversation content into a URL on any public host it's allowed to reach. If that matters for your install, set the allowlist; leaving it empty is a choice, not a safe default.
+:::
+
+For the pool endpoint, `awaiting` is the number that signals trouble: a sustained non-zero value means callers are blocking on `db.pool.timeout` waiting for a connection. `active` sitting near `max` is normal on a busy system.
+
 ## Unmanaged keys
 
 A read-only diagnostic list that appears only when the Config DB contains keys not owned by any section above. Usually stale rows from a prior schema or mid-migration state — a signal that something needs cleanup, not a place to add new config.

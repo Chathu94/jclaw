@@ -35,6 +35,7 @@ const MANAGED_PREFIXES = [
   // tuning keys, which are code defaults with no UI surface.
   'verification.', // JCLAW-836: tool-result check toggles — seeded by DefaultConfigJob, no UI surface
   'shell.', // Shell execution defaults — Settings (allowlist + timeout)
+  'web_fetch.', // JCLAW-773: outbound-host allowlist — operator-set through the Settings API, no UI surface
   'playwright.', // JCLAW-172: namespace retired but kept in the prefix list
   // so leftover playwright.enabled / playwright.headless rows on upgraded
   // installs don't surface as "Unmanaged" diagnostic noise.
