@@ -1850,59 +1850,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </div>
           </button>
         </div>
-        <!-- Core-memory usage: per agent, because the cap is (JCLAW-981) -->
-        <div
-          v-if="coreMigration"
-          class="px-4 py-2.5 border-t border-border"
-          data-testid="agent-core-memory"
-        >
-          <div class="flex items-center justify-between gap-3">
-            <div class="min-w-0">
-              <span class="text-sm font-medium text-fg-strong">Core memories</span>
-              <span
-                v-if="coreMigration.running"
-                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
-              >migrating</span>
-              <span
-                v-else-if="coreMigration.overCap"
-                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
-                data-testid="agent-core-over-cap"
-              >over the limit</span>
-            </div>
-            <button
-              type="button"
-              class="shrink-0 px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
-              :disabled="!coreMigration.overCap || coreMigration.running"
-              data-testid="agent-core-migrate"
-              @click="startCoreMigration"
-            >
-              {{ coreMigration.running ? 'Migrating…' : 'Migrate excess' }}
-            </button>
-          </div>
-          <p class="text-xs text-fg-muted mt-1">
-            {{ coreMigration.liveCore }} of {{ coreMigration.cap }} allowed.
-            <template v-if="coreMigration.overCap">
-              The excess is not loaded into any turn — it holds the core category without the
-              benefit. Migrating asks this agent to file each one under the category that fits
-              it best; nothing is deleted, and anything it cannot classify stays core so you
-              can run this again.
-            </template>
-          </p>
-          <p
-            v-if="coreMigration.running && coreMigration.total > 0"
-            class="text-xs text-fg-muted mt-1"
-            data-testid="agent-core-migrate-progress"
-          >
-            Recategorised {{ coreMigration.processed }} of {{ coreMigration.total }}.
-          </p>
-          <p
-            v-if="coreMigrationError || coreMigration.error"
-            class="text-xs text-red-700 dark:text-red-400 mt-1"
-            data-testid="agent-core-migrate-error"
-          >
-            {{ coreMigrationError || `Last run failed: ${coreMigration.error}` }}
-          </p>
-        </div>
 
         <div
           v-if="memoryAutocaptureEnabled"
@@ -1956,6 +1903,72 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </select>
             </label>
           </div>
+        </div>
+      </div>
+
+      <!-- Core memories (JCLAW-981): the always-loaded tier and its cap. Its own card
+           rather than a row under Memory Autocapture, which governs none of it — core
+           memories are injected by prompt assembly whether or not capture runs, and the
+           migration classifier reads the agent's own model, not the extractor override. -->
+      <div
+        v-if="editing && coreMigration"
+        class="bg-surface-elevated border border-border"
+      >
+        <div
+          class="px-4 py-2.5"
+          data-testid="agent-core-memory"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <span class="text-sm font-medium text-fg-strong">Core memories</span>
+              <span
+                v-if="coreMigration.running"
+                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+              >migrating</span>
+              <span
+                v-else-if="coreMigration.overCap"
+                class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+                data-testid="agent-core-over-cap"
+              >over the limit</span>
+            </div>
+            <button
+              type="button"
+              class="shrink-0 px-3 py-1.5 text-xs border border-border hover:bg-muted/40 transition-colors disabled:opacity-50"
+              :disabled="!coreMigration.overCap || coreMigration.running"
+              data-testid="agent-core-migrate"
+              @click="startCoreMigration"
+            >
+              {{ coreMigration.running ? 'Migrating…' : 'Migrate excess' }}
+            </button>
+          </div>
+          <div class="text-xs text-fg-muted mt-0.5">
+            Always loaded into this agent's prompt, independent of Memory Autocapture.
+            Migrating is run by the agent's own model — the extractor model set under
+            Memory Autocapture does not apply here.
+          </div>
+          <p class="text-xs text-fg-muted mt-1">
+            {{ coreMigration.liveCore }} of {{ coreMigration.cap }} allowed.
+            <template v-if="coreMigration.overCap">
+              The excess is not loaded into any turn — it holds the core category without the
+              benefit. Migrating asks this agent to file each one under the category that fits
+              it best; nothing is deleted, and anything it cannot classify stays core so you
+              can run this again.
+            </template>
+          </p>
+          <p
+            v-if="coreMigration.running && coreMigration.total > 0"
+            class="text-xs text-fg-muted mt-1"
+            data-testid="agent-core-migrate-progress"
+          >
+            Recategorised {{ coreMigration.processed }} of {{ coreMigration.total }}.
+          </p>
+          <p
+            v-if="coreMigrationError || coreMigration.error"
+            class="text-xs text-red-700 dark:text-red-400 mt-1"
+            data-testid="agent-core-migrate-error"
+          >
+            {{ coreMigrationError || `Last run failed: ${coreMigration.error}` }}
+          </p>
         </div>
       </div>
 
