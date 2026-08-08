@@ -31,6 +31,7 @@ import {
 // (JCLAW-271); Heroicons' UserGroup is too tilted toward a "team" gloss to
 // read as the parent/child fan-out we want.
 import { BotMessageSquare, PanelLeftClose, PanelLeftOpen, UsersRound } from '@lucide/vue'
+import { useOnline } from '@vueuse/core'
 import { loadTourStatus } from '~/composables/useGuidedTour'
 import TourIntroDialog from '~/components/TourIntroDialog.vue'
 
@@ -100,6 +101,16 @@ async function checkStatus() {
     apiOnline.value = false
   }
 }
+
+// The 30s poll can leave the dot green for up to 30s after the link drops.
+// navigator.onLine fires immediately, but is only trustworthy when false —
+// true merely means an interface has a route, not that the backend answers —
+// so a drop marks us offline directly while a recovery only re-probes.
+const online = useOnline()
+watch(online, (up) => {
+  if (up) checkStatus()
+  else apiOnline.value = false
+})
 
 let statusInterval: ReturnType<typeof setInterval>
 
