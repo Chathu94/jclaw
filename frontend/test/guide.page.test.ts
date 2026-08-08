@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Guide from '~/pages/guide.vue'
 import { sections } from '~/components/guide/sections'
@@ -24,6 +24,13 @@ import { sections } from '~/components/guide/sections'
  * section — the same cold-load behavior the operator sees.
  */
 
+// The page itself calls no API, but the cases below navigate, and any
+// navigation runs the global auth middleware — which probes /api/config and
+// redirects to /login (dropping the fragment) when it cannot reach it. Merely
+// registering the endpoint causes no request, so the "no API calls" case that
+// mounts without navigating is unaffected.
+registerEndpoint('/api/config', () => ({ entries: [] }))
+
 describe('User Guide page', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -37,6 +44,47 @@ describe('User Guide page', () => {
       expect(item.exists()).toBe(true)
       expect(item.text()).toContain(s.title)
     }
+  })
+
+  it('writes the section into the URL when a TOC entry is picked', async () => {
+    // Attached to the document because jumpTo() resolves its scroll target with
+    // document.querySelector and bails when it finds nothing — detached, the
+    // click is a no-op and this would pass for the wrong reason.
+    const component = await mountSuspended(Guide, { route: '/guide', attachTo: document.body })
+    await flushPromises()
+    const router = useRouter()
+
+    try {
+      await component.find('[data-testid="guide-toc-item-prompts"]').trigger('click')
+
+      // Without this the address bar stays at a bare /guide however far the
+      // reader navigates, so there is nothing to copy or bookmark.
+      await vi.waitFor(() => expect(router.currentRoute.value.hash).toBe('#prompts'))
+    }
+    finally {
+      component.unmount()
+    }
+  })
+
+  it('keeps a heading-level fragment rather than coarsening it to the section', async () => {
+    const component = await mountSuspended(Guide, { route: '/guide#subagents-async-yield' })
+    await flushPromises()
+
+    // Landing on a heading anchor resolves the owning section for the TOC
+    // highlight, which must not then overwrite the more precise fragment the
+    // reader arrived on.
+    expect(component.find('[data-testid="guide-toc-item-subagents"]').exists()).toBe(true)
+    expect(useRouter().currentRoute.value.hash).toBe('#subagents-async-yield')
+  })
+
+  it('resolves a fragment to the longest matching section id, not the first', async () => {
+    // `subagents-tasks-reminders` is prefixed by `subagents`, which sorts
+    // earlier. First-prefix-wins highlighted the wrong section and, once the
+    // URL began tracking the reader, rewrote the fragment to match it.
+    await mountSuspended(Guide, { route: '/guide#subagents-tasks-reminders' })
+    await flushPromises()
+
+    expect(useRouter().currentRoute.value.hash).toBe('#subagents-tasks-reminders')
   })
 
   it('emits a section sentinel for every registered section', async () => {

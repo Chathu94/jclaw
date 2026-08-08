@@ -19,12 +19,13 @@
  * hard refreshes work.
  */
 import { computed, onMounted, onUnmounted, ref, nextTick, watch } from 'vue'
-import { useRoute } from '#imports'
+import { useRoute, useRouter } from '#imports'
 import { ArrowUpIcon, Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { sections } from '~/components/guide/sections'
 import GuideRenderer from '~/components/guide/GuideRenderer.vue'
 
 const route = useRoute()
+const router = useRouter()
 const activeSectionId = ref<string>(sections[0]?.id ?? '')
 const mobileNavOpen = ref(false)
 
@@ -114,6 +115,20 @@ function scrollToTop() {
  * from within a section (the inbound URL change fires `route.hash` but
  * Nuxt's router doesn't auto-scroll on same-route hash changes).
  */
+/**
+ * Owning section for a URL fragment: an exact id first, then the longest id the
+ * fragment is prefixed by. Order matters because ids nest — a plain
+ * first-prefix-wins match resolves `subagents-tasks-reminders` to `subagents`
+ * and highlights the wrong entry.
+ */
+function sectionIdForHash(bare: string): string | undefined {
+  const exact = sections.find(s => bare === s.id)
+  if (exact) return exact.id
+  return sections
+    .filter(s => bare.startsWith(`${s.id}-`))
+    .sort((a, b) => b.id.length - a.id.length)[0]?.id
+}
+
 function jumpToHash(hash: string) {
   if (!hash) return
   const bare = hash.replace(/^#/, '')
@@ -122,8 +137,7 @@ function jumpToHash(hash: string) {
   if (el) {
     el.scrollIntoView({ behavior: 'auto', block: 'start' })
   }
-  // The section id is either the literal fragment or its prefix-before-dash.
-  const sectionId = sections.find(s => bare === s.id || bare.startsWith(`${s.id}-`))?.id
+  const sectionId = sectionIdForHash(bare)
   if (sectionId) activeSectionId.value = sectionId
 }
 
@@ -138,9 +152,34 @@ onMounted(async () => {
   updateScrolled()
 })
 
+/**
+ * Publish the section being read back into the address bar, so the URL always
+ * names something the reader can copy — from a TOC click or from plain
+ * scrolling, since both land here through {@code activeSectionId}.
+ *
+ * {@code replace}, not {@code push}: reading down the page crosses a dozen
+ * sections, and each one as a history entry would make Back walk the guide
+ * backwards instead of leaving it.
+ */
+let syncingHash = false
+
+watch(activeSectionId, (id) => {
+  if (!id) return
+  // A heading-level fragment (`#subagents-async-yield`) already resolves to
+  // this section, and is more precise than the section id — don't coarsen it
+  // while the reader is still inside that section.
+  if (sectionIdForHash(route.hash.replace(/^#/, '')) === id) return
+  syncingHash = true
+  router.replace({ hash: `#${id}` }).finally(() => {
+    syncingHash = false
+  })
+})
+
 // Same-route hash changes (a click on a `/guide#section-id` link from
-// inside the page) don't reload the page; jump to the new anchor.
+// inside the page) don't reload the page; jump to the new anchor. Our own
+// writes are skipped — the view is already where they say.
 watch(() => route.hash, (h) => {
+  if (syncingHash) return
   jumpToHash(h)
 })
 
