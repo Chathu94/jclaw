@@ -203,11 +203,12 @@ interface NavGroup { label?: string, items: NavItem[] }
 
 /**
  * Breadcrumb trail for the current route, rooted at the nav entry that matches
- * the first path segment and descending through nested segments. Pages that
- * edit in-place (no URL change) can append a sub-crumb via
- * {@link useBreadcrumbExtra} — e.g. {@code /agents} + extra "main" renders as
- * {@code Agents > main}. The last crumb (route segment or sub-crumb, whichever
- * comes last) is the current page, rendered plain; preceding crumbs link back.
+ * the first path segment and descending through nested segments. Pages can
+ * append a sub-crumb via {@link useBreadcrumbExtra} to name the entity the URL
+ * only identifies by id — e.g. {@code /agents/7752} renders as
+ * {@code Agents > Testing}. The last crumb (route segment or sub-crumb,
+ * whichever comes last) is the current page, rendered plain; preceding crumbs
+ * link back.
  */
 const crumbs = computed<Crumb[]>(() => {
   const path = route.path
@@ -222,6 +223,11 @@ const crumbs = computed<Crumb[]>(() => {
     let acc = ''
     segments.forEach((seg) => {
       acc += `/${seg}`
+      // An id is not a label. When the page publishes a human name for that
+      // entity via breadcrumbExtra, the raw id would sit beside it as a
+      // redundant crumb ("Agents > 7752 > Testing"), so let the name stand in.
+      // Pages that publish no name (conversations) keep their id crumb.
+      if (breadcrumbExtra.value && /^\d+$/.test(seg)) return
       const match = allItems.find(item => item.to === acc)
       const label = match?.label ?? seg.charAt(0).toUpperCase() + seg.slice(1)
       trail.push({ label, to: acc })

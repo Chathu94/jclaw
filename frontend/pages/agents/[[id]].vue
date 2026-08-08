@@ -56,6 +56,12 @@ const [{ data: agents, refresh }, { data: configData }] = await Promise.all([
   useFetch<ConfigResponse>('/api/config'),
 ])
 
+// One page instance across /agents and /agents/<id>. NuxtPage keys by path by
+// default, so opening an agent would otherwise unmount and remount the whole
+// page — refetching every panel, and letting the outgoing instance's
+// onUnmounted null the breadcrumb the incoming one had already set.
+definePageMeta({ key: () => '/agents' })
+
 const route = useRoute()
 const router = useRouter()
 
@@ -71,8 +77,12 @@ watch([editing, creating], ([agent, isCreating]) => {
   else if (isCreating) breadcrumbExtra.value = 'New agent'
   else breadcrumbExtra.value = null
 }, { immediate: true })
+// Only the create form needs this. It has no URL of its own, so a click on the
+// "Agents" crumb is a same-route click that NuxtLink skips, and the layout
+// nulling the extra is the only signal it should close. The edit form closes
+// through the route instead — that crumb genuinely changes path.
 watch(breadcrumbExtra, (value) => {
-  if (value === null && (editing.value || creating.value)) cancel()
+  if (value === null && creating.value) cancel()
 })
 onUnmounted(() => {
   breadcrumbExtra.value = null

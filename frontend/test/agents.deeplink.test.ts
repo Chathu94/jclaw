@@ -134,16 +134,39 @@ describe('Agents page — URL-addressable agent detail', () => {
     await flushPromises()
     expect(openAgentName(component)).toContain('helper')
 
-    // Leave the form the way the breadcrumb does. Closing has to move the URL
-    // too: if it stayed at /agents/2 with the form shut, re-picking that agent
-    // would be a same-URL push the watcher never sees.
-    useBreadcrumbExtra().value = null
+    // Closing has to move the URL too: if it stayed at /agents/2 with the form
+    // shut, re-picking that agent would be a same-URL push the watcher never
+    // sees.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
+    const back = component.findAll('button').find((b: any) => b.text().includes('Back to agents'))
+    expect(back, 'the form should offer a way back to the listing').toBeTruthy()
+    await back!.trigger('click')
+
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents'))
     expect(openAgentName(component)).not.toContain('helper')
 
     await router.push('/agents/2')
     await flushPromises()
     expect(openAgentName(component)).toContain('helper')
+  })
+
+  it('keeps the edit form open when the shared breadcrumb ref is cleared', async () => {
+    setupApi()
+    const router = useRouter()
+    const component = await mountSuspended(Agents, { route: '/agents/2' })
+    await flushPromises()
+    expect(openAgentName(component)).toContain('helper')
+
+    // NuxtPage remounts the page when the param changes, and the outgoing
+    // instance's onUnmounted nulls this shared ref after the incoming one has
+    // already set it. Treating that as "close the form" made opening an agent
+    // bounce straight back to /agents. Only the create form, which has no URL
+    // of its own, reacts to this ref now.
+    useBreadcrumbExtra().value = null
+    await flushPromises()
+
+    expect(openAgentName(component)).toContain('helper')
+    expect(router.currentRoute.value.fullPath).toBe('/agents/2')
   })
 
   it('falls back to the listing for an id that matches no agent', async () => {
