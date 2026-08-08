@@ -18,6 +18,7 @@ import services.LoadTestHarness;
 import services.LoadTestRunner;
 import tools.LoadTestSleepTool;
 import utils.ApiResponses;
+import utils.DbPoolStats;
 import utils.HttpFactories;
 import utils.LatencyStats;
 
@@ -59,8 +60,9 @@ public class ApiMetricsController extends Controller {
     private static final String KEY_SINCE = "since";
     private static final String STATUS_RESET = "reset";
 
+    // NB: `only` is an allowlist, so an action omitted here is served UNAUTHENTICATED.
     @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows",
-            "cost", "compression", "resetCompression"})
+            "cost", "compression", "resetCompression", "dbPool"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -217,6 +219,23 @@ public class ApiMetricsController extends Controller {
                     m.tokensBefore, m.tokensAfter, m.kind.name(), m.ccrHit));
         }
         renderJSON(GSON.toJson(new CompressionResponse(since.toString(), rows)));
+    }
+
+    /**
+     * JCLAW-772: current HikariCP pool occupancy. Added because nothing exposed the pool,
+     * so "is a connection pinned for the duration of a stream?" could not be answered from
+     * a running install at all. {@code awaiting} is the field that signals exhaustion —
+     * a sustained non-zero value means callers are blocking on {@code db.pool.timeout}.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DbPoolStats.class)))
+    @Operation(summary = "Current HikariCP connection-pool occupancy (active, idle, total, awaiting, max)")
+    public static void dbPool() {
+        var stats = DbPoolStats.snapshot();
+        if (stats.isEmpty()) {
+            ApiResponses.error(503, "pool_unavailable",
+                    "The configured DataSource is not a HikariCP pool, so occupancy cannot be read.");
+        }
+        renderJSON(GSON.toJson(stats.get()));
     }
 
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */

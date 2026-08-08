@@ -297,6 +297,7 @@ GET     /api/metrics/latency/rows               ApiMetricsController.latencyRows
 DELETE  /api/metrics/latency/rows               ApiMetricsController.clearLatencyRows
 # Cost is durable — aggregates persisted Message.usageJson across conversations
 GET     /api/metrics/cost                       ApiMetricsController.cost
+GET     /api/metrics/db-pool                    ApiMetricsController.dbPool
 GET     /api/metrics/compression                ApiMetricsController.compression
 DELETE  /api/metrics/compression                ApiMetricsController.resetCompression
 POST    /api/metrics/loadtest                   ApiMetricsController.loadtest

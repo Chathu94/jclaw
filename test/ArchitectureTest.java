@@ -101,6 +101,31 @@ class ArchitectureTest extends UnitTest {
      * h2c-upgrade hang and to keep a single virtual-thread-clean client. This guards
      * against the second stack creeping back in.
      */
+    /**
+     * JCLAW-199/772: Play 1.x wraps an action in a JPA transaction and commits only once it
+     * returns. streamChat blocks its invocation thread for the whole SSE stream, so an ambient
+     * transaction would hold that thread's HikariCP connection for the stream's full duration —
+     * at the production pool of 64, capping concurrent DB-touching streams at 64 while thousands
+     * of virtual threads sit idle. {@code @NoTransaction} opts the action out; every DB touch on
+     * the path goes through a short {@code services.Tx#run} instead.
+     *
+     * <p>This guards the annotation, not the runtime property, and that limit is deliberate.
+     * The runtime property is not observable in-process: the connection would be pinned by the
+     * "agent-stream" virtual thread while it blocks on the SSE read, and OkHttp delivers tokens
+     * on its own dispatcher thread, so no callback ever runs on the pinned thread — a probe
+     * there reads false whether or not the defect is present (verified by wrapping
+     * streamLlmLoop in a Tx.run: the probe still passed). A pool gauge is process-global and
+     * play1 runs test classes concurrently, so it would read other tests' connections. Removing
+     * the annotation is the regression that actually recurs, and this catches it.
+     */
+    @Test
+    void streamingChatActionOptsOutOfThePerRequestTransaction() throws Exception {
+        var streamChat = Class.forName("controllers.ApiChatController").getDeclaredMethod("streamChat");
+        assertTrue(streamChat.isAnnotationPresent(play.db.jpa.NoTransaction.class),
+                "ApiChatController.streamChat must carry @NoTransaction — without it Play holds a "
+                        + "JPA connection for the entire SSE stream (JCLAW-772)");
+    }
+
     @Test
     void noJdkHttpClientInApp() {
         ArchRule rule = noClasses()

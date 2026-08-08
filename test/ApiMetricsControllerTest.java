@@ -72,6 +72,35 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void dbPoolRequiresAuth() {
+        var response = GET("/api/metrics/db-pool");
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    void dbPoolReportsOccupancy() {
+        // JCLAW-772: nothing exposed the pool before this, so "is a connection pinned
+        // for the duration of a stream?" was unanswerable from a running install.
+        login();
+        var response = GET("/api/metrics/db-pool");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+
+        var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        for (var field : new String[]{"active", "idle", "total", "awaiting", "max"}) {
+            assertTrue(json.has(field), "db-pool must report '" + field + "'; got: " + json);
+        }
+        // The request itself holds a connection, so max must be a real configured
+        // ceiling and total must fit inside it — a zeroed record would mean the
+        // MXBean was read but never populated.
+        assertTrue(json.get("max").getAsInt() > 0,
+                "max must be the configured pool ceiling, got: " + json);
+        assertTrue(json.get("total").getAsInt() <= json.get("max").getAsInt(),
+                "total cannot exceed max; got: " + json);
+        assertTrue(json.get("awaiting").getAsInt() >= 0, "awaiting must be non-negative; got: " + json);
+    }
+
+    @Test
     void latencyReturnsEmptyJsonWhenNoSamples() {
         login();
         var response = GET("/api/metrics/latency");
