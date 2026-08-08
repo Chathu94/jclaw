@@ -1,18 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
-import Agents from '~/pages/agents.vue'
+import Agents from '~/pages/agents/[[id]].vue'
 
 /**
- * Command-palette → agent edit handoff.
+ * URL-addressable agent detail: /agents lists, /agents/<id> opens that agent.
  *
- * The palette sets usePendingAgentEdit() and navigates to /agents; this spec
- * covers the consuming half. Two arrival paths have to work, and they are not
- * the same code path:
+ * The route is the source of truth, so two arrival paths have to work and they
+ * are not the same code path:
  *
- *   - from another page — the id is already set when /agents mounts, so only
- *     the watcher's `immediate` run sees it;
- *   - from /agents itself — nothing remounts, so only the watcher proper fires.
+ *   - the id is already in the URL when the page mounts (deep link, reload, or
+ *     the command palette arriving from another page) — only the watcher's
+ *     `immediate` run sees it;
+ *   - the id changes while already on the page — nothing remounts, so only the
+ *     watcher proper fires.
  */
 
 function setupApi() {
@@ -74,14 +75,16 @@ function setupApi() {
 }
 
 // Without this, the previous case's Agents instance stays mounted and alive.
-// Two live pages both watch the pending id; the older one wins the race, nulls
-// it, and the case under test re-reads null and never opens its form.
+// Two live pages both watch the route; the older one reacts too and the case
+// under test races against it.
 enableAutoUnmount(afterEach)
 
-beforeEach(() => {
+beforeEach(async () => {
   // useFetch caches by URL across mounts; clear so each case refetches.
   clearNuxtData()
-  usePendingAgentEdit().value = null
+  // The router is shared across cases in this file, so a case that navigated
+  // would otherwise leak its URL into the next one's mount.
+  await useRouter().replace('/agents')
 })
 
 /** The edit form is the only place an <input> carries an agent's name. */
@@ -89,59 +92,70 @@ beforeEach(() => {
 const openAgentName = (component: any): string[] =>
   component.findAll('input').map((i: { element: HTMLInputElement }) => i.element.value)
 
-describe('Agents page — command-palette agent handoff', () => {
-  it('opens the target agent form when the id is already pending on mount', async () => {
+describe('Agents page — URL-addressable agent detail', () => {
+  // Mounting the component with a `route` proves the page reacts to the param;
+  // it does not prove Nuxt maps the URL to this page at all. Without this, a
+  // filename that stopped generating the optional-param route would leave every
+  // other case here green while /agents/2 404s in the browser.
+  it('registers /agents and /agents/<id> as routes served by this page', () => {
+    const router = useRouter()
+    for (const path of ['/agents', '/agents/2']) {
+      const matched = router.resolve(path).matched
+      expect(matched.length, `${path} should match a route`).toBeGreaterThan(0)
+    }
+    expect(router.resolve('/agents/2').matched[0]?.components?.default)
+      .toBe(router.resolve('/agents').matched[0]?.components?.default)
+  })
+
+  it('opens the agent named in the URL when the page mounts there', async () => {
     setupApi()
-    usePendingAgentEdit().value = 2
-    const component = await mountSuspended(Agents)
+    const component = await mountSuspended(Agents, { route: '/agents/2' })
     await flushPromises()
 
     expect(openAgentName(component)).toContain('helper')
   })
 
-  it('opens the target agent form when the id arrives while already on the page', async () => {
+  it('opens the agent when the URL changes while already on the page', async () => {
     setupApi()
-    const component = await mountSuspended(Agents)
+    const component = await mountSuspended(Agents, { route: '/agents' })
     await flushPromises()
     expect(openAgentName(component)).not.toContain('helper')
 
-    usePendingAgentEdit().value = 2
+    await useRouter().push('/agents/2')
     await flushPromises()
 
     expect(openAgentName(component)).toContain('helper')
   })
 
-  it('consumes the id so the same agent can be picked twice in a row', async () => {
+  it('returns the URL to /agents when the form is closed, so the same agent can be re-picked', async () => {
     setupApi()
-    const component = await mountSuspended(Agents)
+    const router = useRouter()
+    const component = await mountSuspended(Agents, { route: '/agents/2' })
     await flushPromises()
+    expect(openAgentName(component)).toContain('helper')
 
-    usePendingAgentEdit().value = 2
-    await flushPromises()
-    expect(usePendingAgentEdit().value).toBeNull()
-
-    // Leave the form the way the breadcrumb does, then pick the same agent
-    // again. An un-consumed id would make this second pick a no-op write, and
-    // the palette would look dead for whichever agent was opened last.
+    // Leave the form the way the breadcrumb does. Closing has to move the URL
+    // too: if it stayed at /agents/2 with the form shut, re-picking that agent
+    // would be a same-URL push the watcher never sees.
     useBreadcrumbExtra().value = null
-    await flushPromises()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents'))
     expect(openAgentName(component)).not.toContain('helper')
 
-    usePendingAgentEdit().value = 2
+    await router.push('/agents/2')
     await flushPromises()
     expect(openAgentName(component)).toContain('helper')
   })
 
-  it('ignores an id that matches no agent instead of blanking the list', async () => {
+  it('falls back to the listing for an id that matches no agent', async () => {
     setupApi()
-    usePendingAgentEdit().value = 999
-    const component = await mountSuspended(Agents)
+    const router = useRouter()
+    const component = await mountSuspended(Agents, { route: '/agents/999' })
     await flushPromises()
 
     expect(openAgentName(component)).not.toContain('helper')
     // The listing is still rendered — an unknown id must not strand the page on
-    // an empty editor.
+    // an empty editor — and the URL is corrected rather than left lying.
     expect(component.text()).toContain('helper')
-    expect(usePendingAgentEdit().value).toBeNull()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents'))
   })
 })

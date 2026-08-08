@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import Agents from '~/pages/agents.vue'
+import Agents from '~/pages/agents/[[id]].vue'
 
 /**
  * Page-level tests for {@code agents.vue} CRUD flows.
@@ -172,7 +172,9 @@ describe('Agents page — agent skills list', () => {
     const helperCard = targets.find(t => t.text().includes('helper'))
     expect(helperCard, 'helper agent card should be reachable').toBeTruthy()
     await helperCard!.trigger('click')
-    await flushPromises()
+    // Opening is a route change to /agents/<id>; the global auth middleware
+    // awaits an /api/config probe before the page's route watcher runs.
+    await vi.waitFor(() => expect(component.text()).toContain('daily-briefing'))
 
     const text = component.text()
     const idxDaily = text.indexOf('daily-briefing')

@@ -56,13 +56,15 @@ const [{ data: agents, refresh }, { data: configData }] = await Promise.all([
   useFetch<ConfigResponse>('/api/config'),
 ])
 
+const route = useRoute()
+const router = useRouter()
+
 const editing = ref<Agent | null>(null)
 const creating = ref(false)
 
 // Feed the layout breadcrumb: when editing, show "Agents > {name}"; when
-// creating, show "Agents > New agent"; otherwise just "Agents". The reverse
-// direction closes the edit form when the layout clears the extra (user
-// clicked the "Agents" crumb while already on /agents).
+// creating, show "Agents > New agent"; otherwise just "Agents". The URL carries
+// the id, not the name, so the crumb still has to be published from here.
 const breadcrumbExtra = useBreadcrumbExtra()
 watch([editing, creating], ([agent, isCreating]) => {
   if (agent) breadcrumbExtra.value = agent.name
@@ -70,10 +72,7 @@ watch([editing, creating], ([agent, isCreating]) => {
   else breadcrumbExtra.value = null
 }, { immediate: true })
 watch(breadcrumbExtra, (value) => {
-  if (value === null && (editing.value || creating.value)) {
-    editing.value = null
-    creating.value = false
-  }
+  if (value === null && (editing.value || creating.value)) cancel()
 })
 onUnmounted(() => {
   breadcrumbExtra.value = null
@@ -815,25 +814,30 @@ function editAgent(agent: Agent) {
   loadExecConfig(agent.name)
 }
 
-// Deep-link: /agents?edit=<id> opens that agent's form directly. The command
-// palette navigates here, and it can be opened from /agents itself — where the
-// push only swaps the query and does NOT remount the page — so this is a
-// watcher with `immediate`, not an onMounted hook, to cover both entries.
+/** Navigate to an agent's own URL; the route watcher below opens the form. */
+function openAgent(agent: Agent) {
+  router.push(`/agents/${agent.id}`)
+}
+
+// The route is the source of truth for which agent is open: /agents lists,
+// /agents/<id> opens that one. `immediate` covers arriving with the id already
+// in the URL (deep link, reload, command palette from another page); the watcher
+// proper covers picking an agent while already here, where nothing remounts.
 //
-// The param is stripped once consumed (same as chat's ?compose=): leaving it in
-// the URL would make re-picking the agent you just closed a same-URL push, which
-// the watcher never sees, so the palette would look dead for that one agent.
-// Deep-link from the command palette: it stashes the agent id and navigates
-// here. `immediate` covers the arrival-from-another-page case (the id is
-// already set when this page mounts); the watcher proper covers being picked
-// while already on /agents, where nothing remounts. Consuming it — resetting to
-// null — is what lets the same agent be picked twice in a row.
-const pendingAgentEdit = usePendingAgentEdit()
-watch(pendingAgentEdit, (id) => {
-  if (id == null) return
-  const agent = (agents.value ?? []).find(a => a.id === id)
+// Closing navigates back to /agents, so "form open" and "URL carries an id" can
+// never disagree — which is what makes re-picking the agent you just closed work
+// rather than becoming a same-URL push the watcher never sees.
+watch(() => route.params.id, (raw) => {
+  const id = Array.isArray(raw) ? raw[0] : raw
+  if (!id) {
+    editing.value = null
+    return
+  }
+  const agent = (agents.value ?? []).find(a => String(a.id) === id)
+  // An id matching no agent falls back to the list rather than stranding the
+  // page on an empty editor.
   if (agent) editAgent(agent)
-  pendingAgentEdit.value = null
+  else router.replace('/agents')
 }, { immediate: true })
 
 // When the selected model changes, drop a thinking mode the new model doesn't
@@ -1416,6 +1420,8 @@ function cancel() {
   agentTools.value = []
   agentSkills.value = []
   queueMode.value = 'queue'
+  // Only the edit form has a URL of its own; the create form lives on /agents.
+  if (route.params.id) router.push('/agents')
 }
 
 const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md']
@@ -1474,9 +1480,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           role="button"
           tabindex="0"
           class="px-4 py-3 flex items-center justify-between hover:bg-muted cursor-pointer transition-colors"
-          @click="editAgent(mainAgent)"
-          @keydown.enter.prevent="editAgent(mainAgent)"
-          @keydown.space.prevent="editAgent(mainAgent)"
+          @click="openAgent(mainAgent)"
+          @keydown.enter.prevent="openAgent(mainAgent)"
+          @keydown.space.prevent="openAgent(mainAgent)"
         >
           <div>
             <span class="text-sm text-fg-strong">{{ mainAgent.name }}</span>
@@ -1536,9 +1542,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           role="button"
           tabindex="0"
           class="px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted cursor-pointer transition-colors"
-          @click="editAgent(agent)"
-          @keydown.enter.prevent="editAgent(agent)"
-          @keydown.space.prevent="editAgent(agent)"
+          @click="openAgent(agent)"
+          @keydown.enter.prevent="openAgent(agent)"
+          @keydown.space.prevent="openAgent(agent)"
         >
           <!-- Name + enabled toggle share the top row so the switch aligns with
                the agent name rather than centering against the whole card. -->

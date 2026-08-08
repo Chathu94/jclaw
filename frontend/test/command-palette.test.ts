@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, nextTick, ref } from 'vue'
@@ -12,6 +12,9 @@ function setupMockApi() {
   registerEndpoint('/api/conversations', () => [
     { id: 1, agentName: 'main', channelType: 'web', preview: 'Hello world', updatedAt: '2026-04-16T10:00:00Z' },
   ])
+  // The global auth middleware probes /api/config on the first navigation;
+  // without it, picking an agent lands on /login instead of the agent.
+  registerEndpoint('/api/config', () => ({ entries: [] }))
 }
 
 // The CommandDialog uses Teleport to render at document.body level,
@@ -154,9 +157,10 @@ describe('CommandPalette', () => {
     expect(convoHits).toBe(1)
   })
 
-  it('hands the picked agent to /agents instead of just opening the listing', async () => {
+  it('navigates to the picked agent\'s own URL instead of just the listing', async () => {
     setupMockApi()
-    usePendingAgentEdit().value = null
+    const router = useRouter()
+    await router.replace('/')
     const open = await mountWithOpen(false)
     await flushPromises()
     open.value = true
@@ -170,9 +174,9 @@ describe('CommandPalette', () => {
     row!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
-    // The id is what makes /agents open the edit form; navigating alone lands
-    // on the listing, which is the bug this covers.
-    expect(usePendingAgentEdit().value).toBe(1)
+    // The id in the path is what makes the page open that agent's form;
+    // navigating to the bare listing is the bug this covers.
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents/1'))
   })
 
   it('silently survives an API failure (palette still shows static items)', async () => {

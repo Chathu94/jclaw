@@ -31,7 +31,7 @@ import type { ToolAction, ToolCategory, ToolMeta } from '~/composables/useToolMe
 // composables/useToolMeta.ts) to the concrete Heroicons component. Unknown
 // keys fall back to DocumentTextIcon so a new backend icon never breaks
 // the grid while we catch up on the frontend side. Keep in sync with
-// pages/agents.vue's TOOL_ICON_COMPONENTS — the two are intentionally
+// pages/agents/[[id]].vue's TOOL_ICON_COMPONENTS — the two are intentionally
 // separate (this page is a read-only catalog with cards, agents.vue has
 // per-row toggles), but they consume the same backend icon-key vocabulary.
 const TOOL_ICONS: Record<string, FunctionalComponent> = {
@@ -72,7 +72,7 @@ function iconExtraClassFor(name: string): string {
 }
 
 // JCLAW-173: this page is a read-only catalog. Per-tool enable/disable
-// lives on the agent detail page (pages/agents.vue) — the tool registry
+// lives on the agent detail page (pages/agents/[[id]].vue) — the tool registry
 // itself is global, but binding a tool to a specific agent is the only
 // meaningful axis. The previous "global toggle" was a fan-out that wrote
 // to every agent's AgentToolConfig row, which was a leaky abstraction.

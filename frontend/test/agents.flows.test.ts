@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import Agents from '~/pages/agents.vue'
+import Agents from '~/pages/agents/[[id]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 
 /**
@@ -203,7 +203,14 @@ async function openHelperEdit(component: any) {
   const helperCard = targets.find((t: any) => t.text().includes('helper'))
   expect(helperCard, 'helper agent card should be reachable').toBeTruthy()
   await helperCard!.trigger('click')
-  await flushPromises()
+  // Opening an agent is a route change to /agents/<id>, and the global auth
+  // middleware awaits an /api/config probe before the page's route watcher runs
+  // — so a single flush lands before the form exists.
+  await vi.waitFor(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: matches the broad wrapper above.
+    const values = component.findAll('input').map((i: any) => i.element.value)
+    expect(values).toContain('helper')
+  })
 }
 
 describe('Agents page — edit flow opens form and pulls per-agent state', () => {
