@@ -80,15 +80,31 @@ describe('SettingsUpgradePanel — availability', () => {
     preflight = available({
       available: false,
       unavailableReason: 'This is a source checkout — update it with \'git pull\'.',
-      latestVersion: null,
+    })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.text()).toContain('0.17.50 is available')
+    expect(c.text()).toContain('git pull')
+    // Neither control may render: the POST would refuse, and "Check again"
+    // would spend a GitHub call for an install that can never act on it.
+    expect(c.findAll('button')).toHaveLength(0)
+  })
+
+  it('states only that a current source checkout is up to date', async () => {
+    // The instruction is about closing a gap. With no gap it is noise the
+    // operator has to read past to learn the one thing the panel is for.
+    preflight = available({
+      available: false,
+      unavailableReason: 'This is a source checkout — update it with \'git pull\'.',
+      latestVersion: '0.17.49',
       upgradeAvailable: false,
     })
     const c = await mountSuspended(Harness)
     await flushPromises()
 
-    expect(c.text()).toContain('git pull')
-    // Neither control may render: the POST would refuse, and "Check again"
-    // would spend a GitHub call for an install that can never act on it.
+    expect(c.text()).toContain('up to date')
+    expect(c.text()).not.toContain('git pull')
     expect(c.findAll('button')).toHaveLength(0)
   })
 
@@ -97,8 +113,6 @@ describe('SettingsUpgradePanel — availability', () => {
       available: false,
       unavailableReason: 'This instance runs in a container — upgrade the image instead '
         + '(docker compose pull && docker compose up -d).',
-      latestVersion: null,
-      upgradeAvailable: false,
     })
     const c = await mountSuspended(Harness)
     await flushPromises()

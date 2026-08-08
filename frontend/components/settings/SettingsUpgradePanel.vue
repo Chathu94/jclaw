@@ -231,10 +231,16 @@ const previousOutcome = computed(() => {
 const summaryLine = computed(() => {
   const p = preflight.value
   if (!p) return 'Checking for updates…'
-  if (!p.available) return p.unavailableReason ?? ''
-  if (!p.latestVersion) return `Version ${p.currentVersion} — could not reach GitHub to check for updates.`
-  if (p.upgradeAvailable) return `Version ${p.currentVersion} — ${p.latestVersion} is available.`
-  return `Version ${p.currentVersion} — up to date.`
+  if (!p.latestVersion) {
+    return p.available
+      ? `Version ${p.currentVersion} — could not reach GitHub to check for updates.`
+      : p.unavailableReason ?? ''
+  }
+  // Version state outranks unavailability: an install that cannot upgrade itself
+  // still has nothing to be told to do while it is already on the newest release.
+  if (!p.upgradeAvailable) return `Version ${p.currentVersion} — up to date.`
+  if (!p.available) return `Version ${p.currentVersion} — ${p.latestVersion} is available. ${p.unavailableReason}`
+  return `Version ${p.currentVersion} — ${p.latestVersion} is available.`
 })
 </script>
 

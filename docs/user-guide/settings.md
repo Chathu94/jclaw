@@ -345,6 +345,8 @@ Upgrade only applies to installs made by the one-line installer or from an unzip
 - **A source checkout** — update it with `git pull`.
 - **A container** — the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
 
+Either way the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that — **up to date** — with nothing to do.
+
 ### From the command line
 
 ```bash

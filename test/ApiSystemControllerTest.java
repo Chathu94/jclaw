@@ -102,6 +102,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     @Test
     void upgradePreflightReportsThisCheckoutCannotUpgradeItself() {
         login();
+        UpgradeService.latestVersionForTest = "99.0.0";
         var response = GET("/api/system/upgrade");
         assertIsOk(response);
 
@@ -114,14 +115,15 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
-    void upgradePreflightSkipsTheReleaseCheckWhenItCouldNotAct() {
+    void upgradePreflightStillReportsTheNewestReleaseWhenItCannotAct() {
         login();
-        // A source checkout can never upgrade, so spending one of GitHub's 60
-        // unauthenticated calls an hour on every settings-page mount would be
-        // pure waste. latestVersion must stay null rather than be fetched.
+        UpgradeService.latestVersionForTest = "99.0.0";
+        // An install that cannot upgrade itself still needs to know whether it is
+        // behind — without this the panel can only recite the git-pull
+        // instruction, including on a checkout that is already current.
         var body = getContent(GET("/api/system/upgrade"));
-        assertTrue(body.contains("\"latestVersion\":null") || !body.contains("\"latestVersion\""), body);
-        assertTrue(body.contains("\"upgradeAvailable\":false"), body);
+        assertTrue(body.contains("\"latestVersion\":\"99.0.0\""), body);
+        assertTrue(body.contains("\"upgradeAvailable\":true"), body);
     }
 
     @Test

@@ -124,11 +124,10 @@ public class ApiSystemController extends Controller {
     public static void upgradePreflight(Boolean refresh) {
         var unavailable = UpgradeService.unavailableReason();
         var current = UpgradeService.currentVersion();
-        // Skip the network call entirely when the install can't upgrade anyway —
-        // a source checkout has no reason to spend a GitHub API call per mount.
-        var latest = unavailable == null
-                ? UpgradeService.latestVersion(Boolean.TRUE.equals(refresh))
-                : null;
+        // Resolved even when this install cannot upgrade itself: without it the panel
+        // can only recite a git-pull/docker instruction, including on a checkout that
+        // is already current. The hour-long cache bounds this to one GitHub call/hour.
+        var latest = UpgradeService.latestVersion(Boolean.TRUE.equals(refresh));
 
         renderJSON(GSON.toJson(new UpgradePreflight(
                 unavailable == null, unavailable, current, latest,
