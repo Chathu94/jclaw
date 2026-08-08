@@ -107,13 +107,13 @@ Commands:
             server. Separate from 'test' by design — needs a live server and
             JCLAW_ADMIN_PASSWORD from certs/.env. Local UAT, not a gate.
   dist      Build the developer-distribution zip at dist/jclaw.zip and exit.
-            Runs precompile + frontend build + `play dist`; operators
+            Runs precompile + frontend build + \`play dist\`; operators
             unzipping the result need Java 25 + Gradle + Play 1 fork on
             their machine to launch it. For a self-contained tarball,
-            see `bundle` (or the Dockerfile, which ships the same artifact).
+            see \`bundle\` (or the Dockerfile, which ships the same artifact).
   bundle    Build the self-contained bundle zip at dist/jclaw-bundle.zip and
-            exit. Like `dist` but via `play bundle` — bakes in the framework,
-            resolved deps, and a `./play` launcher, so the unzipped tree runs
+            exit. Like \`dist\` but via \`play bundle\` — bakes in the framework,
+            resolved deps, and a \`./play\` launcher, so the unzipped tree runs
             with only a Java 25 JRE (no Gradle/Play install). Same artifact the
             Dockerfile ships inside the container image.
   completion Print a shell completion script (completion <bash|zsh>) so
