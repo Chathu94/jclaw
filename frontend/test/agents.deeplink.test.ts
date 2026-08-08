@@ -1,18 +1,22 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
-import Agents from '~/pages/agents/[[id]].vue'
+import Agents from '~/pages/agents/[[name]].vue'
 
 /**
- * URL-addressable agent detail: /agents lists, /agents/<id> opens that agent.
+ * URL-addressable agent detail: /agents lists, /agents/<name> opens that agent.
+ *
+ * The name is the address rather than the row id — the API constrains names to
+ * ^\w[\w-]{0,63}$ and enforces uniqueness, so they are safe URL segments with no
+ * encoding, and they read.
  *
  * The route is the source of truth, so two arrival paths have to work and they
  * are not the same code path:
  *
- *   - the id is already in the URL when the page mounts (deep link, reload, or
+ *   - the name is already in the URL when the page mounts (deep link, reload, or
  *     the command palette arriving from another page) — only the watcher's
  *     `immediate` run sees it;
- *   - the id changes while already on the page — nothing remounts, so only the
+ *   - the name changes while already on the page — nothing remounts, so only the
  *     watcher proper fires.
  */
 
@@ -96,20 +100,28 @@ describe('Agents page — URL-addressable agent detail', () => {
   // Mounting the component with a `route` proves the page reacts to the param;
   // it does not prove Nuxt maps the URL to this page at all. Without this, a
   // filename that stopped generating the optional-param route would leave every
-  // other case here green while /agents/2 404s in the browser.
-  it('registers /agents and /agents/<id> as routes served by this page', () => {
+  // other case here green while /agents/helper 404s in the browser.
+  it('registers /agents and /agents/<name> as routes served by this page', () => {
     const router = useRouter()
-    for (const path of ['/agents', '/agents/2']) {
+    for (const path of ['/agents', '/agents/helper']) {
       const matched = router.resolve(path).matched
       expect(matched.length, `${path} should match a route`).toBeGreaterThan(0)
     }
-    expect(router.resolve('/agents/2').matched[0]?.components?.default)
+    expect(router.resolve('/agents/helper').matched[0]?.components?.default)
       .toBe(router.resolve('/agents').matched[0]?.components?.default)
   })
 
   it('opens the agent named in the URL when the page mounts there', async () => {
     setupApi()
-    const component = await mountSuspended(Agents, { route: '/agents/2' })
+    const component = await mountSuspended(Agents, { route: '/agents/helper' })
+    await flushPromises()
+
+    expect(openAgentName(component)).toContain('helper')
+  })
+
+  it('matches the name case-insensitively so a hand-typed URL still lands', async () => {
+    setupApi()
+    const component = await mountSuspended(Agents, { route: '/agents/HELPER' })
     await flushPromises()
 
     expect(openAgentName(component)).toContain('helper')
@@ -121,7 +133,7 @@ describe('Agents page — URL-addressable agent detail', () => {
     await flushPromises()
     expect(openAgentName(component)).not.toContain('helper')
 
-    await useRouter().push('/agents/2')
+    await useRouter().push('/agents/helper')
     await flushPromises()
 
     expect(openAgentName(component)).toContain('helper')
@@ -130,13 +142,13 @@ describe('Agents page — URL-addressable agent detail', () => {
   it('returns the URL to /agents when the form is closed, so the same agent can be re-picked', async () => {
     setupApi()
     const router = useRouter()
-    const component = await mountSuspended(Agents, { route: '/agents/2' })
+    const component = await mountSuspended(Agents, { route: '/agents/helper' })
     await flushPromises()
     expect(openAgentName(component)).toContain('helper')
 
-    // Closing has to move the URL too: if it stayed at /agents/2 with the form
-    // shut, re-picking that agent would be a same-URL push the watcher never
-    // sees.
+    // Closing has to move the URL too: if it stayed at /agents/helper with the
+    // form shut, re-picking that agent would be a same-URL push the watcher
+    // never sees.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mountSuspended returns a proxy wrapper.
     const back = component.findAll('button').find((b: any) => b.text().includes('Back to agents'))
     expect(back, 'the form should offer a way back to the listing').toBeTruthy()
@@ -145,7 +157,7 @@ describe('Agents page — URL-addressable agent detail', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents'))
     expect(openAgentName(component)).not.toContain('helper')
 
-    await router.push('/agents/2')
+    await router.push('/agents/helper')
     await flushPromises()
     expect(openAgentName(component)).toContain('helper')
   })
@@ -153,7 +165,7 @@ describe('Agents page — URL-addressable agent detail', () => {
   it('keeps the edit form open when the shared breadcrumb ref is cleared', async () => {
     setupApi()
     const router = useRouter()
-    const component = await mountSuspended(Agents, { route: '/agents/2' })
+    const component = await mountSuspended(Agents, { route: '/agents/helper' })
     await flushPromises()
     expect(openAgentName(component)).toContain('helper')
 
@@ -166,18 +178,18 @@ describe('Agents page — URL-addressable agent detail', () => {
     await flushPromises()
 
     expect(openAgentName(component)).toContain('helper')
-    expect(router.currentRoute.value.fullPath).toBe('/agents/2')
+    expect(router.currentRoute.value.fullPath).toBe('/agents/helper')
   })
 
-  it('falls back to the listing for an id that matches no agent', async () => {
+  it('falls back to the listing for a name that matches no agent', async () => {
     setupApi()
     const router = useRouter()
-    const component = await mountSuspended(Agents, { route: '/agents/999' })
+    const component = await mountSuspended(Agents, { route: '/agents/nobody' })
     await flushPromises()
 
     expect(openAgentName(component)).not.toContain('helper')
-    // The listing is still rendered — an unknown id must not strand the page on
-    // an empty editor — and the URL is corrected rather than left lying.
+    // The listing is still rendered — an unknown name must not strand the page
+    // on an empty editor — and the URL is corrected rather than left lying.
     expect(component.text()).toContain('helper')
     await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents'))
   })

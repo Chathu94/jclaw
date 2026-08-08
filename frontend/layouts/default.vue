@@ -221,14 +221,15 @@ const crumbs = computed<Crumb[]>(() => {
   else {
     const segments = path.split('/').filter(Boolean)
     let acc = ''
-    segments.forEach((seg) => {
+    segments.forEach((seg, i) => {
       acc += `/${seg}`
-      // An id is not a label. When the page publishes a human name for that
-      // entity via breadcrumbExtra, the raw id would sit beside it as a
-      // redundant crumb ("Agents > 7752 > Testing"), so let the name stand in.
-      // Pages that publish no name (conversations) keep their id crumb.
-      if (breadcrumbExtra.value && /^\d+$/.test(seg)) return
       const match = allItems.find(item => item.to === acc)
+      // A trailing segment that matches no nav item identifies an entity, not a
+      // section. When the page publishes a label for that entity via
+      // breadcrumbExtra, rendering both duplicates it — "Agents > Testing >
+      // Testing" for /agents/Testing — so the published label stands in. Pages
+      // that publish none (conversations) keep their raw segment.
+      if (breadcrumbExtra.value && !match && i === segments.length - 1) return
       const label = match?.label ?? seg.charAt(0).toUpperCase() + seg.slice(1)
       trail.push({ label, to: acc })
     })

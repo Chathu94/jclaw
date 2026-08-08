@@ -75,9 +75,9 @@ function navigateTo(path: string) {
   router.push(path)
 }
 
-function openAgent(id: number) {
+function openAgent(name: string) {
   close()
-  router.push(`/agents/${id}`)
+  router.push(`/agents/${name}`)
 }
 
 function openConversation(id: number) {
@@ -120,7 +120,7 @@ function toggleTheme() {
             v-for="agent in agents"
             :key="agent.id"
             :value="`agent ${agent.name} ${agent.modelProvider} ${agent.modelId}`"
-            @select="openAgent(agent.id)"
+            @select="openAgent(agent.name)"
           >
             <div class="flex items-center justify-between w-full">
               <span>{{ agent.name }}</span>

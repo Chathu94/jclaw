@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import Agents from '~/pages/agents/[[id]].vue'
+import Agents from '~/pages/agents/[[name]].vue'
 
 /**
  * Page-level tests for {@code agents.vue} CRUD flows.

@@ -826,25 +826,30 @@ function editAgent(agent: Agent) {
 
 /** Navigate to an agent's own URL; the route watcher below opens the form. */
 function openAgent(agent: Agent) {
-  router.push(`/agents/${agent.id}`)
+  router.push(`/agents/${agent.name}`)
 }
 
 // The route is the source of truth for which agent is open: /agents lists,
-// /agents/<id> opens that one. `immediate` covers arriving with the id already
-// in the URL (deep link, reload, command palette from another page); the watcher
-// proper covers picking an agent while already here, where nothing remounts.
+// /agents/<name> opens that one. Names are safe URL segments without encoding —
+// the API constrains them to ^\w[\w-]{0,63}$ and enforces uniqueness — and they
+// read far better than a row id. `immediate` covers arriving with the name
+// already in the URL (deep link, reload, command palette from another page); the
+// watcher proper covers picking an agent while already here.
 //
-// Closing navigates back to /agents, so "form open" and "URL carries an id" can
+// Closing navigates back to /agents, so "form open" and "URL names an agent" can
 // never disagree — which is what makes re-picking the agent you just closed work
 // rather than becoming a same-URL push the watcher never sees.
-watch(() => route.params.id, (raw) => {
-  const id = Array.isArray(raw) ? raw[0] : raw
-  if (!id) {
+watch(() => route.params.name, (raw) => {
+  const slug = Array.isArray(raw) ? raw[0] : raw
+  if (!slug) {
     editing.value = null
     return
   }
-  const agent = (agents.value ?? []).find(a => String(a.id) === id)
-  // An id matching no agent falls back to the list rather than stranding the
+  // Case-insensitive so a hand-typed /agents/testing still lands; the stored
+  // name is what the breadcrumb and the form display.
+  const wanted = slug.toLowerCase()
+  const agent = (agents.value ?? []).find(a => a.name.toLowerCase() === wanted)
+  // A name matching no agent falls back to the list rather than stranding the
   // page on an empty editor.
   if (agent) editAgent(agent)
   else router.replace('/agents')
@@ -1431,7 +1436,7 @@ function cancel() {
   agentSkills.value = []
   queueMode.value = 'queue'
   // Only the edit form has a URL of its own; the create form lives on /agents.
-  if (route.params.id) router.push('/agents')
+  if (route.params.name) router.push('/agents')
 }
 
 const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md']

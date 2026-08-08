@@ -174,9 +174,9 @@ describe('CommandPalette', () => {
     row!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
-    // The id in the path is what makes the page open that agent's form;
+    // The name in the path is what makes the page open that agent's form;
     // navigating to the bare listing is the bug this covers.
-    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents/1'))
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/agents/main'))
   })
 
   it('silently survives an API failure (palette still shows static items)', async () => {

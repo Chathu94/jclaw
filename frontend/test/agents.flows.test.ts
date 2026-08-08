@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
-import Agents from '~/pages/agents/[[id]].vue'
+import Agents from '~/pages/agents/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 
 /**
