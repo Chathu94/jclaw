@@ -58,6 +58,21 @@ describe('User Guide page', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.hash).toBe('#prompts'))
   })
 
+  it('clears the fragment when the reader jumps back to the top', async () => {
+    const component = await mountSuspended(Guide, { route: '/guide#tasks' })
+    await flushPromises()
+    const router = useRouter()
+
+    // The mascot in the right gutter is the back-to-top control; the image and
+    // its hint share one clickable wrapper.
+    await component.find('img[src="/clawdia-reading.webp"]').trigger('click')
+
+    // A URL still naming a section is wrong to copy once the reader is at the
+    // top of the guide.
+    await vi.waitFor(() => expect(router.currentRoute.value.hash).toBe(''))
+    expect(router.currentRoute.value.path).toBe('/guide')
+  })
+
   it('highlights the owning section when the URL names a heading inside it', async () => {
     const component = await mountSuspended(Guide, { route: '/guide#subagents-async-yield' })
     await flushPromises()

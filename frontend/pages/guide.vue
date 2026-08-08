@@ -111,6 +111,11 @@ function scrollToTop() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
   activeSectionId.value = sections[0]?.id ?? ''
+  // Drop the fragment: the reader is back at the top, so a URL still naming a
+  // section would be wrong to copy. A click writes the URL like any other, and
+  // `push` keeps it undoable — Back returns to the section they came from.
+  // Guarded so clicking at the top doesn't stack no-op history entries.
+  if (route.hash) router.push('/guide')
 }
 
 /**
