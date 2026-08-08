@@ -23,6 +23,9 @@
 #   JCLAW_NO_RC_EDIT   set to 1 to generate completion scripts but not edit your shell rc
 #   JCLAW_BUNDLE_URL   override the bundle source (any URL, incl. file://) for
 #                      air-gapped / mirror / fork / test installs
+#   JCLAW_FORCE_REINSTALL  replace an existing install from scratch, DISCARDING
+#                      its database, workspace and credentials. Without it, an
+#                      existing install is upgraded in place instead.
 #   NO_COLOR        set to disable ANSI color
 #
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
@@ -50,6 +53,7 @@ JCLAW_NO_JRE="${JCLAW_NO_JRE:-}"            # skip the auto JRE download
 JCLAW_INSTALL_JRE="${JCLAW_INSTALL_JRE:-}"  # auto-install the JRE without prompting
 JCLAW_NO_RC_EDIT="${JCLAW_NO_RC_EDIT:-}"    # don't touch shell rc files (PATH + completion wiring)
 JCLAW_BUNDLE_URL="${JCLAW_BUNDLE_URL:-}"    # override bundle source (URL or file://) — air-gap/mirror/test
+JCLAW_FORCE_REINSTALL="${JCLAW_FORCE_REINSTALL:-}"  # wipe and reinstall instead of upgrading in place
 
 APP_DIR="$JCLAW_HOME/jclaw"     # bundle zip extracts under a jclaw/ prefix
 JRE_DIR="$JCLAW_HOME/jre"       # self-contained Zulu JRE lands here when Java is missing
@@ -281,6 +285,25 @@ resolve_url() {
     fi
 }
 
+sha256_of() {
+    if command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" 2>/dev/null | awk '{print $1}'
+    fi
+}
+
+# Record the version installed and the checksum of conf/application.conf *as
+# shipped*. `jclaw.sh upgrade` compares the live conf against this to tell an
+# operator's edits from an untouched default: matching means it can safely
+# install the new release's conf, differing means it must keep theirs.
+# Absent (installs predating this) is read as "edited", which is the side that
+# cannot lose someone's work.
+write_manifest() {
+    _ver=$(sed -n 's/^application\.version=\(.*\)/\1/p' "$APP_DIR/conf/application.conf" 2>/dev/null | head -1)
+    printf 'version=%s\nconf_sha256=%s\ninstalled_at=%s\n' \
+        "$_ver" "$(sha256_of "$APP_DIR/conf/application.conf")" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$APP_DIR/.jclaw-manifest" 2>/dev/null || true
+}
+
 extract() {
     zip="$1"; dest="$2"
     if command -v unzip >/dev/null 2>&1; then
@@ -341,6 +364,69 @@ detect_os
 step "Checking prerequisites"
 check_java
 
+# Re-running the installer over an existing install is the obvious way to
+# update, so it has to be the safe one. The install path below replaces $APP_DIR
+# wholesale and the release archive ships no data/, workspace/, logs/,
+# public/apps/ or certs/.env — so without this handoff, "update" would mean
+# "delete the database, the agent workspace and the session-signing secret".
+# `jclaw.sh upgrade` carries all of that across, backs the database up first,
+# and rolls back a release that fails to start.
+if [ -x "$APP_DIR/jclaw.sh" ] && [ -z "$JCLAW_FORCE_REINSTALL" ]; then
+    upgrade_args="upgrade --yes"
+    [ "$JCLAW_VERSION" != "latest" ] && upgrade_args="$upgrade_args --version $JCLAW_VERSION"
+
+    if grep -q '^do_upgrade()' "$APP_DIR/jclaw.sh" 2>/dev/null; then
+        step "Existing install detected at $APP_DIR — upgrading in place"
+        if [ -n "$JCLAW_BUNDLE_URL" ]; then
+            JCLAW_UPGRADE_ASSET_URL="$JCLAW_BUNDLE_URL"
+            export JCLAW_UPGRADE_ASSET_URL
+        fi
+        # shellcheck disable=SC2086
+        exec "$APP_DIR/jclaw.sh" $upgrade_args
+    fi
+
+    # The install predates `jclaw.sh upgrade` — which is every install made
+    # before this feature shipped, so this is the one-time migration path, not
+    # an edge case. Seed the newer helper into the existing tree and let it do
+    # the work: it already knows how to carry state, back up the database and
+    # roll back, and reimplementing any of that here would give the two copies
+    # a chance to disagree. Hands it the archive we just fetched (file://) so
+    # the ~400 MB is downloaded once, not twice.
+    step "Existing install detected at $APP_DIR — fetching the upgrade helper"
+    URL="${JCLAW_BUNDLE_URL:-$(resolve_url)}"
+    TMP_DL=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-install.XXXXXX")
+    ZIP="$TMP_DL/$ASSET"
+    substep "$JCLAW_VERSION → ${DIM}$URL${RESET}"
+    download "$URL" "$ZIP"
+    extract "$ZIP" "$TMP_DL/staged"
+    [ -f "$TMP_DL/staged/jclaw/jclaw.sh" ] \
+        || die "the downloaded archive has no jclaw/jclaw.sh — the layout may have changed."
+    # Pinning an old release with JCLAW_VERSION lands here with a helper that
+    # predates upgrade too. Say so, rather than copying it in and letting the
+    # handoff below fail with an unknown-argument usage dump.
+    grep -q '^do_upgrade()' "$TMP_DL/staged/jclaw/jclaw.sh" 2>/dev/null || die \
+"the requested release ($JCLAW_VERSION) predates in-place upgrade, so it cannot
+       upgrade the install at $APP_DIR.
+       Install a newer release (unset JCLAW_VERSION), or — accepting that it
+       DELETES the database, workspace and credentials — reinstall from scratch
+       with JCLAW_FORCE_REINSTALL=1."
+    cp "$TMP_DL/staged/jclaw/jclaw.sh" "$APP_DIR/jclaw.sh"
+    chmod +x "$APP_DIR/jclaw.sh"
+
+    step "Upgrading in place"
+    JCLAW_UPGRADE_ASSET_URL="file://$ZIP"
+    export JCLAW_UPGRADE_ASSET_URL
+    # Not exec: the EXIT trap has to survive to delete $TMP_DL, which still
+    # holds the archive the upgrade is reading.
+    # shellcheck disable=SC2086
+    "$APP_DIR/jclaw.sh" $upgrade_args
+    exit $?
+fi
+if [ -d "$APP_DIR" ] && [ -n "$JCLAW_FORCE_REINSTALL" ]; then
+    warn "JCLAW_FORCE_REINSTALL is set — $APP_DIR will be replaced from scratch."
+    warn "Its database, workspace, credentials and installed apps will be lost."
+fi
+
 step "Resolving release"
 URL=$(resolve_url)
 substep "$JCLAW_VERSION → ${DIM}$URL${RESET}"
@@ -360,6 +446,7 @@ fi
 extract "$ZIP" "$JCLAW_HOME"
 [ -d "$APP_DIR" ] || die "extract did not produce $APP_DIR — the archive layout may have changed."
 chmod +x "$APP_DIR/jclaw.sh" "$APP_DIR/play" "$APP_DIR/gradlew" 2>/dev/null || true
+write_manifest
 substep "extracted"
 
 # Convenience shim so `jclaw` works from anywhere.

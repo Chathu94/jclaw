@@ -54,6 +54,16 @@ any new shell — the installer puts the `jclaw` command on your `PATH` (via
 entirely, run `jclaw uninstall`: it stops the app, undoes the PATH and completion
 wiring, and deletes `~/.jclaw`.
 
+**Updating:** `jclaw upgrade` (or **Settings → Upgrade** in the app) installs the
+newest release in place. Your database, workspace, credentials, installed apps and
+edited configuration are carried across; the database is backed up first; and a
+release that fails to start is rolled back automatically. The download runs while
+JClaw keeps serving, so only the swap itself is downtime. `jclaw upgrade --check`
+reports what's available without installing it. Re-running the one-line installer
+does the same thing — it hands off to `jclaw upgrade` when an install already
+exists. Docker deployments upgrade the image instead
+(`docker compose pull && docker compose up -d`), and a git clone uses `git pull`.
+
 **Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
 or Temurin). Nothing else — the bundle bakes in the framework, app dependencies,
 precompiled classes, and the prebuilt SPA.

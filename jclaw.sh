@@ -216,7 +216,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|completion|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|completion|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -233,6 +233,10 @@ Commands:
   restart   Stop and start (combines stop + start)
   status    Show whether the backend is running
   logs      Tail the application log
+  upgrade   Download the newest release and install it in place, then restart.
+            Your data, workspace, credentials and installed apps are kept, the
+            database is backed up first, and a release that fails to come up is
+            rolled back automatically. Use --check to look without installing.
   completion Print a shell completion script (completion <bash|zsh>) so
             \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up.
   uninstall Remove JClaw: undo completion wiring, drop the \`jclaw\` shim, and
@@ -272,7 +276,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|loadtest|evals|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -297,6 +301,7 @@ usage_for() {
         restart)  usage_restart  ;;
         status)   usage_status   ;;
         logs)     usage_logs     ;;
+        upgrade)  usage_upgrade  ;;
         loadtest) usage_loadtest ;;
         evals)    usage_evals    ;;
         test)     usage_test     ;;
@@ -686,6 +691,46 @@ EOF
     fi
 }
 
+usage_upgrade() {
+    cat <<EOF
+Usage: ${INVOKE} upgrade [--check] [--version <tag>] [--yes]
+
+Install the newest JClaw release over this one and restart. Only for
+installs made by the one-line installer or an unzipped release archive —
+a git clone is refused (use 'git pull'), as is a container (upgrade the
+image with 'docker compose pull && docker compose up -d').
+
+The release is downloaded, checksum-verified and unpacked while JClaw is
+still serving, so a network or disk failure costs no downtime at all.
+Only then is the instance stopped and the tree replaced.
+
+Kept across the upgrade:
+  data/ (database, attachments, search index), workspace/, logs/,
+  certs/ (application secret and TLS pair), public/apps/, sidecar
+  virtualenvs, and any other file this release does not ship. A
+  conf/application.conf you have edited is kept too, with the release's
+  copy left beside it as conf/application.conf.new-<version>.
+
+Safety:
+  The database is copied to data/backups/ before the swap, and a release
+  that fails to answer /api/status within 4 minutes is rolled back
+  automatically — tree and database together.
+
+Options:
+  --check                 Report the installed and latest versions, then exit
+                          without changing anything.
+  --version <tag>         Install a specific release (e.g. --version v0.17.48)
+                          instead of the newest. Also permits re-installing or
+                          going back to an earlier release.
+  --yes, -y               Skip the confirmation prompt (for scripted upgrades).
+
+Examples:
+  ${INVOKE} upgrade --check
+  ${INVOKE} upgrade
+  ${INVOKE} upgrade --version v0.17.48 --yes
+EOF
+}
+
 usage_loadtest() {
     if is_developer_clone; then
         cat <<EOF
@@ -1045,6 +1090,7 @@ EOF
         _intro_cmd stop      "Stop the running instance"
         _intro_cmd status    "Show whether the backend is running"
         _intro_cmd logs      "Tail the application log"
+        _intro_cmd upgrade   "Install the newest release in place"
         _intro_cmd uninstall "Remove JClaw (deletes ~/.jclaw, undoes completion)"
         _intro_cmd help      "Full command reference"
         echo ""
@@ -1063,7 +1109,21 @@ BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
 COMPLETION_SHELL=""   # shell name for the `completion` subcommand (bash|zsh)
-UNINSTALL_YES=""      # `uninstall` confirmation bypass (--yes / -y)
+ASSUME_YES=""         # confirmation bypass for uninstall/upgrade (--yes / -y)
+UPGRADE_VERSION=""    # `upgrade --version <tag>`; empty = newest release
+UPGRADE_CHECK=false   # `upgrade --check`: report only, change nothing
+# Set once the upgrade is committed to a target; read by upgrade_status, which
+# can run before they are assigned on the resolve path.
+UPGRADE_FROM=""
+UPGRADE_TO=""
+UPGRADE_STARTED=""
+# The post-swap critical section: between replacing the tree and confirming the
+# new version answers, a failure leaves an install with new code and no state.
+# upgrade_abort / upgrade_cleanup read these to put it back.
+UPGRADE_SWAPPED=false
+UPGRADE_PREV=""
+UPGRADE_DB_BACKUP=""
+UPGRADE_STAGING=""
 LT_CONCURRENCY="10"
 LT_TURNS="5"
 LT_TTFT_MS="100"
@@ -1170,13 +1230,21 @@ while [[ $# -gt 0 ]]; do
             HTTPS_INSTALL_CA=true
             shift
             ;;
-        https|no-https|secret|reset|start|stop|restart|status|logs|uninstall)
+        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|uninstall)
             COMMAND="$1"
             shift
             ;;
         --yes|-y)
-            # Skip the uninstall confirmation prompt (for scripted removal).
-            UNINSTALL_YES=true
+            # Skip the uninstall / upgrade confirmation prompt (for scripted use).
+            ASSUME_YES=true
+            shift
+            ;;
+        --version)
+            UPGRADE_VERSION="$2"
+            shift 2
+            ;;
+        --check)
+            UPGRADE_CHECK=true
             shift
             ;;
         completion)
@@ -3646,6 +3714,7 @@ do_completion() {
         restart  "Stop and start (restart)"
         status   "Show whether it is running"
         logs     "Tail the application log"
+        upgrade  "Install the newest release in place"
         https    "Enable HTTPS (generate cert+key)"
         no-https "Disable HTTPS"
         secret   "Generate or rotate the application secret"
@@ -3671,7 +3740,7 @@ do_completion() {
     local names="" i
     for ((i=0; i<${#pairs[@]}; i+=2)); do names+="${pairs[i]} "; done
     names="${names% }"
-    local opts="--backend-port --help"
+    local opts="--backend-port --check --version --yes --help"
     is_developer_clone && opts="--dev --backend-port --frontend-port --help"
 
     case "$COMPLETION_SHELL" in
@@ -3872,7 +3941,7 @@ do_uninstall() {
     echo "        $root"
     echo
 
-    if [[ -z "$UNINSTALL_YES" ]]; then
+    if [[ -z "$ASSUME_YES" ]]; then
         # Try to actually open the terminal — a bare `[ -r /dev/tty ]` passes on the
         # device node even when there's no controlling tty (CI, `docker run` without -t).
         if { : >/dev/tty; } 2>/dev/null; then
@@ -3910,6 +3979,579 @@ do_uninstall() {
     fi
     echo
     echo "JClaw has been uninstalled."
+}
+
+# ─── Upgrade ───
+
+UPGRADE_REPO="${JCLAW_UPGRADE_REPO:-tsukhani/jclaw}"
+UPGRADE_API="${JCLAW_UPGRADE_API:-https://api.github.com}"
+UPGRADE_DL="${JCLAW_UPGRADE_DOWNLOAD:-https://github.com}"
+
+# Build outputs that must come from the new release verbatim. Everything else
+# in the old tree that the release doesn't ship is carried over (see
+# merge_absent) — an inverted allowlist, so a runtime directory added in a
+# later version is preserved without anyone remembering to list it here.
+# These five are the inverse case: merging them would leave a deleted class on
+# the classpath, two versions of a jar in lib/, or orphaned SPA chunks.
+UPGRADE_NO_MERGE="precompiled lib framework modules .classpath public/spa server.pid"
+
+# Paths that must survive the swap, relative to the app root. Recorded only for
+# the preflight's reassurance text — the carry-over itself is rule-driven.
+UPGRADE_PRESERVED="data workspace logs certs public/apps sidecar (virtualenvs) conf/application.conf (if edited)"
+
+sha256_file() {
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" 2>/dev/null | awk '{print $1}'
+    fi
+}
+
+# True inside a container. The image is the upgrade unit there — rewriting the
+# tree in place is discarded by the next `docker compose up`, so upgrade
+# refuses. JCLAW_CONTAINER is set by the Dockerfile; /.dockerenv covers images
+# built elsewhere.
+is_container() {
+    [[ -n "${JCLAW_CONTAINER:-}" || -f /.dockerenv ]]
+}
+
+# bundle = self-contained (framework/ + ./play); dist = jclaw.zip against a
+# system play. Drives which release asset we fetch, so the upgrade never swaps
+# a bundle install for a dist tree (which would leave it with no launcher).
+upgrade_install_kind() {
+    if [[ -d "$SCRIPT_DIR/framework" && -x "$SCRIPT_DIR/play" ]]; then
+        echo bundle
+    else
+        echo dist
+    fi
+}
+
+upgrade_asset_name() {
+    [[ "$(upgrade_install_kind)" == bundle ]] && echo "jclaw-bundle.zip" || echo "jclaw.zip"
+}
+
+# Why this install can't be upgraded, or empty when it can. Single source for
+# the CLI guard and the API preflight, so the UI never offers a button the
+# helper would refuse.
+upgrade_unavailable_reason() {
+    if is_developer_clone || [[ -d "$SCRIPT_DIR/app" ]]; then
+        echo "this is a source checkout; update it with 'git pull'."
+        return
+    fi
+    if is_container; then
+        echo "this instance runs in a container; upgrade the image instead (docker compose pull && docker compose up -d)."
+        return
+    fi
+    if [[ ! -f "$SCRIPT_DIR/conf/application.conf" ]]; then
+        echo "$SCRIPT_DIR does not look like a JClaw install (no conf/application.conf)."
+        return
+    fi
+    local parent
+    parent="$(cd "$SCRIPT_DIR/.." && pwd)"
+    if [[ ! -w "$parent" || ! -w "$SCRIPT_DIR" ]]; then
+        echo "$SCRIPT_DIR is not writable — upgrade needs to replace it in place."
+        return
+    fi
+    if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+        echo "neither curl nor wget is available to download the release."
+        return
+    fi
+    if ! command -v unzip >/dev/null 2>&1 && ! command -v jar >/dev/null 2>&1; then
+        echo "neither unzip nor a JDK 'jar' tool is available to extract the release."
+        return
+    fi
+}
+
+upgrade_current_version() {
+    sed -n 's/^application\.version=\(.*\)/\1/p' "$SCRIPT_DIR/conf/application.conf" 2>/dev/null | head -1 | tr -d '\r'
+}
+
+# Newest published release tag (e.g. "v0.17.49"). Only tag_name is parsed —
+# the asset URLs follow GitHub's stable releases/download/<tag>/<asset> form,
+# and release-note bodies carry arbitrary quotes that naive JSON parsing trips
+# on. grep -o + head -1 takes the first occurrence, which is the release's own
+# tag regardless of field order.
+upgrade_latest_tag() {
+    local json
+    json=$(http_get_text "$UPGRADE_API/repos/$UPGRADE_REPO/releases/latest") || return 1
+    printf '%s' "$json" | tr -d '\n' \
+        | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
+        | head -1 | sed 's/.*"\([^"]*\)"$/\1/'
+}
+
+http_get_text() {
+    if command -v curl >/dev/null 2>&1; then curl -fsSL "$1"
+    elif command -v wget >/dev/null 2>&1; then wget -qO- "$1"
+    else return 1; fi
+}
+
+# Content-Length of a release asset, following redirects to the CDN. Used for
+# the free-space gate and the download percentage. Empty when unavailable —
+# both callers degrade rather than fail.
+upgrade_remote_size() {
+    command -v curl >/dev/null 2>&1 || return 0
+    curl -fsIL "$1" 2>/dev/null \
+        | tr -d '\r' | awk 'BEGIN{IGNORECASE=1} /^content-length:/ {n=$2} END{if (n) print n}'
+}
+
+# 0 when $1 is a strictly newer version than $2. Leading "v" optional on
+# either side; missing components read as 0, so 0.18 > 0.17.49.
+version_gt() {
+    local a="${1#v}" b="${2#v}" i x y
+    [[ "$a" == "$b" ]] && return 1
+    local -a A B
+    IFS='.' read -r -a A <<<"$a"
+    IFS='.' read -r -a B <<<"$b"
+    for ((i = 0; i < 3; i++)); do
+        x="${A[i]:-0}"; y="${B[i]:-0}"
+        x="${x//[!0-9]/}"; y="${y//[!0-9]/}"
+        x=$((10#${x:-0})); y=$((10#${y:-0}))
+        ((x > y)) && return 0
+        ((x < y)) && return 1
+    done
+    return 1
+}
+
+# Progress/outcome for the in-app panel, at $SCRIPT_DIR/logs/upgrade-status.json.
+# logs/ is carried across the swap, so this path stays valid on both the success
+# and rollback paths — and the file the new JVM serves is the one this wrote.
+# Skipped during the swap window itself, when logs/ is briefly in neither tree.
+upgrade_status() {
+    local phase="$1" pct="$2" message="$3"
+    local dir="$SCRIPT_DIR/logs"
+    [[ -d "$dir" ]] || return 0
+    printf '{"phase":"%s","pct":%s,"message":"%s","fromVersion":"%s","toVersion":"%s","startedAt":"%s"}\n' \
+        "$phase" "${pct:-0}" "${message//\"/\'}" "$UPGRADE_FROM" "$UPGRADE_TO" "$UPGRADE_STARTED" \
+        >"$dir/upgrade-status.json.tmp" 2>/dev/null || return 0
+    mv -f "$dir/upgrade-status.json.tmp" "$dir/upgrade-status.json" 2>/dev/null || true
+}
+
+# Move everything under $1 that $2 doesn't already have into $2. A whole
+# subtree absent from the release moves in one mv (so a sidecar .venv with
+# 30k files costs one rename, not 30k); a directory present in both recurses;
+# a file present in both is left behind, because the release owns it.
+#
+# The glob options are set once here rather than inside the recursion: an
+# inner call's `shopt -u` on return would switch dotglob off for the rest of
+# the *outer* loop, silently skipping every remaining dotfile.
+merge_absent() {
+    local saved
+    # `|| true` is load-bearing, and it has to be INSIDE the substitution:
+    # `shopt -p` reports whether the options are SET via its exit status, so it
+    # returns 1 whenever either is off. Outside, that failure escapes the
+    # subshell and aborts the upgrade at the exact point the tree has been
+    # swapped but no state carried across.
+    saved=$(shopt -p nullglob dotglob || true)
+    shopt -s nullglob dotglob
+    _merge_absent "$1" "$2" "${3:-}"
+    eval "$saved"
+}
+
+# $3 is the path relative to the app root, for UPGRADE_NO_MERGE matching.
+_merge_absent() {
+    local old="$1" new="$2" rel="$3"
+    [[ -d "$old" ]] || return 0
+    local entry base childrel
+    for entry in "$old"/*; do
+        base="${entry##*/}"
+        childrel="${rel:+$rel/}$base"
+        case " $UPGRADE_NO_MERGE " in
+            *" $childrel "*) continue ;;
+        esac
+        if [[ ! -e "$new/$base" && ! -L "$new/$base" ]]; then
+            mv "$entry" "$new/$base"
+        elif [[ -d "$entry" && -d "$new/$base" ]]; then
+            _merge_absent "$entry" "$new/$base" "$childrel"
+        fi
+    done
+}
+
+# Download with a coarse percentage. curl's own progress bar can't be read
+# without parsing a carriage-return stream, so poll the output file against the
+# Content-Length we already fetched for the disk gate.
+upgrade_download() {
+    local url="$1" out="$2" total="${3:-}"
+    if ! command -v curl >/dev/null 2>&1; then
+        wget -qO "$out" "$url"
+        return
+    fi
+    curl -fL --silent --show-error -o "$out" "$url" &
+    local dl=$! got
+    while kill -0 "$dl" 2>/dev/null; do
+        if [[ -n "$total" && "$total" -gt 0 && -f "$out" ]]; then
+            got=$(wc -c <"$out" 2>/dev/null || echo 0)
+            upgrade_status downloading $((got * 100 / total)) "Downloading $(basename "$url")…"
+        fi
+        sleep 2
+    done
+    wait "$dl"
+}
+
+do_upgrade() {
+    cd "$SCRIPT_DIR"
+
+    local reason
+    reason=$(upgrade_unavailable_reason)
+    if [[ -n "$reason" ]]; then
+        echo "Error: cannot upgrade — $reason" >&2
+        exit 1
+    fi
+
+    local kind asset current
+    kind=$(upgrade_install_kind)
+    asset=$(upgrade_asset_name)
+    current=$(upgrade_current_version)
+    [[ -n "$current" ]] || { echo "Error: could not read application.version from conf/application.conf." >&2; exit 1; }
+
+    local target="$UPGRADE_VERSION"
+    if [[ -z "$target" ]]; then
+        echo "==> Checking for a newer release…"
+        target=$(upgrade_latest_tag) \
+            || { echo "Error: could not reach $UPGRADE_API to resolve the latest release." >&2; exit 1; }
+        [[ -n "$target" ]] || { echo "Error: no release tag found for $UPGRADE_REPO." >&2; exit 1; }
+    fi
+    case "$target" in v*) ;; *) target="v$target" ;; esac
+
+    echo "    Installed: $current  ($kind install)"
+    echo "    Latest:    ${target#v}"
+
+    if [[ "$UPGRADE_CHECK" == true ]]; then
+        if version_gt "$target" "$current"; then
+            echo ""
+            echo "An upgrade is available. Install it with: ${INVOKE} upgrade"
+        else
+            echo ""
+            echo "JClaw is up to date."
+        fi
+        return 0
+    fi
+
+    if [[ -z "$UPGRADE_VERSION" ]] && ! version_gt "$target" "$current"; then
+        echo ""
+        echo "Already up to date — nothing to do."
+        echo "(Pass --version <tag> to install a specific release anyway.)"
+        return 0
+    fi
+
+    if [[ -z "$ASSUME_YES" ]]; then
+        if { : >/dev/tty; } 2>/dev/null; then
+            echo ""
+            echo "This will replace $SCRIPT_DIR with ${target#v} and restart JClaw."
+            echo "Your data, workspace, credentials and installed apps are preserved."
+            printf 'Proceed? [y/N] ' >/dev/tty
+            local ans=''
+            read -r ans </dev/tty 2>/dev/null || ans=''
+            case "$ans" in
+                [Yy]|[Yy][Ee][Ss]) ;;
+                *) echo "Aborted — nothing was changed."; return 0 ;;
+            esac
+        else
+            echo "Refusing to upgrade without confirmation (no terminal). Re-run with --yes." >&2
+            exit 1
+        fi
+    fi
+
+    UPGRADE_FROM="$current"
+    UPGRADE_TO="${target#v}"
+    UPGRADE_STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    local parent staging url
+    parent="$(cd "$SCRIPT_DIR/.." && pwd)"
+    staging="$parent/.jclaw-upgrade.$$"
+    url="$UPGRADE_DL/$UPGRADE_REPO/releases/download/$target/$asset"
+    [[ -n "${JCLAW_UPGRADE_ASSET_URL:-}" ]] && url="$JCLAW_UPGRADE_ASSET_URL"
+
+    # Everything from here to the stop happens with the app still serving, so a
+    # network failure, a bad checksum or a full disk costs no downtime at all.
+    mkdir -p "$SCRIPT_DIR/logs"
+    upgrade_status resolving 0 "Preparing to upgrade to ${target#v}…"
+
+    local size free_kb need_kb
+    size=$(upgrade_remote_size "$url" || true)
+    if [[ -n "$size" && "$size" -gt 0 ]]; then
+        free_kb=$(df -Pk "$parent" 2>/dev/null | awk 'NR==2{print $4}')
+        # zip + extracted tree + the old tree we keep until the health gate passes.
+        need_kb=$(( size / 1024 * 4 ))
+        if [[ -n "$free_kb" && "$free_kb" -lt "$need_kb" ]]; then
+            upgrade_status failed 0 "Not enough free disk space."
+            echo "Error: need ~$((need_kb / 1024)) MB free under $parent, but only $((free_kb / 1024)) MB available." >&2
+            exit 1
+        fi
+    fi
+
+    rm -rf "$staging"
+    mkdir -p "$staging"
+    UPGRADE_STAGING="$staging"
+    trap upgrade_cleanup EXIT
+
+    echo "==> Downloading $asset (${target#v})…"
+    upgrade_status downloading 0 "Downloading ${asset}…"
+    if ! upgrade_download "$url" "$staging/$asset" "$size"; then
+        upgrade_status failed 0 "Download failed."
+        echo "Error: could not download $url" >&2
+        exit 1
+    fi
+
+    # SHA256SUMS is a newer release artifact; releases published before it
+    # existed simply don't have one. Warn and continue rather than blocking an
+    # upgrade on an asset the publisher hadn't started attaching yet.
+    upgrade_status verifying 100 "Verifying download…"
+    local sums want got
+    if [[ -n "${JCLAW_UPGRADE_ASSET_URL:-}" ]]; then
+        # The operator chose the source (air-gapped mirror, fork build, or the
+        # archive install.sh already fetched). Checking it against the published
+        # release's SHA256SUMS would reject exactly the artifacts this override
+        # exists to install.
+        echo "    asset source overridden — skipping checksum verification"
+    elif sums=$(http_get_text "$UPGRADE_DL/$UPGRADE_REPO/releases/download/$target/SHA256SUMS" 2>/dev/null) && [[ -n "$sums" ]]; then
+        want=$(printf '%s\n' "$sums" | awk -v a="$asset" '$2 == a || $2 == "*" a {print $1}' | head -1)
+        got=$(sha256_file "$staging/$asset")
+        if [[ -n "$want" && -n "$got" && "$want" != "$got" ]]; then
+            upgrade_status failed 0 "Checksum mismatch — refusing to install."
+            echo "Error: checksum mismatch for $asset (wanted $want, got $got)." >&2
+            exit 1
+        fi
+        [[ -n "$want" && -n "$got" ]] && echo "    checksum verified (sha256)"
+    else
+        echo "    no SHA256SUMS published for $target — skipping checksum verification"
+    fi
+
+    echo "==> Extracting…"
+    upgrade_status extracting 0 "Extracting ${target#v}…"
+    extract_zip "$staging/$asset" "$staging"
+    local new_tree="$staging/jclaw"
+    [[ -d "$new_tree" && -f "$new_tree/conf/application.conf" ]] \
+        || { upgrade_status failed 0 "The downloaded archive has an unexpected layout."
+             echo "Error: $asset did not extract to a jclaw/ tree with conf/application.conf." >&2; exit 1; }
+    chmod +x "$new_tree/jclaw.sh" "$new_tree/play" "$new_tree/gradlew" 2>/dev/null || true
+
+    # Hash the conf as shipped, before the merge can replace it with the
+    # operator's copy — this is what the next upgrade compares against to tell
+    # "never touched" from "edited".
+    local new_conf_sha installed
+    new_conf_sha=$(sha256_file "$new_tree/conf/application.conf")
+
+    # Take the version from the archive rather than the tag we resolved: with
+    # --version, or an overridden asset URL, the two can legitimately differ,
+    # and the manifest has to describe what is actually on disk.
+    installed=$(sed -n 's/^application\.version=\(.*\)/\1/p' "$new_tree/conf/application.conf" | head -1 | tr -d '\r')
+    [[ -n "$installed" ]] || installed="${target#v}"
+    UPGRADE_TO="$installed"
+
+    # ─── Downtime starts here ───
+    echo "==> Stopping JClaw…"
+    upgrade_status stopping 0 "Stopping JClaw…"
+    do_stop_prod || true
+
+    # The tree swap is reversible; the schema migration the new version runs on
+    # first boot is not (jpa.ddl=update). Without this copy, "roll back" would
+    # mean old code against a newer schema.
+    local db="$SCRIPT_DIR/data/jclaw.mv.db" db_backup=""
+    if [[ -f "$db" ]]; then
+        mkdir -p "$SCRIPT_DIR/data/backups"
+        db_backup="$SCRIPT_DIR/data/backups/jclaw-$current-$(date -u +%Y%m%dT%H%M%SZ).mv.db"
+        echo "==> Backing up the database…"
+        cp "$db" "$db_backup"
+        # Keep the three most recent; older ones are dead weight at DB size.
+        # shellcheck disable=SC2012
+        ls -1t "$SCRIPT_DIR/data/backups"/jclaw-*.mv.db 2>/dev/null | tail -n +4 | while read -r stale; do
+            rm -f "$stale"
+        done
+    fi
+
+    # Read the conf fingerprints while the old tree is still whole. They cannot
+    # be read after the merge: the release ships no .jclaw-manifest, so the
+    # merge is precisely what moves the old one out of $prev — leaving the
+    # comparison below with nothing to compare against and every conf looking
+    # edited.
+    # `|| true` on both: pipefail turns a missing .jclaw-manifest (every install
+    # predating it) into a failed pipeline, and an absent conf into a failed
+    # hash. Both are legitimate, and both correctly read as "assume edited".
+    # tr -d '\r': install.ps1 writes this file on Windows, where a stray CR
+    # would ride into the hash and make every conf look edited.
+    local recorded old_conf_sha
+    recorded=$(sed -n 's/^conf_sha256=//p' "$SCRIPT_DIR/.jclaw-manifest" 2>/dev/null | head -1 | tr -d '\r' || true)
+    old_conf_sha=$(sha256_file "$SCRIPT_DIR/conf/application.conf" || true)
+
+    local prev="$SCRIPT_DIR.previous"
+    rm -rf "$prev"
+
+    # Arm the safety net before touching the tree. From here until the new
+    # version is started, ANY failure — not just "it didn't come up" — has to
+    # put the old install back. Every step below is therefore guarded
+    # explicitly, with the EXIT trap as the backstop for anything unforeseen.
+    UPGRADE_PREV="$prev"
+    UPGRADE_DB_BACKUP="$db_backup"
+
+    echo "==> Installing ${target#v}…"
+    # The first move is the point of no return; before it, a failure has changed
+    # nothing, so it exits rather than rolling back.
+    mv "$SCRIPT_DIR" "$prev" || {
+        echo "Error: could not move the current install aside — nothing was changed." >&2
+        upgrade_status failed 0 "Could not replace the install directory."
+        exit 1
+    }
+    UPGRADE_SWAPPED=true
+    mv "$new_tree" "$SCRIPT_DIR" || upgrade_abort "could not move the new release into place"
+    cd "$SCRIPT_DIR" || upgrade_abort "could not enter the new install directory"
+    hash -r
+    upgrade_status swapping 0 "Installing ${target#v}…"
+
+    # Carry state forward. db_backup was written under data/, so it rides along.
+    merge_absent "$prev" "$SCRIPT_DIR" "" || upgrade_abort "could not carry your data across"
+    [[ -n "$db_backup" ]] && db_backup="$SCRIPT_DIR/data/backups/${db_backup##*/}"
+
+    local conf_preserved=false
+    if [[ -z "$recorded" || "$recorded" != "$old_conf_sha" ]]; then
+        # Edited by the operator (or predates the manifest, where assuming
+        # "edited" is the side that can't lose their work). Keep theirs and
+        # leave the release's copy beside it so new keys are discoverable.
+        cp "$SCRIPT_DIR/conf/application.conf" "$SCRIPT_DIR/conf/application.conf.new-$installed" \
+            || upgrade_abort "could not stage the new conf/application.conf"
+        cp "$prev/conf/application.conf" "$SCRIPT_DIR/conf/application.conf" \
+            || upgrade_abort "could not restore your conf/application.conf"
+
+        # application.version is release metadata that happens to live in the
+        # operator's file. Carrying their copy over verbatim would leave the new
+        # install reporting the old version — and since the update check reads
+        # that line, offering this same upgrade forever.
+        local conf_tmp="$SCRIPT_DIR/conf/.application.conf.upgrade.$$"
+        sed "s/^application\.version=.*/application.version=$installed/" \
+            "$SCRIPT_DIR/conf/application.conf" >"$conf_tmp" \
+            && mv "$conf_tmp" "$SCRIPT_DIR/conf/application.conf" \
+            || upgrade_abort "could not set application.version in your conf/application.conf"
+        conf_preserved=true
+    fi
+
+    printf 'version=%s\nconf_sha256=%s\ninstalled_at=%s\n' \
+        "$installed" "$new_conf_sha" "$UPGRADE_STARTED" >"$SCRIPT_DIR/.jclaw-manifest" \
+        || upgrade_abort "could not write .jclaw-manifest"
+
+    echo "==> Starting ${installed}…"
+    upgrade_status starting 0 "Starting ${installed}…"
+    # Past the filesystem work: from here a failure is "the new version doesn't
+    # run", which the health gate below handles with the same rollback. Clearing
+    # the flag keeps the EXIT backstop from rolling back a second time.
+    UPGRADE_SWAPPED=false
+    local started=true
+    "$SCRIPT_DIR/jclaw.sh" start --backend-port "$BACKEND_PORT" || started=false
+
+    if [[ "$started" == true ]] && upgrade_health_ok; then
+        echo ""
+        echo "==> Upgraded $current → $installed"
+        [[ "$conf_preserved" == true ]] \
+            && echo "    Your edited conf/application.conf was kept; the new one is at conf/application.conf.new-$installed"
+        [[ -n "$db_backup" ]] && echo "    Database backup: ${db_backup#"$SCRIPT_DIR"/}"
+        rm -rf "$prev"
+        UPGRADE_SWAPPED=false
+        upgrade_status done 100 "Upgraded to $installed."
+        return 0
+    fi
+
+    echo ""
+    echo "Error: $installed did not come up — rolling back to $current." >&2
+    upgrade_status rolling-back 0 "Upgrade failed — rolling back to ${current}…"
+    upgrade_rollback "$prev" "$db_backup"
+    upgrade_status rolled-back 0 "Upgrade to $installed failed; rolled back to $current."
+    echo "Rolled back to $current. See logs/upgrade.log for what failed." >&2
+    exit 1
+}
+
+# Roll back and stop. Called explicitly by every step in the window between
+# replacing the tree and starting the new version, and as a backstop from the
+# EXIT trap — because a failure in there leaves an install carrying new code and
+# none of its state, beside a .previous directory the operator has no reason to
+# know about.
+#
+# Deliberately NOT an ERR trap: that needs `set -E` to reach inside functions,
+# and an inherited ERR trap also fires inside command substitutions, where the
+# handler's own output lands in the variable being assigned and its `exit` only
+# leaves the subshell. EXIT traps are not inherited by `$( )`, so the backstop
+# uses one of those.
+upgrade_abort() {
+    UPGRADE_SWAPPED=false
+    echo "" >&2
+    echo "Error: $1 — rolling back to $UPGRADE_FROM." >&2
+    upgrade_rollback "$UPGRADE_PREV" "$UPGRADE_DB_BACKUP"
+    upgrade_status rolled-back 0 "Upgrade to $UPGRADE_TO failed; rolled back to $UPGRADE_FROM."
+    echo "Rolled back to $UPGRADE_FROM. See logs/upgrade.log for what failed." >&2
+    exit 1
+}
+
+# Single EXIT handler for the upgrade: drop the staging tree, and if we died
+# with the swap half-applied, put the old install back.
+upgrade_cleanup() {
+    local rc=$?
+    [[ -n "$UPGRADE_STAGING" ]] && rm -rf "$UPGRADE_STAGING"
+    if [[ "$UPGRADE_SWAPPED" == true ]]; then
+        UPGRADE_SWAPPED=false
+        echo "" >&2
+        echo "Error: the upgrade stopped unexpectedly after the tree was replaced." >&2
+        upgrade_rollback "$UPGRADE_PREV" "$UPGRADE_DB_BACKUP"
+        upgrade_status rolled-back 0 "Upgrade to $UPGRADE_TO failed; rolled back to $UPGRADE_FROM."
+        echo "Rolled back to $UPGRADE_FROM. See logs/upgrade.log for what failed." >&2
+        exit 1
+    fi
+    exit "$rc"
+}
+
+# Poll until the new instance answers, or give up. Two consecutive successes,
+# for the same reason SettingsRestartPanel requires them: a half-initialised
+# Play can answer one request mid-boot.
+upgrade_health_ok() {
+    local budget=240 elapsed=0 ok=0 url="http://127.0.0.1:$BACKEND_PORT/api/status"
+    while ((elapsed < budget)); do
+        if upgrade_probe "$url"; then
+            ((ok++))
+            ((ok >= 2)) && return 0
+        else
+            ok=0
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    return 1
+}
+
+upgrade_probe() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS --max-time 4 "$1" >/dev/null 2>&1
+    else
+        wget -q --timeout=4 -O /dev/null "$1" >/dev/null 2>&1
+    fi
+}
+
+# Undo the swap: state moves back out of the new tree, the old tree returns,
+# and the pre-upgrade database is restored over whatever schema migration the
+# new version applied on its way up.
+upgrade_rollback() {
+    local prev="$1" db_backup="$2" parent
+    parent="$(cd "$SCRIPT_DIR/.." && pwd)"
+    "$SCRIPT_DIR/jclaw.sh" stop --backend-port "$BACKEND_PORT" >/dev/null 2>&1 || true
+
+    rm -f "$SCRIPT_DIR"/conf/application.conf.new-* 2>/dev/null || true
+    merge_absent "$SCRIPT_DIR" "$prev" ""
+    cd "$parent" 2>/dev/null || cd / || true
+    rm -rf "$SCRIPT_DIR"
+    mv "$prev" "$SCRIPT_DIR"
+    cd "$SCRIPT_DIR"
+    hash -r
+
+    if [[ -n "$db_backup" ]]; then
+        local restored="$SCRIPT_DIR/data/backups/${db_backup##*/}"
+        [[ -f "$restored" ]] && cp "$restored" "$SCRIPT_DIR/data/jclaw.mv.db"
+    fi
+
+    "$SCRIPT_DIR/jclaw.sh" start --backend-port "$BACKEND_PORT" || true
+}
+
+extract_zip() {
+    local zip="$1" dest="$2"
+    if command -v unzip >/dev/null 2>&1; then
+        unzip -q -o "$zip" -d "$dest"
+    else
+        ( cd "$dest" && jar xf "$zip" )
+    fi
 }
 
 # ─── Execute ───
@@ -3971,6 +4613,9 @@ case "$COMMAND" in
         ;;
     logs)
         do_logs
+        ;;
+    upgrade)
+        do_upgrade
         ;;
     completion)
         do_completion

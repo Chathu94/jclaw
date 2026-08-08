@@ -256,6 +256,13 @@ POST    /api/tailscale                          ApiTailscaleController.toggle
 GET     /api/system/restart                     ApiSystemController.restartPreflight
 POST    /api/system/restart                     ApiSystemController.restart
 
+# Upgrade. Same handoff shape as restart, but the helper downloads and unpacks
+# the release before it stops anything — so the 202 is followed by minutes of
+# normal service, tracked through the status route rather than a down-then-up poll.
+GET     /api/system/upgrade                     ApiSystemController.upgradePreflight
+POST    /api/system/upgrade                     ApiSystemController.upgrade
+GET     /api/system/upgrade/status              ApiSystemController.upgradeStatus
+
 # Printers (JCLAW-911). GET /api/printers is a live mDNS browse, never a cache.
 # The /default pair is the operator's saved choice, consulted by the printer tool
 # when a call names no target.

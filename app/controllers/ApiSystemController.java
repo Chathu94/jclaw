@@ -8,19 +8,20 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.RestartService;
 import services.SubagentRegistry;
+import services.UpgradeService;
 import utils.ApiResponses;
 
 import static utils.GsonHolder.GSON;
 
 /**
- * Instance-level maintenance operations — currently just restart
- * (Settings → Restart).
+ * Instance-level maintenance operations — restart and upgrade
+ * (Settings → Restart / Upgrade).
  *
- * <p>Restart is deliberately not gated on in-flight work. The moment an
- * operator most wants to reboot is usually the moment something is wedged, so
- * a 409 while a stuck task "runs" would lock them out of the one control that
- * clears it. Instead {@link #restartPreflight()} reports what is in flight and
- * the UI makes the operator confirm against it.
+ * <p>Neither is gated on in-flight work. The moment an operator most wants to
+ * reboot is usually the moment something is wedged, so a 409 while a stuck task
+ * "runs" would lock them out of the one control that clears it. Instead the
+ * preflights report what is in flight and the UI makes the operator confirm
+ * against it.
  */
 @With(AuthCheck.class)
 public class ApiSystemController extends Controller {
@@ -91,5 +92,96 @@ public class ApiSystemController extends Controller {
         ApiResponses.ok("mode", plan.mode(),
                 "backendOnly", plan.backendOnly(),
                 "rebuildExpected", plan.rebuildExpected());
+    }
+
+    /**
+     * @param available          whether this install can upgrade itself — false
+     *                           for a source checkout, a container, or a tree
+     *                           jclaw.sh cannot replace
+     * @param unavailableReason  why not, or null when {@code available}
+     * @param currentVersion     the version running now
+     * @param latestVersion      newest published release, or null when GitHub
+     *                           could not be reached
+     * @param upgradeAvailable   true when {@code latestVersion} is newer
+     * @param installKind        {@code "bundle"} or {@code "dist"} — which
+     *                           release asset this install upgrades from
+     * @param runningTasks       task runs in RUNNING state, which the restart
+     *                           at the end of the upgrade interrupts
+     * @param activeSubagentRuns subagent runs live in THIS JVM, likewise
+     */
+    public record UpgradePreflight(boolean available, String unavailableReason,
+                                   String currentVersion, String latestVersion,
+                                   boolean upgradeAvailable, String installKind,
+                                   long runningTasks, int activeSubagentRuns) {}
+
+    /**
+     * GET /api/system/upgrade — what an upgrade would install and what it would
+     * interrupt. Performs nothing.
+     *
+     * @param refresh bypass the cached release check (the "check again" control)
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UpgradePreflight.class)))
+    public static void upgradePreflight(Boolean refresh) {
+        var unavailable = UpgradeService.unavailableReason();
+        var current = UpgradeService.currentVersion();
+        // Skip the network call entirely when the install can't upgrade anyway —
+        // a source checkout has no reason to spend a GitHub API call per mount.
+        var latest = unavailable == null
+                ? UpgradeService.latestVersion(Boolean.TRUE.equals(refresh))
+                : null;
+
+        renderJSON(GSON.toJson(new UpgradePreflight(
+                unavailable == null, unavailable, current, latest,
+                UpgradeService.isNewer(latest, current), UpgradeService.installKind(),
+                TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
+                SubagentRegistry.activeRunIds().size())));
+    }
+
+    /**
+     * POST /api/system/upgrade — hand off to the upgrade helper and ack.
+     *
+     * <p>Returns 202 like {@link #restart()}, but the gap is far wider: the
+     * helper downloads and unpacks the release before it stops anything, so
+     * this JVM keeps serving for minutes after the ack. The UI tracks
+     * {@link #upgradeStatus()} through that window rather than assuming the
+     * instance is on its way down.
+     *
+     * @param version optional release to install (defaults to the newest);
+     *                also the way to re-install or step back to an earlier one
+     */
+    public static void upgrade(String version) {
+        // Success render stays OUT of the try — RenderJson is a RuntimeException,
+        // so a catch-all around it would swallow its own 202 and answer 500.
+        UpgradeService.Plan plan;
+        try {
+            plan = UpgradeService.requestUpgrade(version);
+        } catch (IllegalStateException e) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, e.getMessage());
+            return;
+        } catch (Exception e) {
+            ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR,
+                    "Failed to launch the upgrade helper: " + e.getMessage());
+            return;
+        }
+
+        response.status = 202;
+        ApiResponses.ok("currentVersion", plan.currentVersion(),
+                "targetVersion", plan.targetVersion(),
+                "installKind", plan.installKind());
+    }
+
+    /**
+     * GET /api/system/upgrade/status — the helper's last reported progress, or
+     * 204 when no upgrade has ever run on this install.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UpgradeService.Status.class)))
+    public static void upgradeStatus() {
+        var status = UpgradeService.status();
+        if (status == null) {
+            response.status = 204;
+            renderText("");
+            return;
+        }
+        renderJSON(GSON.toJson(status));
     }
 }

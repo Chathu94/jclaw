@@ -306,6 +306,55 @@ The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Res
 
 When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
+## Upgrade
+
+Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade` — the same command you'd run by hand — so the CLI and the UI take exactly the same path.
+
+The panel shows the version you're running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
+
+**The download happens while JClaw keeps serving.** The release (~400 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
+
+### What is kept
+
+Everything the release doesn't ship is carried across, so an upgrade never resets your instance:
+
+| Kept | What's in it |
+|------|--------------|
+| `data/` | the database, uploaded attachments, the search index |
+| `workspace/` | the agent workspace, including per-skill credentials |
+| `certs/` | the application secret (your sessions survive) and any TLS cert+key |
+| `public/apps/` | apps you've installed |
+| `logs/` | the existing application, GC and upgrade logs |
+| `sidecar/*/.venv` | Python environments and downloaded models |
+| skills you installed | bundled skills are updated; yours are left alone |
+
+The rule is inverted on purpose: rather than listing directories to preserve — a list that goes stale the moment a release adds one — the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
+
+`conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The panel tells you when this happens.
+
+### If it goes wrong
+
+The database is copied to `data/backups/` before the swap — this matters because the new version migrates the schema on first boot, and that isn't undone by putting the old files back. The three most recent backups are kept.
+
+If the new version doesn't answer within four minutes of starting, the upgrade **rolls itself back**: the old tree is restored, the pre-upgrade database is restored over it, and the previous version is started again. The panel then reports the rollback rather than showing an unchanged version number with no explanation. Helper output goes to `logs/upgrade.log`.
+
+### When the button isn't there
+
+Upgrade only applies to installs made by the one-line installer or from an unzipped release archive. In two cases the panel explains itself instead of offering a button:
+
+- **A source checkout** — update it with `git pull`.
+- **A container** — the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
+
+### From the command line
+
+```bash
+jclaw upgrade --check                    # report versions, change nothing
+jclaw upgrade                            # install the newest release
+jclaw upgrade --version v0.17.48 --yes   # pin a release (also how you step back)
+```
+
+Re-running the one-line installer over an existing install now delegates here too, so it upgrades rather than replacing your data.
+
 ## Restart
 
 Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart` — the same command you'd run by hand — so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.

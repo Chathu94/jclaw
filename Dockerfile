@@ -246,10 +246,15 @@ RUN apt-get update && \
         libxkbcommon0 libxrandr2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Combined into one ENV block — three values, one layer.
+# Combined into one ENV block — four values, one layer.
+# JCLAW_CONTAINER makes the in-app upgrade refuse: here the image is the
+# upgrade unit, and a tree swap under /app is discarded by the next
+# `docker compose up`. Read by UpgradeService.isContainer and jclaw.sh's
+# is_container, alongside a /.dockerenv probe for images built elsewhere.
 ENV JAVA_HOME=/usr/lib/jvm/zulu25 \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
-    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    JCLAW_CONTAINER=1
 
 # Chromium browser tree (~150 MB). Sourced from chromium-stage, which
 # itself only invalidates when build.gradle.kts bumps the playwright

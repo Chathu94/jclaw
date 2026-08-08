@@ -25,6 +25,9 @@
     JCLAW_INSTALL_JRE set to 1 to download the Zulu JRE without prompting
     JCLAW_NO_JRE      set to 1 to never auto-install a JRE (fail if Java is missing)
     JCLAW_NO_RC_EDIT  set to 1 to generate completion scripts but not edit your shell rc
+    JCLAW_FORCE_REINSTALL  replace an existing install from scratch, DISCARDING its
+                      database, workspace and credentials. Without it, an existing
+                      install is upgraded in place instead.
 
   Shell completion: the bundle's jclaw.sh runs through Git Bash or WSL, so the
   installer wires bash/zsh tab-completion into that shell's rc (jclaw.sh <TAB>).
@@ -166,6 +169,28 @@ function Test-Wsl {
     try { wsl.exe -l -q *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
 
+# Record the version installed and the checksum of conf/application.conf *as
+# shipped*. `jclaw.sh upgrade` compares the live conf against this to tell an
+# operator's edits from an untouched default: matching means it can safely
+# install the new release's conf, differing means it must keep theirs. Absent
+# (installs predating this) is read as "edited", the side that cannot lose
+# someone's work.
+function Write-Manifest {
+    $conf = Join-Path $AppDir 'conf\application.conf'
+    if (-not (Test-Path $conf)) { return }
+    try {
+        $ver = (Select-String -Path $conf -Pattern '^application\.version=(.*)$').Matches[0].Groups[1].Value
+        $sha = (Get-FileHash -Path $conf -Algorithm SHA256).Hash.ToLower()
+        $at  = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        # LF, not CRLF: jclaw.sh parses this with sed, which would otherwise
+        # carry a trailing \r into the checksum it compares.
+        $text = "version=$ver`nconf_sha256=$sha`ninstalled_at=$at`n"
+        [System.IO.File]::WriteAllText((Join-Path $AppDir '.jclaw-manifest'), $text)
+    } catch {
+        Warn "could not write .jclaw-manifest: $($_.Exception.Message)"
+    }
+}
+
 function Resolve-Url {
     if ($Version -eq 'latest') {
         return "https://github.com/$Repo/releases/latest/download/$Asset"
@@ -203,6 +228,35 @@ if ($useWsl) {
     if (-not $gitBash) { Substep 'Neither Git Bash nor WSL found - will install, then print run instructions.' }
 }
 
+# Re-running the installer over an existing install is the obvious way to
+# update, so it has to be the safe one. The block below replaces $AppDir
+# wholesale and the release archive ships no data\, workspace\, logs\,
+# public\apps\ or certs\.env - so without this handoff, "update" would mean
+# "delete the database, the agent workspace and the session-signing secret".
+# jclaw.sh upgrade carries all of that across, backs the database up first, and
+# rolls back a release that fails to start.
+if ((Test-Path (Join-Path $AppDir 'jclaw.sh')) -and -not $env:JCLAW_FORCE_REINSTALL) {
+    if (-not ($gitBash -or $useWsl)) {
+        Die "an install already exists at $AppDir, but neither Git Bash nor WSL is available to upgrade it. Install one, then re-run."
+    }
+    Step "Existing install detected at $AppDir - upgrading in place"
+    $upgradeArgs = 'upgrade --yes'
+    if ($Version -ne 'latest') { $upgradeArgs += " --version '$Version'" }
+    if ($gitBash) {
+        $u = $AppDir -replace '\\','/'
+        & $gitBash -lc "'$u/jclaw.sh' $upgradeArgs"
+    } else {
+        $wp = (wsl.exe wslpath -a "$AppDir").Trim()
+        wsl.exe bash -lc "'$wp/jclaw.sh' $upgradeArgs"
+    }
+    if ($LASTEXITCODE -ne 0) { Die "upgrade exited $LASTEXITCODE" }
+    exit 0
+}
+if ((Test-Path $AppDir) -and $env:JCLAW_FORCE_REINSTALL) {
+    Warn "JCLAW_FORCE_REINSTALL is set - $AppDir will be replaced from scratch."
+    Warn 'Its database, workspace, credentials and installed apps will be lost.'
+}
+
 Step 'Resolving release'
 $url = Resolve-Url
 Substep "$Version -> $url"
@@ -230,6 +284,7 @@ try {
     Expand-Archive -Path $zip -DestinationPath $JclawHome -Force
     if (-not (Test-Path $AppDir)) { throw "extract did not produce $AppDir" }
     if ($rollback) { Remove-Item -Recurse -Force $rollback -ErrorAction SilentlyContinue }
+    Write-Manifest
     Substep 'extracted'
 } catch {
     if ($rollback -and (Test-Path $rollback)) {

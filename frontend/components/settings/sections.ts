@@ -25,6 +25,7 @@ import {
   ClipboardDocumentCheckIcon,
   ClockIcon,
   CircleStackIcon,
+  CloudArrowDownIcon,
   CommandLineIcon,
   CpuChipIcon,
   DocumentMagnifyingGlassIcon,
@@ -64,6 +65,7 @@ import SettingsSpeechPanel from './SettingsSpeechPanel.vue'
 import SettingsSubagentsPanel from './SettingsSubagentsPanel.vue'
 import SettingsTasksPanel from './SettingsTasksPanel.vue'
 import SettingsTranscriptionPanel from './SettingsTranscriptionPanel.vue'
+import SettingsUpgradePanel from './SettingsUpgradePanel.vue'
 import SettingsUploadsPanel from './SettingsUploadsPanel.vue'
 import SettingsVideoGenPanel from './SettingsVideoGenPanel.vue'
 import SettingsVideoInterpPanel from './SettingsVideoInterpPanel.vue'
@@ -101,9 +103,10 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
       { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
-      // Last in the group deliberately: it's the one section whose primary
-      // control takes the instance down, so it shouldn't sit next to the
-      // section the rail opens on by default.
+      // Last in the group deliberately: these two are the sections whose
+      // primary control takes the instance down, so they shouldn't sit next to
+      // the section the rail opens on by default.
+      { id: 'upgrade', title: 'Upgrade', icon: CloudArrowDownIcon, component: SettingsUpgradePanel },
       { id: 'restart', title: 'Restart', icon: ArrowPathIcon, component: SettingsRestartPanel },
     ],
   },

@@ -396,7 +396,14 @@ pipeline {
                                 NOTES_ARG='--generate-notes'
                             fi
 
-                            gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip \
+                            # SHA256SUMS rides on the release so `jclaw.sh upgrade`
+                            # can verify what it downloaded before installing it
+                            # over a working instance. Bare filenames (no dist/
+                            # prefix) because the verifier matches on the asset
+                            # name as published.
+                            ( cd dist && shasum -a 256 jclaw.zip jclaw-bundle.zip > SHA256SUMS )
+
+                            gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip dist/SHA256SUMS \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
                                 \$NOTES_ARG
