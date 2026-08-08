@@ -234,6 +234,7 @@ public class ApiMetricsController extends Controller {
         if (stats.isEmpty()) {
             ApiResponses.error(503, "pool_unavailable",
                     "The configured DataSource is not a HikariCP pool, so occupancy cannot be read.");
+            throw ApiResponses.unreachable();
         }
         renderJSON(GSON.toJson(stats.get()));
     }

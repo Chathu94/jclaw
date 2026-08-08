@@ -408,7 +408,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         var apiKey = ConfigService.get(PROVIDER_PREFIX + provider + ".apiKey", "");
         var request = new Request.Builder()
-                .url(baseUrl.replaceAll("/+$", "") + HttpKeys.CHAT_COMPLETIONS_PATH)
+                .url(baseUrl.replaceAll("/++$", "") + HttpKeys.CHAT_COMPLETIONS_PATH)
                 .post(RequestBody.create(body.toString(), MediaType.get(HttpKeys.APPLICATION_JSON)));
         if (!apiKey.isBlank()) request.header("Authorization", "Bearer " + apiKey);
 

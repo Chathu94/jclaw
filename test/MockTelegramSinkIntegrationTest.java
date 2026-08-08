@@ -612,7 +612,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== JCLAW-384: streamed reply lands in the bot-sent-id cache ====================
 
     @Test
-    void streamedReplyIsRecordedInBotSentIdCache() throws Exception {
+    void streamedReplyIsRecordedInBotSentIdCache() {
         // The streamed reply bubble is sent by the sink's placeholder path, not
         // TelegramChannel's direct send methods, so before JCLAW-384 it never
         // reached the bot-sent-id cache and notify=own under-notified on it.
