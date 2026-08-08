@@ -1,5 +1,6 @@
 import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
+import channels.TelegramStreamingSinkTestHooks;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -67,9 +68,9 @@ class TelegramStreamingSinkTest extends UnitTest {
         sink.update(null);
         sink.update("");
         // No flush scheduled → no placeholder sent → messageId stays null
-        assertNull(sink.messageIdForTest());
-        assertFalse(sink.streamCapReachedForTest());
-        assertFalse(sink.sealedForTest());
+        assertNull(TelegramStreamingSinkTestHooks.messageId(sink));
+        assertFalse(TelegramStreamingSinkTestHooks.streamCapReached(sink));
+        assertFalse(TelegramStreamingSinkTestHooks.sealed(sink));
     }
 
     @Test
@@ -80,7 +81,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // the response exceeds 4096 characters, streaming stops at the cap".
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update("x".repeat(4097));
-        assertTrue(sink.streamCapReachedForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.streamCapReached(sink),
                 "4097-char update must flip the cap flag");
     }
 
@@ -89,7 +90,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // Boundary: 4096 chars is the hard cap; at-or-below is fine.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update("x".repeat(4096));
-        assertFalse(sink.streamCapReachedForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.streamCapReached(sink),
                 "4096-char update must stay within the cap");
     }
 
@@ -97,11 +98,11 @@ class TelegramStreamingSinkTest extends UnitTest {
     void updateIgnoredAfterCapReached() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update("x".repeat(4097));
-        assertTrue(sink.streamCapReachedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.streamCapReached(sink));
 
         // Further updates must not change state — no retry, no reset.
         sink.update("more");
-        assertTrue(sink.streamCapReachedForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.streamCapReached(sink),
                 "cap is sticky: further updates must not clear it");
     }
 
@@ -113,7 +114,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // sink cleanly (otherwise a later update would still try to flush).
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.seal(null);
-        assertTrue(sink.sealedForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink),
                 "seal(null) still flips the sealed flag");
     }
 
@@ -125,7 +126,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         sink.seal(null);
         // Second seal is a no-op — no exception, flag stays set.
         sink.seal("something else");
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
     }
 
     @Test
@@ -141,8 +142,8 @@ class TelegramStreamingSinkTest extends UnitTest {
         // still null.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update("y".repeat(5000));
-        assertTrue(sink.streamCapReachedForTest());
-        assertNull(sink.messageIdForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.streamCapReached(sink));
+        assertNull(TelegramStreamingSinkTestHooks.messageId(sink),
                 "overflow before any flush must leave messageId null — "
                         + "seal will deliver via the planner, no placeholder to delete");
     }
@@ -157,10 +158,10 @@ class TelegramStreamingSinkTest extends UnitTest {
         // Calling errorFallback without any prior activity — messageId is
         // null so no delete attempt, no network call; flips the sealed flag.
         sink.errorFallback(new RuntimeException("first"));
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
         // Second call: no-op.
         sink.errorFallback(new RuntimeException("second"));
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
     }
 
     @Test
@@ -172,7 +173,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.seal(null);
         sink.errorFallback(new RuntimeException("late"));
-        assertTrue(sink.sealedForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink),
                 "sealed state holds against a trailing error callback");
     }
 
@@ -232,14 +233,14 @@ class TelegramStreamingSinkTest extends UnitTest {
         // against, so the notifier must decline to fire rather than
         // accidentally sending a "your delivery failed" message from a
         // sink that has no user context.
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
         assertFalse(TelegramStreamingSink.tryFireNotifier(null),
                 "null conversationId must decline to fire");
     }
 
     @Test
     void tryFireNotifierFiresOnceThenRateLimits() {
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
         // First call within the window: fires.
         assertTrue(TelegramStreamingSink.tryFireNotifier(12345L),
                 "first call for a fresh conversation must fire");
@@ -254,7 +255,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // matters during a Telegram outage: every affected chat should
         // still get its first notification, even if they fail
         // simultaneously.
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
         assertTrue(TelegramStreamingSink.tryFireNotifier(111L));
         assertTrue(TelegramStreamingSink.tryFireNotifier(222L));
         assertTrue(TelegramStreamingSink.tryFireNotifier(333L));
@@ -267,7 +268,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // A genuine concern this guards against: a bug that sets the
         // timestamp but never lets it age out would manifest as a
         // conversation that can only ever fire once per JVM lifetime.
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
         assertTrue(TelegramStreamingSink.tryFireNotifier(999L));
 
         var mapField = TelegramStreamingSink.class
@@ -287,7 +288,7 @@ class TelegramStreamingSinkTest extends UnitTest {
     void tryFireNotifierExplicitCooldownIsHonoured() {
         // The explicit-cooldown overload rate-limits against the passed window,
         // not the config default — so a per-binding cooldown is respected.
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
         assertTrue(TelegramStreamingSink.tryFireNotifier(424242L, 60_000L),
                 "first call must fire");
         assertFalse(TelegramStreamingSink.tryFireNotifier(424242L, 60_000L),
@@ -401,7 +402,7 @@ class TelegramStreamingSinkTest extends UnitTest {
     @Test
     void throttleStartsAtMinimum() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
-        assertEquals(250L, sink.currentThrottleMsForTest(),
+        assertEquals(250L, TelegramStreamingSinkTestHooks.currentThrottleMs(sink),
                 "fresh sink should start at the 250 ms minimum");
     }
 
@@ -412,7 +413,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         long[] expected = { 500, 750, 1000, 1000 };
         for (int i = 0; i < 4; i++) {
             sink.recordFlushFailure(buildTelegram429(1));
-            assertEquals(expected[i], sink.currentThrottleMsForTest(),
+            assertEquals(expected[i], TelegramStreamingSinkTestHooks.currentThrottleMs(sink),
                     "step " + (i + 1) + " after 429");
         }
     }
@@ -421,7 +422,7 @@ class TelegramStreamingSinkTest extends UnitTest {
     void throttleStaysUnchangedOnNon429Failure() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.recordFlushFailure(new RuntimeException("connection reset"));
-        assertEquals(250L, sink.currentThrottleMsForTest(),
+        assertEquals(250L, TelegramStreamingSinkTestHooks.currentThrottleMs(sink),
                 "non-rate-limit failure must not touch the cadence");
     }
 
@@ -434,7 +435,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
                 "rate-ish but no params");
         sink.recordFlushFailure(ex);
-        assertEquals(250L, sink.currentThrottleMsForTest());
+        assertEquals(250L, TelegramStreamingSinkTestHooks.currentThrottleMs(sink));
     }
 
     /**
@@ -480,11 +481,11 @@ class TelegramStreamingSinkTest extends UnitTest {
         // response is delivered.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.startTypingHeartbeat();
-        assertTrue(sink.typingHeartbeatActiveForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "startTypingHeartbeat must schedule the heartbeat");
 
         sink.seal("");
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "seal must cancel the typing heartbeat");
     }
 
@@ -496,12 +497,12 @@ class TelegramStreamingSinkTest extends UnitTest {
         // so the Telegram client doesn't keep showing "typing..." forever.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.startTypingHeartbeat();
-        assertTrue(sink.typingHeartbeatActiveForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
 
         sink.cancel();
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "cancel must stop the typing heartbeat");
-        assertTrue(sink.sealedForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink),
                 "cancel must mark the sink sealed so late update() calls no-op");
     }
 
@@ -515,7 +516,7 @@ class TelegramStreamingSinkTest extends UnitTest {
 
         sink.cancel();
         sink.cancel(); // second call must be a no-op, not throw
-        assertFalse(sink.typingHeartbeatActiveForTest());
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
     }
 
     @Test
@@ -525,11 +526,11 @@ class TelegramStreamingSinkTest extends UnitTest {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.startTypingHeartbeat();
         sink.seal("");
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
 
         sink.cancel(); // must be a no-op since sealed.compareAndSet returns false
-        assertTrue(sink.sealedForTest());
-        assertFalse(sink.typingHeartbeatActiveForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
     }
 
     @Test
@@ -540,10 +541,10 @@ class TelegramStreamingSinkTest extends UnitTest {
         // the error reply.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.startTypingHeartbeat();
-        assertTrue(sink.typingHeartbeatActiveForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
 
         sink.errorFallback(new RuntimeException("boom"));
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "errorFallback must cancel the typing heartbeat");
     }
 
@@ -555,12 +556,12 @@ class TelegramStreamingSinkTest extends UnitTest {
         // though seal()/cancel() never fire — the safety net for a turn that
         // hangs without ever sealing.
         var sink = new TelegramStreamingSink("tok", "chat", null);
-        sink.setTypingHeartbeatMaxMsForTest(0);
+        TelegramStreamingSinkTestHooks.setTypingHeartbeatMaxMs(sink, 0);
         sink.startTypingHeartbeat();
 
         boolean stopped = false;
         for (int i = 0; i < 40; i++) {
-            if (!sink.typingHeartbeatActiveForTest()) { stopped = true; break; }
+            if (!TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink)) { stopped = true; break; }
             Thread.sleep(50);
         }
         assertTrue(stopped, "heartbeat must self-stop once the TTL elapses, even without seal()");
@@ -574,12 +575,12 @@ class TelegramStreamingSinkTest extends UnitTest {
         // heartbeat tick a SKIPPED no-op, so the counter seam is deterministic.
         var sink = new TelegramStreamingSink("tok", null, null);
         sink.startTypingHeartbeat();
-        assertTrue(sink.typingHeartbeatActiveForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
 
         for (int i = 0; i < TelegramStreamingSink.TYPING_AUTH_FAILURE_LIMIT; i++) {
             sink.recordTypingOutcome(TelegramChannel.TypingActionOutcome.UNAUTHORIZED);
         }
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "consecutive 401s must stop the heartbeat for the turn");
     }
 
@@ -599,7 +600,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         for (int i = 0; i < belowLimit; i++) {
             sink.recordTypingOutcome(TelegramChannel.TypingActionOutcome.UNAUTHORIZED);
         }
-        assertTrue(sink.typingHeartbeatActiveForTest(),
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "a SENT reset between 401 bursts must keep the breaker below its limit");
     }
 
@@ -610,10 +611,10 @@ class TelegramStreamingSinkTest extends UnitTest {
         // don't waste API calls during the subsequent edit-loop.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.startTypingHeartbeat();
-        assertTrue(sink.typingHeartbeatActiveForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
 
         sink.update("first tokens");
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "update must cancel the typing heartbeat on first call");
     }
 
@@ -624,9 +625,9 @@ class TelegramStreamingSinkTest extends UnitTest {
         // heartbeats.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.startTypingHeartbeat();
-        var firstActive = sink.typingHeartbeatActiveForTest();
+        var firstActive = TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink);
         sink.startTypingHeartbeat();  // no-op
-        assertTrue(firstActive && sink.typingHeartbeatActiveForTest(),
+        assertTrue(firstActive && TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "second startTypingHeartbeat must be a no-op with the first still running");
 
         sink.seal("");
@@ -640,7 +641,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.seal("");
         sink.startTypingHeartbeat();
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "startTypingHeartbeat must no-op when sink is already sealed");
     }
 
@@ -654,7 +655,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
                 "[400] Bad Request: message is not modified");
         sink.recordFlushFailure(ex);
-        assertEquals(250L, sink.currentThrottleMsForTest(),
+        assertEquals(250L, TelegramStreamingSinkTestHooks.currentThrottleMs(sink),
                 "the no-modify branch must NOT touch the cadence");
     }
 
@@ -682,7 +683,7 @@ class TelegramStreamingSinkTest extends UnitTest {
         // and no exception.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         Assertions.assertDoesNotThrow(() -> sink.seal(null));
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
     }
 
     @Test
@@ -750,9 +751,9 @@ class TelegramStreamingSinkTest extends UnitTest {
                 "Too Many Requests", apiResponse);
 
         sinkA.recordFlushFailure(tare);
-        assertEquals(500L, sinkA.currentThrottleMsForTest(),
+        assertEquals(500L, TelegramStreamingSinkTestHooks.currentThrottleMs(sinkA),
                 "sinkA ratchets to 500 after one 429");
-        assertEquals(250L, sinkB.currentThrottleMsForTest(),
+        assertEquals(250L, TelegramStreamingSinkTestHooks.currentThrottleMs(sinkB),
                 "sinkB stays at the floor — sinks don't share ratchet state");
         // Silence unused-var (the basic exception is just there to document
         // shape parity with the throttle test that lives above).
@@ -768,11 +769,11 @@ class TelegramStreamingSinkTest extends UnitTest {
         // pending, scheduling, or messageId. No exception, no state change.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.seal("");
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
         sink.update("late tokens");
-        assertNull(sink.messageIdForTest(),
+        assertNull(TelegramStreamingSinkTestHooks.messageId(sink),
                 "post-seal update must NOT trigger a placeholder send");
-        assertFalse(sink.streamCapReachedForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.streamCapReached(sink),
                 "post-seal update must NOT mutate streamCapReached");
     }
 
@@ -783,18 +784,18 @@ class TelegramStreamingSinkTest extends UnitTest {
         // AC4: existing call sites (the three pre-369 constructors) leave both
         // new fields null → today's behavior (no reply, no topic).
         var threeArg = new TelegramStreamingSink("tok", "chat", null);
-        assertNull(threeArg.replyToMessageIdForTest(),
+        assertNull(TelegramStreamingSinkTestHooks.replyToMessageId(threeArg),
                 "3-arg constructor must default replyToMessageId to null");
-        assertNull(threeArg.messageThreadIdForTest(),
+        assertNull(TelegramStreamingSinkTestHooks.messageThreadId(threeArg),
                 "3-arg constructor must default messageThreadId to null");
 
         var fourArg = new TelegramStreamingSink("tok", "chat", null, 1L);
-        assertNull(fourArg.replyToMessageIdForTest());
-        assertNull(fourArg.messageThreadIdForTest());
+        assertNull(TelegramStreamingSinkTestHooks.replyToMessageId(fourArg));
+        assertNull(TelegramStreamingSinkTestHooks.messageThreadId(fourArg));
 
         var fiveArg = new TelegramStreamingSink("tok", "chat", null, 1L, "supergroup");
-        assertNull(fiveArg.replyToMessageIdForTest());
-        assertNull(fiveArg.messageThreadIdForTest());
+        assertNull(TelegramStreamingSinkTestHooks.replyToMessageId(fiveArg));
+        assertNull(TelegramStreamingSinkTestHooks.messageThreadId(fiveArg));
     }
 
     @Test
@@ -803,9 +804,9 @@ class TelegramStreamingSinkTest extends UnitTest {
         // the placeholder send, planner send, and typing heartbeat can carry
         // them. The parent wires these in after merge.
         var sink = new TelegramStreamingSink("tok", "chat", null, 99L, "supergroup", 1234, 56);
-        assertEquals(1234, sink.replyToMessageIdForTest().intValue(),
+        assertEquals(1234, TelegramStreamingSinkTestHooks.replyToMessageId(sink).intValue(),
                 "constructor must round-trip replyToMessageId");
-        assertEquals(56, sink.messageThreadIdForTest().intValue(),
+        assertEquals(56, TelegramStreamingSinkTestHooks.messageThreadId(sink).intValue(),
                 "constructor must round-trip messageThreadId");
     }
 

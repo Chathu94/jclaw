@@ -631,17 +631,37 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         return IMAGE_MD.matcher(text).replaceAll("");
     }
 
-    public Integer messageIdForTest() { return messageId; }
+    // JCLAW-771: package-private, reached from the default-package tests through
+    // TelegramStreamingSinkTestHooks. Public accessors on the production type let
+    // any caller read streaming internals the sink guards under stateLock.
+    Integer messageIdForTest() { return messageId; }
     /** JCLAW-369: round-trip accessors for the inbound reply target / topic thread. */
-    public Integer replyToMessageIdForTest() { return replyToMessageId; }
-    public Integer messageThreadIdForTest() { return messageThreadId; }
-    public boolean streamCapReachedForTest() { return streamCapReached; }
-    public boolean sealedForTest() { return sealed.get(); }
-    public String lastSentTextForTest() { return lastSentText; }
-    public long lastSentAtForTest() { return lastSentAt; }
-    public long currentThrottleMsForTest() { return currentThrottleMs; }
+    Integer replyToMessageIdForTest() { return replyToMessageId; }
+    Integer messageThreadIdForTest() { return messageThreadId; }
+    boolean streamCapReachedForTest() { return streamCapReached; }
+    boolean sealedForTest() { return sealed.get(); }
+    String lastSentTextForTest() { return lastSentText; }
+    long lastSentAtForTest() { return lastSentAt; }
+    long currentThrottleMsForTest() { return currentThrottleMs; }
+
+    /** JCLAW-771: replaces getDeclaredMethod("flush") reflection in the integration test —
+     *  a private-method lookup silently breaks the moment flush() is relocated. */
+    void flushForTest() { flush(); }
+
+    /** JCLAW-771: replaces getDeclaredField("pending") reflection. Buffers {@code text}
+     *  WITHOUT scheduling a flush, so a test driving flush() by hand keeps exactly one
+     *  flush in flight — the reason the test reached for the field rather than onToken. */
+    void appendPendingForTest(String text) {
+        stateLock.lock();
+        try {
+            pending.append(text);
+        } finally {
+            stateLock.unlock();
+        }
+    }
+
     /** True while the typing-indicator heartbeat (JCLAW-98) is scheduled. */
-    public boolean typingHeartbeatActiveForTest() {
+    boolean typingHeartbeatActiveForTest() {
         stateLock.lock();
         try {
             return typingHeartbeat != null && !typingHeartbeat.isDone();
@@ -740,7 +760,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /** Visible for tests: lower the heartbeat TTL so the self-stop path is
      *  exercisable without a 60s wait (JCLAW-342). */
-    public void setTypingHeartbeatMaxMsForTest(long ms) {
+    void setTypingHeartbeatMaxMsForTest(long ms) {
         this.typingHeartbeatMaxMs = ms;
     }
 
@@ -1134,7 +1154,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     }
 
     /** Clear the notifier rate limiter. Visible for tests only. */
-    public static void clearNotifierRateLimiterForTest() {
+    static void clearNotifierRateLimiterForTest() {
         LAST_NOTIFIER_FIRE_MS.clear();
     }
 

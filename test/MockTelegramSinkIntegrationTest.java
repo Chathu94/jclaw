@@ -1,5 +1,6 @@
 import channels.TelegramChannel;
 import channels.TelegramStreamingSink;
+import channels.TelegramStreamingSinkTestHooks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -83,12 +84,10 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 1L, null);
         pokePending(sink, "placeholder text");
 
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
 
-        var t1 = Thread.ofVirtual().start(() -> invokeQuietly(flushMethod, sink));
+        var t1 = Thread.ofVirtual().start(() -> TelegramStreamingSinkTestHooks.flush(sink));
         Thread.sleep(10);
-        var t2 = Thread.ofVirtual().start(() -> invokeQuietly(flushMethod, sink));
+        var t2 = Thread.ofVirtual().start(() -> TelegramStreamingSinkTestHooks.flush(sink));
 
         t1.join(2000);
         t2.join(2000);
@@ -163,10 +162,8 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                         + "\"parameters\":{\"retry_after\":1}}");
 
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 2L, null);
-        assertEquals(250L, sink.currentThrottleMsForTest(), "fresh sink at floor");
+        assertEquals(250L, TelegramStreamingSinkTestHooks.currentThrottleMs(sink), "fresh sink at floor");
 
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
 
         // Drive four flushes. The ratchet progresses 250 → 500 → 750 → 1000
         // → 1000 (capped). We pokePending before each call so there's
@@ -174,8 +171,8 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         long[] expected = { 500, 750, 1000, 1000 };
         for (int i = 0; i < 4; i++) {
             pokePending(sink, "payload " + i);
-            flushMethod.invoke(sink);
-            assertEquals(expected[i], sink.currentThrottleMsForTest(),
+            TelegramStreamingSinkTestHooks.flush(sink);
+            assertEquals(expected[i], TelegramStreamingSinkTestHooks.currentThrottleMs(sink),
                     "after 429 #" + (i + 1) + " the ratchet should be at " + expected[i] + "ms");
         }
     }
@@ -271,7 +268,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // exhausts its two attempts and returns false.
         server.respondWith("sendMessage", 500,
                 "{\"ok\":false,\"error_code\":500,\"description\":\"internal server error\"}");
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
 
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 4L, "private");
         sink.seal("final content");
@@ -309,7 +306,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // suppressed.
         server.respondWith("sendMessage", 500,
                 "{\"ok\":false,\"error_code\":500,\"description\":\"internal server error\"}");
-        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        TelegramStreamingSinkTestHooks.clearNotifierRateLimiter();
 
         long convId = 5L;
         new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, convId, "private")
@@ -341,7 +338,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
      * Poke the sink's pending buffer directly via reflection. Skips
      * {@link TelegramStreamingSink#update(String)} on purpose: update()
      * schedules a virtual-thread flush via the static scheduler, which
-     * then races with the test's direct {@code flushMethod.invoke(sink)}
+     * then races with the test's direct {@code TelegramStreamingSinkTestHooks.flush(sink)}
      * call. When the scheduler-side flush wins the race for the
      * {@code flushInFlight} re-entrance guard, the test's direct invoke
      * returns early and that iteration's expected ratchet step never
@@ -352,22 +349,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
      * flight.
      */
     private static void pokePending(TelegramStreamingSink sink, String text) {
-        try {
-            var f = TelegramStreamingSink.class.getDeclaredField("pending");
-            f.setAccessible(true);
-            var pending = (StringBuilder) f.get(sink);
-            pending.append(text);
-        } catch (ReflectiveOperationException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private static void invokeQuietly(java.lang.reflect.Method m, Object target) {
-        try {
-            m.invoke(target);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
+        TelegramStreamingSinkTestHooks.appendPending(sink, text);
     }
 
     // ==================== JCLAW-325: residual coverage ====================
@@ -382,11 +364,9 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
 
         // Force a placeholder by directly running flush after poking pending.
         pokePending(sink, "live preview tokens");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
+        TelegramStreamingSinkTestHooks.flush(sink);
 
-        assertNotNull(sink.messageIdForTest(),
+        assertNotNull(TelegramStreamingSinkTestHooks.messageId(sink),
                 "first flush must set messageId from the mock placeholder response");
         int placeholderCount = (int) server.countRequests("sendMessage");
         assertTrue(placeholderCount >= 1, "placeholder sendMessage must have landed");
@@ -394,7 +374,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // Seal with plain text well under the cap — editMessage path.
         sink.seal("This is the **final** response.");
 
-        assertTrue(sink.sealedForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.sealed(sink));
         assertTrue(server.countRequests("editMessageText") >= 1,
                 "seal must dispatch one editMessageText to swap to HTML");
     }
@@ -409,10 +389,8 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
 
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 8L, "private");
         pokePending(sink, "preview text");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
-        assertNotNull(sink.messageIdForTest(),
+        TelegramStreamingSinkTestHooks.flush(sink);
+        assertNotNull(TelegramStreamingSinkTestHooks.messageId(sink),
                 "placeholder must be sent before the media-bearing seal");
 
         // Final response carries an image markdown — needsPlanner = true.
@@ -431,10 +409,8 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // seal's notifier path — error text differs.
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 9L, "private");
         pokePending(sink, "partial response");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
-        assertNotNull(sink.messageIdForTest());
+        TelegramStreamingSinkTestHooks.flush(sink);
+        assertNotNull(TelegramStreamingSinkTestHooks.messageId(sink));
 
         int beforeSends = (int) server.countRequests("sendMessage");
 
@@ -464,7 +440,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // started, then cancels on seal so no more pulses arrive.
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 10L, "private");
         sink.startTypingHeartbeat();
-        assertTrue(sink.typingHeartbeatActiveForTest());
+        assertTrue(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink));
 
         // Wait briefly for the first scheduled fire (initialDelay=0L) to
         // reach the mock. The scheduler hop + VT spawn + HTTP is fast on
@@ -478,7 +454,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                 "typing heartbeat must fire at least one sendChatAction");
 
         sink.seal("");
-        assertFalse(sink.typingHeartbeatActiveForTest(),
+        assertFalse(TelegramStreamingSinkTestHooks.typingHeartbeatActive(sink),
                 "seal must cancel the heartbeat");
 
         long countAtSeal = server.countRequests("sendChatAction");
@@ -498,11 +474,9 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 11L, "supergroup",
                 4321, 88);
         pokePending(sink, "live preview tokens");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
+        TelegramStreamingSinkTestHooks.flush(sink);
 
-        assertNotNull(sink.messageIdForTest(), "first flush must send a placeholder");
+        assertNotNull(TelegramStreamingSinkTestHooks.messageId(sink), "first flush must send a placeholder");
         String placeholderBody = server.requests().stream()
                 .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
                 .map(MockTelegramServer.RecordedRequest::body)
@@ -521,9 +495,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // plain placeholder with neither field — unchanged behavior.
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 12L, "private");
         pokePending(sink, "plain preview");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
+        TelegramStreamingSinkTestHooks.flush(sink);
 
         String body = server.requests().stream()
                 .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
@@ -653,11 +625,9 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
 
         // Force the placeholder send (sets messageId from the mock response).
         pokePending(sink, "live preview tokens");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
+        TelegramStreamingSinkTestHooks.flush(sink);
 
-        Integer replyId = sink.messageIdForTest();
+        Integer replyId = TelegramStreamingSinkTestHooks.messageId(sink);
         assertNotNull(replyId, "placeholder send must set the reply message id");
         assertTrue(TelegramChannel.wasSentByBot(BOT_TOKEN, CHAT_ID, replyId),
                 "the streamed reply message id must be recorded in the bot-sent-id cache");
