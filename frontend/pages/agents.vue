@@ -1826,7 +1826,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       >
         <div class="px-4 py-2.5 flex items-center justify-between gap-4">
           <div>
-            <span class="text-sm font-medium text-fg-strong">Memory</span>
+            <span class="text-sm font-medium text-fg-strong">Memory Autocapture</span>
             <div class="text-xs text-fg-muted mt-0.5">
               Automatically capture durable facts from this agent's conversations
               into long-term memory.
