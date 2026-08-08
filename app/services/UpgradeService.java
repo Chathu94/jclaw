@@ -46,6 +46,7 @@ public final class UpgradeService {
     private static final String DEFAULT_API = "https://api.github.com";
     private static final String REPO_PROPERTY = "jclaw.upgrade.repo";
     private static final String API_URL_PROPERTY = "jclaw.upgrade.api.url";
+    private static final String KEY_TAG_NAME = "tag_name";
     private static final int TIMEOUT_SECONDS = 20;
 
     /**
@@ -191,10 +192,10 @@ public final class UpgradeService {
                 throw new IOException("HTTP " + resp.code() + " for " + url);
             }
             var json = JsonParser.parseString(resp.body().string()).getAsJsonObject();
-            if (!json.has("tag_name") || json.get("tag_name").isJsonNull()) {
-                throw new IOException("release payload has no tag_name");
+            if (!json.has(KEY_TAG_NAME) || json.get(KEY_TAG_NAME).isJsonNull()) {
+                throw new IOException("release payload has no " + KEY_TAG_NAME);
             }
-            return stripV(json.get("tag_name").getAsString());
+            return stripV(json.get(KEY_TAG_NAME).getAsString());
         }
     }
 
@@ -321,7 +322,7 @@ public final class UpgradeService {
                     str(json, "fromVersion"),
                     str(json, "toVersion"),
                     str(json, "startedAt"));
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException _) {
             // A torn read of a file the helper is mid-write on is expected while
             // an upgrade runs; the next poll a second later gets a whole one.
             return null;
