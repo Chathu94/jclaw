@@ -13,15 +13,23 @@ the price, not the requirement.
 
 ## Commercial tiers
 
-Pricing is segmented by tier. Tier definitions and current pricing are
-maintained at <https://abundent.com/jclaw/licensing> and may be updated from
-time to time; the licensing boundary above never changes.
+Pricing is segmented by tier and may be updated from time to time; the
+licensing boundary above never changes. For current pricing, email
+[support@abundent.com](mailto:support@abundent.com).
 
 | Tier | Who it's for | Terms |
 | --- | --- | --- |
-| **Small business** | Organizations below the published revenue and headcount thresholds (measured across your entire corporate group) | Low-cost self-serve annual license, standard terms |
+| **Small business** | Organizations below the small-business revenue and headcount thresholds (measured across your entire corporate group) | Low-cost annual license, standard terms |
 | **Mid-market** | Organizations above the small-business thresholds, outside regulated financial services | Standard commercial license, priced per deployment / seat / revenue band |
 | **Enterprise** | Large organizations, including banks and other regulated institutions | Negotiated enterprise terms; contact us and we will route you to the right commercial channel |
+
+<!-- TODO: state the small-business thresholds here as concrete figures, e.g.
+     "below USD <revenue> annual revenue and fewer than <headcount> employees".
+     These decide which obligation applies rather than what it costs, so they
+     belong in this versioned file — a licensee can then see which definition
+     applied to the version they adopted. Prices stay off-repo. -->
+
+Until the thresholds are published here, tier placement is confirmed on enquiry.
 
 ## How to obtain a commercial license
 
