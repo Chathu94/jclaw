@@ -85,6 +85,10 @@ async function checkStatus() {
       expectedFrameworkVersion?: string | null
     }>('/api/status', {
       signal: controller.signal,
+      // ofetch retries once by default, which against a dead backend means two
+      // requests per probe and two 5s timeouts before the banner appears. The
+      // poll chain below is our retry policy.
+      retry: 0,
     })
     clearTimeout(timeout)
     apiVersion.value = data.applicationVersion
@@ -102,17 +106,49 @@ async function checkStatus() {
   }
 }
 
-// The 30s poll can leave the dot green for up to 30s after the link drops.
-// navigator.onLine fires immediately, but is only trustworthy when false —
-// true merely means an interface has a route, not that the backend answers —
-// so a drop marks us offline directly while a recovery only re-probes.
+// A healthy backend should show as recovered quickly, but a dead one must not
+// be probed every 10s for hours. So: poll at POLL_BASE_MS while it answers,
+// double the gap on each *consecutive* failure up to POLL_MAX_MS, reset on the
+// first success. The first failure still retries at the base delay — a single
+// dropped probe is usually a blip, not an outage.
+const POLL_BASE_MS = 10_000
+const POLL_MAX_MS = 120_000
+
+let pollTimer: ReturnType<typeof setTimeout>
+let pollFailures = 0
+let pollStopped = false
+
+/**
+ * The single scheduling entry point. Every trigger — mount, the timer itself,
+ * link recovery, the banner's Retry — goes through here, and each one cancels
+ * the pending probe before starting, so concurrent poll chains cannot pile up.
+ */
+async function pollStatus() {
+  clearTimeout(pollTimer)
+  await checkStatus()
+  // checkStatus resolves after unmount too; without this the chain would
+  // reschedule itself forever against a dead component.
+  if (pollStopped) return
+  pollFailures = apiOnline.value ? 0 : pollFailures + 1
+  const delay = Math.min(POLL_BASE_MS * 2 ** Math.max(0, pollFailures - 1), POLL_MAX_MS)
+  pollTimer = setTimeout(pollStatus, delay)
+}
+
+/** Probe now and drop any accumulated backoff — an explicit "try again". */
+function retryStatus() {
+  pollFailures = 0
+  return pollStatus()
+}
+
+// navigator.onLine fires immediately where the poll would take up to
+// POLL_BASE_MS, but it is only trustworthy when false — true merely means an
+// interface has a route, not that the backend answers — so a drop marks us
+// offline directly while a recovery only re-probes.
 const online = useOnline()
 watch(online, (up) => {
-  if (up) checkStatus()
+  if (up) retryStatus()
   else apiOnline.value = false
 })
-
-let statusInterval: ReturnType<typeof setInterval>
 
 function handleKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -122,8 +158,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 onMounted(() => {
-  checkStatus()
-  statusInterval = setInterval(checkStatus, 30_000)
+  pollStatus()
   // userAgentData.platform returns "macOS" (lowercase m); navigator.userAgent
   // contains "Macintosh". Normalize before matching so both paths agree.
   const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
@@ -133,7 +168,8 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  clearInterval(statusInterval)
+  pollStopped = true
+  clearTimeout(pollTimer)
   document.removeEventListener('keydown', handleKeydown)
 })
 
@@ -643,7 +679,7 @@ const navGroups: NavGroup[] = [
         message="API is unreachable. Some features may be unavailable."
         variant="error"
         action-text="Retry"
-        @action="checkStatus"
+        @action="retryStatus"
       />
 
       <!-- Content -->
