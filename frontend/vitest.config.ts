@@ -18,7 +18,9 @@ export default defineVitestConfig({
       // v8 is the native Vitest coverage provider (istanbul requires a
       // separate Babel transform); both emit Sonar-compatible lcov but v8
       // is lighter and ships in @vitest/coverage-v8 matching the vitest
-      // major. Activated by `pnpm test -- --coverage` in the Jenkinsfile.
+      // major. Activated by `pnpm test --coverage` in the Jenkinsfile — no `--`
+      // separator, or pnpm ends the flags and vitest reads `--coverage` as a
+      // test-file pattern, producing a silent pass with no coverage at all.
       //
       // `lcov` is what sonar.javascript.lcov.reportPaths consumes; `text`
       // keeps a human-readable summary in the test log; `html` lets us
@@ -26,7 +28,10 @@ export default defineVitestConfig({
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],
       reportsDirectory: 'coverage',
-      include: ['components/**', 'composables/**', 'pages/**', 'plugins/**', 'utils/**'],
+      // layouts/ must stay listed: sonar.coverage.exclusions does not exclude
+      // it, so anything omitted here is counted by Sonar with no coverage data
+      // and reports as 0% however well it is tested.
+      include: ['components/**', 'composables/**', 'layouts/**', 'pages/**', 'plugins/**', 'utils/**'],
       exclude: [
         'test/**',
         'tests/**',
