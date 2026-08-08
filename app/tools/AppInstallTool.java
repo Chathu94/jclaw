@@ -131,6 +131,22 @@ public class AppInstallTool implements ToolRegistry.Tool {
     /** File I/O — not safe to race with other calls in the same round. */
     @Override public boolean parallelSafe() { return false; }
 
+    /** JCLAW-773: {@code install} publishes agent-authored HTML/JS under {@code public/apps/},
+     *  which {@code Application.appAsset} serves at {@code /apps/…} — the same origin as the
+     *  cookie-authed SPA and {@code /api}, under no Content-Security-Policy — so it must route
+     *  through {@link agents.DangerousActionGate} before an inbound-channel turn can reach it.
+     *  {@code stage} and {@code validate} write nothing outside the agent's own workspace. */
+    @Override
+    public boolean dangerous(String argsJson) {
+        if (argsJson == null) return false;
+        try {
+            var args = JsonParser.parseString(argsJson).getAsJsonObject();
+            return ACTION_INSTALL.equals(JsonArgs.optString(args, PARAM_ACTION));
+        } catch (RuntimeException _) {
+            return false;   // malformed args never reach install()
+        }
+    }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         if (agent == null) return err("no agent context.");

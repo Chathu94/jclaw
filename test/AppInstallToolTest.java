@@ -177,6 +177,26 @@ class AppInstallToolTest extends UnitTest {
                 "existing workspace copy kept: " + res);
     }
 
+    // ============ JCLAW-773: install routes through DangerousActionGate ============
+
+    @Test
+    void installIsDangerousAndStageValidateAreNot() {
+        assertTrue(tool.dangerous("{\"action\":\"install\",\"slug\":\"demo\"}"),
+                "install publishes same-origin HTML/JS and must be gated");
+        assertFalse(tool.dangerous("{\"action\":\"validate\",\"slug\":\"demo\"}"),
+                "validate writes nothing; gating it would prompt on a pure read");
+        assertFalse(tool.dangerous("{\"action\":\"stage\",\"slug\":\"demo\"}"),
+                "stage only writes the agent's own workspace");
+    }
+
+    @Test
+    void notDangerousForMalformedOrActionlessArgs() {
+        assertFalse(tool.dangerous(null), "null args -> no install -> not dangerous");
+        assertFalse(tool.dangerous("not json"), "malformed args never reach install()");
+        assertFalse(tool.dangerous("[1,2,3]"), "non-object JSON -> not dangerous");
+        assertFalse(tool.dangerous("{\"slug\":\"demo\"}"), "action-less call is rejected by execute()");
+    }
+
     private static void deleteDir(Path root) {
         if (root == null || !Files.exists(root)) return;
         try (Stream<Path> walk = Files.walk(root)) {
