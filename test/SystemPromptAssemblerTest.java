@@ -353,6 +353,79 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     // =====================
+    // Execution Bias memory bullet tracks MemoryAutoCapture.captureEligible
+    // =====================
+
+    @Test
+    void autocaptureOnAgentIsToldItRemembersAutomatically() {
+        var agent = newAgent("spa-mem-on");
+
+        var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
+
+        assertTrue(prompt.contains("You remember durable facts automatically"),
+                "an autocapture-enabled agent keeps the automatic-capture guidance");
+        assertFalse(prompt.contains("Automatic memory capture is not running for this conversation"),
+                "the off-variant must not appear for an autocapture-enabled agent");
+    }
+
+    @Test
+    void autocaptureOffAgentIsToldToStoreOnlyWhenDirected() {
+        var agent = newAgent("spa-mem-off");
+        agent.memoryAutocaptureEnabled = false;
+        agent.save();
+
+        var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
+
+        assertTrue(prompt.contains("Automatic memory capture is not running for this conversation"),
+                "an autocapture-disabled agent must be told capture is off");
+        assertTrue(prompt.contains("only when the operator explicitly directs you to remember"),
+                "storing must be scoped to an explicit operator instruction");
+        assertFalse(prompt.contains("You remember durable facts automatically"),
+                "the automatic-capture claim must not survive the toggle being off");
+        assertFalse(prompt.contains("that is what the automatic capture is for"),
+                "the off-variant must not defer proactive saves to a capture that is not running");
+    }
+
+    /** Subagents are excluded from capture (JCLAW-539), so they get the same off-variant. */
+    @Test
+    void subagentIsNotToldItRemembersAutomatically() {
+        var parent = newAgent("spa-mem-parent");
+        var child = newAgent("spa-mem-child");
+        child.parentAgent = parent;
+        child.save();
+
+        var prompt = SystemPromptAssembler.assemble(child, "test").systemPrompt();
+
+        assertFalse(prompt.contains("You remember durable facts automatically"),
+                "a subagent never gets autocapture, so it must not be told otherwise");
+        assertTrue(prompt.contains("Automatic memory capture is not running for this conversation"),
+                "a subagent gets the manual-storage guidance");
+    }
+
+    /** Voice turns are excluded from capture (JCLAW-866) even with the agent toggle on. */
+    @Test
+    void voiceConversationDropsTheAutomaticCaptureClaim() {
+        var agent = newAgent("spa-mem-voice");
+
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "voice").systemPrompt();
+
+        assertFalse(prompt.contains("You remember durable facts automatically"),
+                "a voice turn is never auto-captured, so the claim must not be made there");
+        assertTrue(prompt.contains("Automatic memory capture is not running for this conversation"),
+                "a voice turn gets the manual-storage guidance");
+    }
+
+    @Test
+    void nonVoiceChannelKeepsTheAutomaticCaptureGuidance() {
+        var agent = newAgent("spa-mem-web");
+
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+
+        assertTrue(prompt.contains("You remember durable facts automatically"),
+                "the voice exclusion must not leak into other channels");
+    }
+
+    // =====================
     // Cleanup so workspace dirs don't accumulate across runs
     // =====================
 
