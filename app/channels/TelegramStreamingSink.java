@@ -382,7 +382,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         // JCLAW-98: first visible content means the placeholder is about to
         // replace the typing indicator anyway — stop the heartbeat so we
         // don't waste API calls. Idempotent; safe to call on every update.
-        cancelTypingHeartbeatLocked();
+        cancelTypingHeartbeat();
         stateLock.lock();
         try {
             if (sealed.get() || streamCapReached) return;
@@ -412,7 +412,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         // JCLAW-98: terminal path — the final edit / planner send will
         // replace the typing indicator. Cancel before the await so no
         // stray heartbeat fires between here and message delivery.
-        cancelTypingHeartbeatLocked();
+        cancelTypingHeartbeat();
         stateLock.lock();
         try {
             cancelScheduledLocked();
@@ -571,7 +571,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      */
     public void cancel() {
         if (!sealed.compareAndSet(false, true)) return;
-        cancelTypingHeartbeatLocked();
+        cancelTypingHeartbeat();
         stateLock.lock();
         try {
             cancelScheduledLocked();
@@ -593,7 +593,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      */
     public void errorFallback(Exception e) {
         if (!sealed.compareAndSet(false, true)) return;
-        cancelTypingHeartbeatLocked();
+        cancelTypingHeartbeat();
         stateLock.lock();
         try {
             cancelScheduledLocked();
@@ -704,7 +704,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
             typingHeartbeat = scheduler().scheduleAtFixedRate(
                     () -> {
                         if (System.nanoTime() >= deadlineNanos) {
-                            cancelTypingHeartbeatLocked(); // JCLAW-342: TTL reached
+                            cancelTypingHeartbeat(); // JCLAW-342: TTL reached
                             return;
                         }
                         // JCLAW-369: scope the typing indicator to the forum
@@ -723,8 +723,10 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
         }
     }
 
-    /** Cancel the typing heartbeat if running. Idempotent. */
-    private void cancelTypingHeartbeatLocked() {
+    /** Cancel the typing heartbeat if running. Idempotent, and safe to call from inside
+     *  another stateLock critical section — the lock is reentrant, which is what the four
+     *  callers under update/seal/cancel rely on. */
+    private void cancelTypingHeartbeat() {
         stateLock.lock();
         try {
             if (typingHeartbeat != null) {
@@ -751,7 +753,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
                 EventLogger.warn(LOG_CATEGORY, agentName(), LOG_SOURCE,
                         "Stopping typing heartbeat after %d consecutive sendChatAction 401s (chat %s)"
                                 .formatted(TYPING_AUTH_FAILURE_LIMIT, chatId));
-                cancelTypingHeartbeatLocked();
+                cancelTypingHeartbeat();
             }
         } else if (outcome == TelegramChannel.TypingActionOutcome.SENT) {
             consecutiveTypingAuthFailures.set(0);
