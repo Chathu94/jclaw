@@ -6,6 +6,7 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 import play.Play;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
@@ -114,7 +115,7 @@ public final class ClawhubSkillFetcher {
 
     private static JsonObject getJson(HttpUrl u) throws IOException {
         var call = HttpFactories.general().newCall(
-                new Request.Builder().url(u).header("Accept", "application/json").get().build());
+                new Request.Builder().url(u).header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON).get().build());
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var b = resp.body();

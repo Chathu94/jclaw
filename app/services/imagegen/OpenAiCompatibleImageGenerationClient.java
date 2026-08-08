@@ -11,6 +11,7 @@ import okhttp3.RequestBody;
 import services.ConfigService;
 import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
@@ -41,7 +42,7 @@ import java.util.Base64;
 public class OpenAiCompatibleImageGenerationClient extends OpenAiCompatibleClientBase
         implements ImageGenerationService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
     private static final String B64_JSON = "b64_json";
     private static final String MIME_PNG = "image/png";
 

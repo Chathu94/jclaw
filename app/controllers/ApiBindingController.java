@@ -44,7 +44,7 @@ public abstract class ApiBindingController extends Controller {
         Agent agent = AgentService.findById(agentId);
         if (agent == null || !agent.enabled) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         return agent;
     }

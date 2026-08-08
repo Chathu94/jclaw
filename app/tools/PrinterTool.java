@@ -12,6 +12,7 @@ import services.printing.PrintDispatcher;
 import services.printing.PrintProtocol;
 import services.printing.PrinterDefaults;
 import services.printing.PrinterDiscovery;
+import utils.HttpKeys;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
@@ -420,7 +421,7 @@ public class PrinterTool implements ToolRegistry.Tool {
         if (lower.endsWith(".webp")) return "image/webp";
         // Deliberately not a guess: a conforming printer treats octet-stream as
         // "sniff it yourself", which beats asserting a format that is wrong.
-        return "application/octet-stream";
+        return HttpKeys.APPLICATION_OCTET_STREAM;
     }
 
     private static String firstNonNull(String a, String b) {

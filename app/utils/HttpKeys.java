@@ -1,7 +1,7 @@
 package utils;
 
 /**
- * Shared HTTP header name and value constants for outbound HTTP calls.
+ * Shared HTTP header, media-type and path constants for outbound HTTP calls.
  * Centralizes the canonical strings used by OkHttp request builders across
  * provider drivers, scanners, the MCP HTTP transport, and channel webhooks —
  * eliminating the java:S1192 duplicated-literal flags those files were
@@ -19,7 +19,11 @@ public final class HttpKeys {
 
     // Common values
     public static final String APPLICATION_JSON = "application/json";
+    public static final String APPLICATION_OCTET_STREAM = "application/octet-stream";
 
     // Bearer-auth prefix (trailing space is intentional — callers append the token)
     public static final String BEARER_PREFIX = "Bearer ";
+
+    // Path suffix appended to an OpenAI-compatible provider baseUrl
+    public static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
 }

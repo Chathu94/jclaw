@@ -108,7 +108,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
         if (agentId == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
 
         String phoneNumberId = readOptionalString(body, KEY_PHONE_NUMBER_ID);
@@ -120,7 +120,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         if (transport == WhatsAppTransport.CLOUD_API
                 && (phoneNumberId == null || accessToken == null)) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "The Cloud API transport requires a phone number id and an access token");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
 
         Agent agent = requireEnabledAgent(agentId);

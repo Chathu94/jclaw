@@ -8,6 +8,7 @@ import it.auties.whatsapp.model.message.standard.DocumentMessageSimpleBuilder;
 import it.auties.whatsapp.model.message.standard.ImageMessageSimpleBuilder;
 import models.WhatsAppBinding;
 import services.EventLogger;
+import utils.HttpKeys;
 import utils.TikaHolder;
 
 import java.io.File;
@@ -234,7 +235,7 @@ public final class WhatsAppCobaltChannel implements Channel {
         try {
             return TikaHolder.TIKA.detect(file);
         } catch (Exception _) {
-            return "application/octet-stream";
+            return HttpKeys.APPLICATION_OCTET_STREAM;
         }
     }
 

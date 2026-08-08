@@ -7,6 +7,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
@@ -28,7 +29,7 @@ import java.io.IOException;
  */
 public class LocalVideoGenerationClient implements VideoGenerationService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
     private static final int DEFAULT_FPS = 24; // sidecar default when the request doesn't specify fps
 
     // Sidecar poll-response JSON keys.

@@ -129,6 +129,17 @@ public final class ApiResponses {
         throw new RenderJson(GSON.toJson(errorBody(code, message)));
     }
 
+    /**
+     * The error to throw after a call that always throws but is typed to return —
+     * {@link #error}, Play's {@code notFound()} / {@code badRequest()}. Returns rather
+     * than throws so a bare call cannot compile into a silent no-op.
+     *
+     * @return the error for the caller to {@code throw}
+     */
+    public static AssertionError unreachable() {
+        return new AssertionError("unreachable: the preceding call throws");
+    }
+
     private static Map<String, Object> errorBody(String code, String message) {
         var body = new LinkedHashMap<String, Object>();
         body.put("type", "error");

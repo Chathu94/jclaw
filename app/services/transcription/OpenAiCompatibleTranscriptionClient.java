@@ -13,6 +13,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -93,7 +94,7 @@ public class OpenAiCompatibleTranscriptionClient extends OpenAiCompatibleClientB
         }
 
         var mediaType = MediaType.parse(
-                attachment.mimeType != null ? attachment.mimeType : "application/octet-stream");
+                attachment.mimeType != null ? attachment.mimeType : HttpKeys.APPLICATION_OCTET_STREAM);
         var fileBody = RequestBody.create(path.toFile(), mediaType);
 
         var multipart = new MultipartBody.Builder()

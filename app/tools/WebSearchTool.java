@@ -14,6 +14,7 @@ import services.ConfigService;
 import services.EventLogger;
 import utils.GsonHolder;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -40,7 +41,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     private static final int TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_NUM_RESULTS = 5;
     private static final int MAX_NUM_RESULTS = 10;
-    private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.get(HttpKeys.APPLICATION_JSON);
 
     /** Chars of a provider error body echoed into the failure message/event. */
     private static final int ERROR_BODY_SNIPPET_CHARS = 200;
@@ -453,7 +454,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var url = "%s?q=%s&count=%d".formatted(baseUrl(), encodedQuery, numResults);
             return new Request.Builder()
                     .url(url)
-                    .header("Accept", "application/json")
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .header("X-Subscription-Token", apiKey)
                     .get()
                     .build();

@@ -230,12 +230,12 @@ public class ApiMemoryController extends Controller {
         Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
         if (body.has(KEY_IMPORTANCE) && !body.get(KEY_IMPORTANCE).isJsonNull()) {
             double imp = body.get(KEY_IMPORTANCE).getAsDouble();
@@ -282,7 +282,7 @@ public class ApiMemoryController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
         var agent = requireEvalAgent(body);
         var suiteId = JsonArgs.optString(body, "suiteId", "recall");
@@ -342,7 +342,7 @@ public class ApiMemoryController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
         var agent = requireEvalAgent(body);
         var suiteId = JsonArgs.optString(body, "suiteId", "recall");
@@ -352,11 +352,11 @@ public class ApiMemoryController extends Controller {
                     java.nio.file.Files.readString(MemoryEvalPaths.suiteFile(suiteId)), MemoryEvalSuite.class);
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
-            throw new AssertionError("unreachable");
+            throw ApiResponses.unreachable();
         } catch (IOException _) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
                     "No generated suite '%s' — generate one first".formatted(suiteId));
-            throw new AssertionError("unreachable");
+            throw ApiResponses.unreachable();
         }
 
         // Which ranking to score. "selected" is what the model actually sees — the
@@ -423,7 +423,7 @@ public class ApiMemoryController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
         var query = JsonArgs.optString(body, "query", "");
         if (query.isBlank()) {
@@ -540,7 +540,7 @@ public class ApiMemoryController extends Controller {
         Memory memory = MemoryService.findById(memoryId);
         if (memory == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
         memory.delete();
         ApiResponses.ok();

@@ -7,6 +7,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
@@ -29,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class LocalImageGenerationClient implements ImageGenerationService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
 
     private final OkHttpClient client;
     /** Non-null only in tests — bypasses the sidecar manager and points at MockWebServer. */

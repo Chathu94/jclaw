@@ -128,7 +128,7 @@ public class ApiSlackBindingsController extends ApiBindingController {
                 ? body.get(KEY_AGENT_ID).getAsLong() : null;
         if (botToken == null || agentId == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "botToken and agentId are required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         // JCLAW-351: transport-specific inbound credential. The Events API (HTTP) verifies
         // an HMAC, so it needs the signing secret; Socket Mode authenticates the WebSocket
@@ -136,11 +136,11 @@ public class ApiSlackBindingsController extends ApiBindingController {
         if (transport == ChannelTransport.SOCKET) {
             if (appToken == null || appToken.isBlank()) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Socket Mode requires an app-level token (xapp-)");
-                throw new AssertionError("unreachable: error() throws");
+                throw ApiResponses.unreachable();
             }
         } else if (signingSecret == null || signingSecret.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "The Events API transport requires a signing secret");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
 
         Agent agent = requireEnabledAgent(agentId);

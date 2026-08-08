@@ -1,6 +1,7 @@
 package services.printing;
 
 import services.EventLogger;
+import utils.HttpKeys;
 
 import javax.imageio.ImageIO;
 
@@ -30,7 +31,7 @@ public final class PrintFormatNegotiator {
 
     public static final String PWG_RASTER = "image/pwg-raster";
     public static final String JPEG = "image/jpeg";
-    public static final String OCTET_STREAM = "application/octet-stream";
+    public static final String OCTET_STREAM = HttpKeys.APPLICATION_OCTET_STREAM;
 
     /** JPEG quality for rendered pages. 0.9 keeps text edges clean without bloating the job. */
     private static final float JPEG_QUALITY = 0.9f;

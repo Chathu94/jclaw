@@ -13,6 +13,7 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.openaicompat.OpenAiCompatibleClientBase;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.io.IOException;
 
@@ -37,7 +38,7 @@ import java.io.IOException;
 public class OpenAiCompatibleImageCaptionClient extends OpenAiCompatibleClientBase
         implements ImageCaptionService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
     private static final String INSTRUCTION =
             "Describe this image objectively in one concise sentence for a reader who cannot see it.";
     /** OpenAI chat-completions message field name (request part + response parse). */
@@ -100,7 +101,7 @@ public class OpenAiCompatibleImageCaptionClient extends OpenAiCompatibleClientBa
         // local Ollama, which rejects WebP) gets an image it can load.
         imageDataUrl = CaptionImageNormalizer.toModelSafeDataUrl(imageDataUrl);
 
-        var url = creds.baseUrl() + "/chat/completions";
+        var url = creds.baseUrl() + HttpKeys.CHAT_COMPLETIONS_PATH;
         var request = bearer(new Request.Builder().url(url), creds.apiKey())
                 .post(RequestBody.create(buildRequestJson(model, imageDataUrl), JSON))
                 .build();

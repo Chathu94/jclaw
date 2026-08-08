@@ -262,12 +262,12 @@ public class ApiTasksController extends Controller {
     private static Agent requireAgentFromBody(JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId does not resolve to an existing agent");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         return agent;
     }
@@ -276,12 +276,12 @@ public class ApiTasksController extends Controller {
     private static String requireTaskName(JsonObject body) {
         if (!body.has(KEY_NAME) || body.get(KEY_NAME).isJsonNull()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "name is required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         var name = body.get(KEY_NAME).getAsString();
         if (name == null || name.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "name must be non-blank");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         return name;
     }
@@ -322,14 +322,14 @@ public class ApiTasksController extends Controller {
     private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(JsonObject body) {
         if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "schedule is required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         try {
             var zone = TimezoneResolver.resolve(TaskWriteService.readOptionalString(body, KEY_TIMEZONE));
             return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString(), zone);
         } catch (IllegalArgumentException e) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Invalid schedule: " + e.getMessage());
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
     }
 

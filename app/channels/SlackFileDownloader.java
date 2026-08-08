@@ -6,6 +6,7 @@ import okhttp3.Request;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
+import utils.HttpKeys;
 import utils.SsrfGuard;
 import utils.WorkspacePathGuard;
 
@@ -202,7 +203,7 @@ public final class SlackFileDownloader {
                 ? stripParams(fetchedContentType)
                 : declaredMime;
         if (mime == null || mime.isBlank()) {
-            mime = "application/octet-stream";
+            mime = HttpKeys.APPLICATION_OCTET_STREAM;
         }
         if (AUDIO_SUBTYPE.equals(subtype) && mime.toLowerCase(Locale.ROOT).startsWith(VIDEO_PREFIX)) {
             mime = "audio/" + mime.substring(VIDEO_PREFIX.length());

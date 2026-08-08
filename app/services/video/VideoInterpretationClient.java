@@ -54,7 +54,7 @@ import java.util.Map;
  */
 public class VideoInterpretationClient {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
     /** OpenAI chat-completions message field (request part + response parse). */
     private static final String CONTENT = "content";
     private static final String INSTRUCTION =
@@ -188,7 +188,7 @@ public class VideoInterpretationClient {
     /** POST a prebuilt {@code /chat/completions} body and return the parsed prose. Shared by both modes. */
     private String executeChat(String baseUrl, String requestJson) {
         var builder = new Request.Builder()
-                .url(Strings.trimTrailingSlash(baseUrl) + "/chat/completions")
+                .url(Strings.trimTrailingSlash(baseUrl) + HttpKeys.CHAT_COMPLETIONS_PATH)
                 .post(RequestBody.create(requestJson, JSON));
         var apiKey = ConfigService.get("provider." + providerName + ".apiKey");
         if (apiKey != null && !apiKey.isBlank()) {

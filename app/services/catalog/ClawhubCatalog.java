@@ -9,6 +9,7 @@ import play.Play;
 import services.EventLogger;
 import services.SkillCategoryClassifier;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.JsonArgs;
 import utils.Strings;
 
@@ -210,7 +211,7 @@ public final class ClawhubCatalog implements Catalog {
 
     private JsonObject getJson(HttpUrl url) throws IOException {
         var call = HttpFactories.general().newCall(
-                new Request.Builder().url(url).header("Accept", "application/json").get().build());
+                new Request.Builder().url(url).header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON).get().build());
         call.timeout().timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var body = resp.body();

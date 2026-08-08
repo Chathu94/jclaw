@@ -709,7 +709,7 @@ public class ApiSkillsController extends Controller {
         var resolved = WorkspacePathGuard.resolveContained(root, name);
         if (resolved == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
         return resolved;
     }

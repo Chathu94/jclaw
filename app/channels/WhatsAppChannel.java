@@ -415,7 +415,7 @@ public class WhatsAppChannel implements Channel {
         } catch (Exception _) {
             // fall through to the default
         }
-        return "application/octet-stream";
+        return HttpKeys.APPLICATION_OCTET_STREAM;
     }
 
     /** Map a MIME type to the WhatsApp media message type

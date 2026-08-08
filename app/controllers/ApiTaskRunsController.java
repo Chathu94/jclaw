@@ -199,7 +199,7 @@ public class ApiTaskRunsController extends Controller {
                 return new RunWindow(since, until);
             } catch (DateTimeException _) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "from/to must be ISO-8601 instants");
-                throw new AssertionError("unreachable: error() throws");
+                throw ApiResponses.unreachable();
             }
         }
         int h = (hours != null && hours > 0) ? Math.min(hours, 24 * 30) : 24;

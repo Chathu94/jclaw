@@ -17,6 +17,7 @@ import play.mvc.ActionInvoker;
 import play.mvc.Router;
 import services.InternalApiTokenService;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.JsonArgs;
 
 import java.io.IOException;
@@ -263,7 +264,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
         var requestBuilder = new Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer " + InternalApiTokenService.token())
-                .header("Accept", "application/json");
+                .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON);
 
         RequestBody body = requestBodyFor(method, args);
         requestBuilder.method(method, body);

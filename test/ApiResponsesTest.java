@@ -66,6 +66,12 @@ class ApiResponsesTest extends UnitTest {
     }
 
     @Test
+    void unreachableReturnsTheErrorRatherThanThrowingIt() {
+        var e = ApiResponses.unreachable();
+        assertNotNull(e.getMessage());
+    }
+
+    @Test
     void errorAndLogRendersCanonicalEnvelopeAndSetsStatus() {
         Http.Response response = new Http.Response();
         Http.Response.current.set(response);

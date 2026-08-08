@@ -24,6 +24,7 @@ import services.transcription.LlmAudio;
 import services.transcription.WhisperTranscriber;
 import utils.GsonHolder;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.JsonArgs;
 
 import java.io.IOException;
@@ -407,8 +408,8 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
 
         var apiKey = ConfigService.get(PROVIDER_PREFIX + provider + ".apiKey", "");
         var request = new Request.Builder()
-                .url(baseUrl.replaceAll("/+$", "") + "/chat/completions")
-                .post(RequestBody.create(body.toString(), MediaType.get("application/json")));
+                .url(baseUrl.replaceAll("/+$", "") + HttpKeys.CHAT_COMPLETIONS_PATH)
+                .post(RequestBody.create(body.toString(), MediaType.get(HttpKeys.APPLICATION_JSON)));
         if (!apiKey.isBlank()) request.header("Authorization", "Bearer " + apiKey);
 
         // Audio inference over a multi-minute recording routinely exceeds

@@ -9,6 +9,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.EventLogger;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.SsrfGuard;
 
 import java.io.File;
@@ -140,9 +141,9 @@ public final class SlackFileUploader {
     private static String mimeOf(File file) {
         try {
             var probed = Files.probeContentType(file.toPath());
-            return probed != null ? probed : "application/octet-stream";
+            return probed != null ? probed : HttpKeys.APPLICATION_OCTET_STREAM;
         } catch (IOException _) {
-            return "application/octet-stream";
+            return HttpKeys.APPLICATION_OCTET_STREAM;
         }
     }
 

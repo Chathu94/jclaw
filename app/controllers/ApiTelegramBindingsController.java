@@ -124,7 +124,7 @@ public class ApiTelegramBindingsController extends ApiBindingController {
 
         if (botToken == null || agentId == null || telegramUserId == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "botToken, agentId, and telegramUserId are required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         if (!telegramUserId.matches("\\d+")) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "telegramUserId must be numeric");

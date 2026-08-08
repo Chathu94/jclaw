@@ -57,14 +57,14 @@ public class ApiBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
 
         var agentId = requiredLong(body, KEY_AGENT_ID);
         var agent = AgentService.findById(agentId);
         if (agent == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
 
         var binding = new AgentBinding();
@@ -84,20 +84,20 @@ public class ApiBindingsController extends Controller {
         var binding = BindingService.findAgentBindingById(id);
         if (binding == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
 
         if (body.has(KEY_AGENT_ID)) {
             var agent = AgentService.findById(requiredLong(body, KEY_AGENT_ID));
             if (agent == null) {
                 notFound();
-                throw new AssertionError("unreachable: notFound() throws");
+                throw ApiResponses.unreachable();
             }
             binding.agent = agent;
         }
@@ -114,7 +114,7 @@ public class ApiBindingsController extends Controller {
         var binding = BindingService.findAgentBindingById(id);
         if (binding == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
         binding.delete();
         ApiResponses.ok();
@@ -140,7 +140,7 @@ public class ApiBindingsController extends Controller {
         } catch (NumberFormatException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "Field '%s' must be a number".formatted(key));
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
     }
 

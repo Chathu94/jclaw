@@ -152,7 +152,7 @@ public final class WhatsAppMediaDownloader {
         }
 
         var mime = pending.mimeType() != null && !pending.mimeType().isBlank()
-                ? stripParams(pending.mimeType()) : "application/octet-stream";
+                ? stripParams(pending.mimeType()) : HttpKeys.APPLICATION_OCTET_STREAM;
         var kind = MessageAttachment.kindForMime(mime);
         var originalFilename = pending.filename() != null && !pending.filename().isBlank()
                 ? pending.filename() : "whatsapp-" + mediaId + extension;

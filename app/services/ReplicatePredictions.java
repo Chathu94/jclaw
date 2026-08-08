@@ -26,7 +26,7 @@ import java.io.IOException;
  */
 public final class ReplicatePredictions {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
     private static final String OUTPUT = "output";
     private static final String ERROR = "error";
 

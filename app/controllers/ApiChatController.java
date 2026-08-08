@@ -115,7 +115,7 @@ public class ApiChatController extends Controller {
     private static ChatContext resolveChatContext(JsonObject body) {
         if (body == null || !body.has("message") || !body.has(KEY_AGENT_ID)) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
 
         var agentId = body.get(KEY_AGENT_ID).getAsLong();
@@ -126,7 +126,7 @@ public class ApiChatController extends Controller {
         Agent agent = Tx.run(() -> AgentService.findById(agentId));
         if (agent == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
 
         var messageText = body.get("message").getAsString();

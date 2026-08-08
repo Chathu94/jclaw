@@ -122,7 +122,7 @@ public class ApiAgentsController extends Controller {
         var agent = AgentService.findById(id);
         if (agent == null || isReservedName(agent.name)) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
         return agent;
     }
@@ -365,7 +365,7 @@ public class ApiAgentsController extends Controller {
         var v = readOptionalString(body, key);
         if (v == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "'" + key + "' is required");
-            throw new AssertionError("unreachable: error() throws");
+            throw ApiResponses.unreachable();
         }
         return v;
     }
@@ -581,7 +581,7 @@ public class ApiAgentsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_CONTENT) || body.get(KEY_CONTENT).isJsonNull()) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
         AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
         ApiResponses.ok("filename", filename);

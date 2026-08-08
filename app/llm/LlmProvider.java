@@ -452,7 +452,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // request that ends in an exception still shows as a call the harness
         // decided to make — the NFR is about decisions, not successes.
         LatencyTrace.countLlmCall();
-        var responseBody = executeWithRetry("/chat/completions", json, timeoutSeconds, channel);
+        var responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH, json, timeoutSeconds, channel);
         // A provider can return a 200 whose body is garbage (truncated JSON, an
         // HTML error page, a missing "choices" array). deserializeResponse then
         // throws a raw JsonSyntaxException / IllegalStateException — which
@@ -502,7 +502,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);
-                OkHttpLlmHttpDriver.streamSse(buildUri("/chat/completions"),
+                OkHttpLlmHttpDriver.streamSse(buildUri(HttpKeys.CHAT_COMPLETIONS_PATH),
                         HttpKeys.BEARER_PREFIX + config.apiKey(), json,
                         data -> {
                             // The server closes the stream right after the [DONE]

@@ -131,13 +131,13 @@ public class ApiToolsController extends Controller {
         Agent agent = AgentService.findById(id);
         if (agent == null) {
             notFound();
-            throw new AssertionError("unreachable: notFound() throws");
+            throw ApiResponses.unreachable();
         }
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_ENABLED)) {
             badRequest();
-            throw new AssertionError("unreachable: badRequest() throws");
+            throw ApiResponses.unreachable();
         }
         var enabled = body.get(KEY_ENABLED).getAsBoolean();
 

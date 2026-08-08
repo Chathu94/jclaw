@@ -3,6 +3,7 @@ package services.sidecar;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.time.Duration;
 import java.util.concurrent.locks.ReentrantLock;
@@ -33,7 +34,7 @@ import java.util.function.Supplier;
  */
 public abstract class SidecarHttpClient {
 
-    protected static final MediaType JSON = MediaType.get("application/json");
+    protected static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
 
     protected final String baseUrlOverride;
     protected final OkHttpClient client;

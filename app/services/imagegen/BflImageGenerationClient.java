@@ -8,6 +8,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
 import utils.HttpFactories;
+import utils.HttpKeys;
 import utils.Strings;
 
 import java.io.IOException;
@@ -26,7 +27,7 @@ import java.util.Base64;
  */
 public class BflImageGenerationClient implements ImageGenerationService {
 
-    private static final MediaType JSON = MediaType.parse("application/json");
+    private static final MediaType JSON = MediaType.parse(HttpKeys.APPLICATION_JSON);
     private static final String KEY_HEADER = "x-key";
     private static final String DEFAULT_MODEL = "flux-2-pro";
     private static final long POLL_INTERVAL_MS = 1000L;
