@@ -4,11 +4,17 @@ import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.lang.ArchRule;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.NoTransaction;
+import play.mvc.Before;
 import play.test.UnitTest;
 
+import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
@@ -101,6 +107,14 @@ class ArchitectureTest extends UnitTest {
      * h2c-upgrade hang and to keep a single virtual-thread-clean client. This guards
      * against the second stack creeping back in.
      */
+    @Test
+    void noJdkHttpClientInApp() {
+        ArchRule rule = noClasses()
+                .should().dependOnClassesThat().resideInAnyPackage("java.net.http..")
+                .because("outbound HTTP is OkHttp-only in app/ (JCLAW-185..188); the JDK HttpClient was removed");
+        rule.check(APP_CLASSES);
+    }
+
     /**
      * JCLAW-199/772: Play 1.x wraps an action in a JPA transaction and commits only once it
      * returns. streamChat blocks its invocation thread for the whole SSE stream, so an ambient
@@ -121,17 +135,61 @@ class ArchitectureTest extends UnitTest {
     @Test
     void streamingChatActionOptsOutOfThePerRequestTransaction() throws Exception {
         var streamChat = Class.forName("controllers.ApiChatController").getDeclaredMethod("streamChat");
-        assertTrue(streamChat.isAnnotationPresent(play.db.jpa.NoTransaction.class),
+        assertTrue(streamChat.isAnnotationPresent(NoTransaction.class),
                 "ApiChatController.streamChat must carry @NoTransaction — without it Play holds a "
                         + "JPA connection for the entire SSE stream (JCLAW-772)");
     }
 
+    /** Actions deliberately reachable with no interceptor: the unauthenticated health probe the
+     *  frontend boot path and the Docker healthcheck both poll. */
+    private static final Set<String> INTENTIONALLY_UNGATED = Set.of("controllers.ApiController.status");
+
+    /** Controllers known to gate via {@code only}; a floor, so a scan that matches nothing fails. */
+    private static final int KNOWN_ALLOWLIST_GATED_CONTROLLERS = 2;
+
+    /**
+     * JCLAW-772: {@code only} is an allowlist, so an action absent from every {@code @Before}
+     * list is served with <em>no</em> interceptor — {@code dbPool} shipped that way and was
+     * caught by a hand-written per-action test that existed only because someone thought to
+     * write it. This asserts the invariant instead, so a newly added action fails here until
+     * it is either gated or named in {@link #INTENTIONALLY_UNGATED}.
+     *
+     * <p>Every public static method counts, not just routed ones: {@code conf/routes} uses
+     * Play's {@code {controller}.{action}} catch-all, so a public static helper on a controller
+     * is web-reachable whether or not anyone meant it to be.
+     *
+     * <p>Controllers are discovered rather than listed — a hard-coded list would reproduce the
+     * same "remember to add it" failure this test exists to remove. A controller with no
+     * {@code only} interceptor is out of scope: a bare {@code @Before} and an
+     * {@code @Before(unless = …)} denylist both already cover a new action by default.
+     */
     @Test
-    void noJdkHttpClientInApp() {
-        ArchRule rule = noClasses()
-                .should().dependOnClassesThat().resideInAnyPackage("java.net.http..")
-                .because("outbound HTTP is OkHttp-only in app/ (JCLAW-185..188); the JDK HttpClient was removed");
-        rule.check(APP_CLASSES);
+    void everyActionOnAnAllowlistGatedControllerIsGatedOrDeclaredPublic() {
+        var scanned = 0;
+        for (var javaClass : APP_CLASSES) {
+            if (!"controllers".equals(javaClass.getPackageName())) continue;
+            var controller = javaClass.reflect();
+            var gated = new HashSet<String>();
+            for (var method : controller.getDeclaredMethods()) {
+                var before = method.getAnnotation(Before.class);
+                if (before != null) gated.addAll(Arrays.asList(before.only()));
+            }
+            if (gated.isEmpty()) continue;
+            scanned++;
+            for (var method : controller.getDeclaredMethods()) {
+                int modifiers = method.getModifiers();
+                if (!Modifier.isPublic(modifiers) || !Modifier.isStatic(modifiers)) continue;
+                if (method.getReturnType() != void.class) continue;
+                var qualified = controller.getName() + "." + method.getName();
+                assertTrue(gated.contains(method.getName()) || INTENTIONALLY_UNGATED.contains(qualified),
+                        qualified + " is served UNAUTHENTICATED: @Before(only = …) is an allowlist and this "
+                                + "action is in none of them. Add it to the interceptor's list, or to "
+                                + "ArchitectureTest.INTENTIONALLY_UNGATED if that is deliberate (JCLAW-772)");
+            }
+        }
+        assertTrue(scanned >= KNOWN_ALLOWLIST_GATED_CONTROLLERS,
+                "expected at least " + KNOWN_ALLOWLIST_GATED_CONTROLLERS + " allowlist-gated controllers, "
+                        + "scanned " + scanned + " — the scan matched nothing and would pass vacuously");
     }
 
     /**
