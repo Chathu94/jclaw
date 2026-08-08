@@ -7,24 +7,19 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
-import okhttp3.MediaType;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import play.Logger;
+import services.discovery.DiscoveryStrategy;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.SsrfGuard;
-import utils.Strings;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,7 +40,6 @@ public class ModelDiscoveryService {
     private static final Pattern USAGE_PATTERN = Pattern.compile(
             "\"([a-zA-Z0-9_-]+/[a-zA-Z0-9._:-]+)\"\\s*:\\s*\\d");
 
-    private static final int DISCOVER_TIMEOUT_SECONDS = 15;
     private static final int LEADERBOARD_TIMEOUT_SECONDS = 10;
 
     // --- Normalized model-map keys (returned to the frontend) ---
@@ -176,32 +170,13 @@ public class ModelDiscoveryService {
     }
 
     /**
-     * Fetch the model catalog from a provider's /models endpoint, apply leaderboard
-     * rankings if configured, and return normalized model info sorted by rank.
+     * Fetch the model catalog from a provider, apply leaderboard rankings if
+     * configured, and return normalized model info sorted by rank.
      *
-     * <p>Dispatches on provider name and exposes the JCLAW-183 tiered filter:
-     *
-     * <ul>
-     *   <li><b>Tier 1, Ollama</b> (any name containing {@code "ollama"}):
-     *       native {@code /api/tags} + {@code /api/show} pair (JCLAW-118).
-     *       Real {@code context_length} comes back, and the
-     *       {@code capabilities} array distinguishes chat-capable models
-     *       from embedding-only ones — {@link #parseOllamaShow} drops
-     *       entries whose capabilities lack {@code "completion"}.</li>
-     *   <li><b>Tier 1, LM Studio</b> (any name containing {@code "lm-studio"}):
-     *       prefer the native {@code /api/v0/models} endpoint via
-     *       {@link #discoverLmStudioNative}, which exposes a {@code type}
-     *       field per model ({@code "llm"}, {@code "vlm"}, {@code "embeddings"},
-     *       {@code "tts"}, {@code "stt"}). Only {@code "llm"} and
-     *       {@code "vlm"} pass through. Falls back to the OpenAI-compat
-     *       path if the native endpoint is missing (older LM Studio
-     *       versions ship before {@code /api/v0}).</li>
-     *   <li><b>Tier 2 / Tier 3, everything else</b>: OpenAI-compatible
-     *       {@code /v1/models} endpoint. OpenRouter returns rich metadata
-     *       (catalog is empirically chat-only, filter is a no-op);
-     *       plain providers (OpenAI, Groq, vanilla OpenAI-compat) get the
-     *       Tier 3 ID heuristic from {@link EmbeddingModelFilter}.</li>
-     * </ul>
+     * <p>The protocol — native Ollama, native LM Studio, or OpenAI-compatible —
+     * is resolved from the provider name by {@link DiscoveryStrategy#forProvider},
+     * and each one applies its own tier of the JCLAW-183 non-chat filter. Adding a
+     * protocol is a new {@link DiscoveryStrategy} subtype, not an edit here.
      */
     public static DiscoveryResult discover(String providerName, String baseUrl, String apiKey) {
         // JCLAW-778: the base URL is agent-settable config. Reject a metadata /
@@ -216,18 +191,7 @@ public class ModelDiscoveryService {
                 return new DiscoveryResult.Error(400, "Provider base URL rejected by SSRF guard");
             }
         }
-        var lower = providerName == null ? "" : providerName.toLowerCase();
-        if (lower.contains("ollama")) {
-            return discoverOllamaNative(providerName, baseUrl, apiKey);
-        }
-        if (lower.contains("lm-studio")) {
-            var lmStudioResult = discoverLmStudioNative(providerName, baseUrl, apiKey);
-            // null = native endpoint missing or returned non-200; fall through
-            // so the caller still gets a result via the OpenAI-compat path,
-            // applying the ID heuristic in lieu of the type field.
-            if (lmStudioResult != null) return lmStudioResult;
-        }
-        return discoverOpenAiCompat(providerName, baseUrl, apiKey);
+        return DiscoveryStrategy.forProvider(providerName).discover(providerName, baseUrl, apiKey);
     }
 
     @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
@@ -260,7 +224,7 @@ public class ModelDiscoveryService {
                     .get()
                     .build();
             var call = HttpFactories.llmSingleShotGuarded().newCall(req);
-            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            call.timeout().timeout(DiscoveryStrategy.DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             String responseBody;
             try (var response = call.execute()) {
                 if (response.code() != 200) return List.of();
@@ -278,73 +242,23 @@ public class ModelDiscoveryService {
         }
     }
 
-    private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
-        if (baseUrl == null || baseUrl.isBlank()) {
-            return new DiscoveryResult.Error(400, "Provider base URL is required for discovery");
-        }
-        try {
-            var url = baseUrl.endsWith("/") ? baseUrl + FIELD_MODELS : baseUrl + "/" + FIELD_MODELS;
-            var req = new Request.Builder()
-                    .url(url)
-                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
-                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                    .get()
-                    .build();
-            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
-            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-            int statusCode;
-            String responseBody;
-            try (var response = call.execute()) {
-                statusCode = response.code();
-                responseBody = response.body().string();
-            }
-
-            if (statusCode != 200) {
-                Logger.warn("[discover/%s] upstream returned HTTP %d: %s",
-                        providerName, statusCode, Strings.truncate(responseBody, Strings.ERROR_SNIPPET_MAX_CHARS));
-                // JCLAW-778: status only — the upstream body is attacker-influenced
-                // (agent-settable base URL) and must not be reflected to the caller.
-                return new DiscoveryResult.Error(502, "Provider returned HTTP %d".formatted(statusCode));
-            }
-
-            // Together returns a bare JSON array `[{id, ...}, ...]` here,
-            // not OpenAI's wrapped `{data: [...]}` shape; parseModels
-            // accepts either via JsonElement detection.
-            var body = JsonParser.parseString(responseBody);
-            var models = parseModels(body);
-
-            // JCLAW-183 Tier 3: drop entries whose id matches a non-chat
-            // pattern. Safe to apply universally — chat-model ids never
-            // collide with the embedding/audio/image-gen prefixes the
-            // filter checks for.
-            models.removeIf(m -> EmbeddingModelFilter.isLikelyNonChat((String) m.get(KEY_ID)));
-
-            applyLeaderboardAndSort(providerName, models);
-
-            return new DiscoveryResult.Ok(models);
-
-        } catch (JsonSyntaxException e) {
-            Logger.warn("[discover/%s] invalid JSON: %s", providerName, e.getMessage());
-            return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
-        } catch (Exception e) {
-            Logger.warn("[discover/%s] connect/parse failed: %s", providerName, e.getMessage());
-            return new DiscoveryResult.Error(502, "Failed to connect to provider: %s".formatted(e.getMessage()));
-        }
-    }
-
     /**
      * Fetch the configured leaderboard for {@code providerName} (if any),
      * apply rankings to {@code models}, then sort by {@code leaderboardRank}
      * with name fallback. Shared by the OpenAI-compat and Ollama-native
-     * discovery paths.
+     * discovery strategies.
      */
-    private static void applyLeaderboardAndSort(String providerName, List<Map<String, Object>> models) {
+    public static void applyLeaderboardAndSort(String providerName, List<Map<String, Object>> models) {
         var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
         var rankings = fetchLeaderboard(leaderboardUrl);
         if (!rankings.isEmpty()) {
             applyRankings(models, rankings);
         }
+        sortByRankThenName(models);
+    }
+
+    /** Sort without a leaderboard lookup — the LM Studio native path has no ranking source. */
+    public static void sortByRankThenName(List<Map<String, Object>> models) {
         models.sort(ModelDiscoveryService::compareByRankThenName);
     }
 
@@ -926,53 +840,6 @@ public class ModelDiscoveryService {
     // ─── LM Studio native discovery (JCLAW-183) ──────────────────────
 
     /**
-     * LM Studio Tier 1 path. Hits the native {@code /api/v0/models}
-     * endpoint, which returns a {@code type} field per model — one of
-     * {@code "llm"}, {@code "vlm"} (vision-language), {@code "embeddings"},
-     * {@code "tts"} (text-to-speech), {@code "stt"} (speech-to-text).
-     * Keeps {@code "llm"} and {@code "vlm"}; drops the other three so
-     * an operator can't accidentally bind a chat agent to an embedding
-     * or audio model.
-     *
-     * <p>Returns {@code null} on any failure (404 from older LM Studio
-     * versions that predate the native endpoint, malformed JSON,
-     * connection refused) so the caller can fall back to the standard
-     * OpenAI-compat path with the Tier 3 id heuristic.
-     */
-    @SuppressWarnings("java:S1172") // providerName kept for signature parity with other discover* variants
-    static DiscoveryResult discoverLmStudioNative(String providerName, String baseUrl, String apiKey) {
-        try {
-            var nativeBase = stripV1Suffix(baseUrl);
-            var url = nativeBase + "/api/v0/models";
-            var req = new Request.Builder()
-                    .url(url)
-                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
-                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                    .get()
-                    .build();
-            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
-            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-            int statusCode;
-            String responseBody;
-            try (var resp = call.execute()) {
-                statusCode = resp.code();
-                responseBody = resp.body().string();
-            }
-            if (statusCode != 200) return null;
-
-            var body = JsonParser.parseString(responseBody).getAsJsonObject();
-            var models = parseLmStudioNativeResponse(body);
-
-            models.sort(ModelDiscoveryService::compareByRankThenName);
-
-            return new DiscoveryResult.Ok(models);
-        } catch (Exception _) {
-            return null;
-        }
-    }
-
-    /**
      * Parse a {@code /api/v0/models} response body into the same Map shape
      * other discovery paths produce. Filters on the {@code type} field —
      * keeps {@code "llm"} and {@code "vlm"}, drops everything else
@@ -1041,128 +908,6 @@ public class ModelDiscoveryService {
     // ─── Ollama native discovery (JCLAW-118) ─────────────────────────
 
     /**
-     * Native-Ollama discovery path. Uses the richer {@code /api/tags} +
-     * {@code /api/show} pair to extract {@code context_length},
-     * {@code capabilities}, and architecture metadata that the
-     * OpenAI-compatible {@code /v1/models} stub omits entirely for
-     * Ollama Cloud. Fans out {@code /api/show} calls concurrently on
-     * virtual threads so a provider with dozens of models discovers in
-     * one round-trip's worth of wall time rather than N.
-     */
-    @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
-    static DiscoveryResult discoverOllamaNative(String providerName, String baseUrl, String apiKey) {
-        try {
-            var nativeBase = stripV1Suffix(baseUrl);
-            var tagsResult = fetchOllamaTags(nativeBase, apiKey);
-            if (tagsResult.error() != null) return tagsResult.error();
-            var modelIds = tagsResult.modelIds();
-            if (modelIds.isEmpty()) return new DiscoveryResult.Ok(List.of());
-
-            var results = fanOutOllamaShow(nativeBase + "/api/show", apiKey, modelIds);
-            if (results.isEmpty()) {
-                // JCLAW-183: covers both "every /api/show call failed" and
-                // "every model was filtered out as non-chat" (e.g. an Ollama
-                // install with only nomic-embed-text pulled). Either way the
-                // operator gets a clear "nothing chat-capable here" message.
-                return new DiscoveryResult.Error(502,
-                        "No chat-capable models discovered for provider " + providerName);
-            }
-
-            applyLeaderboardAndSort(providerName, results);
-
-            return new DiscoveryResult.Ok(results);
-
-        } catch (JsonSyntaxException _) {
-            return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
-        } catch (Exception e) {
-            // Defensive interrupt-status restore: the broad catch is unavoidable (provider
-            // calls can surface InterruptedException wrapped or unwrapped), so the
-            // instanceof check is the simplest way to honor cooperative cancellation.
-            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            return new DiscoveryResult.Error(502,
-                    "Failed to connect to provider: %s".formatted(e.getMessage()));
-        }
-    }
-
-    /**
-     * Internal carrier for the /api/tags step: either an {@code error} (non-200
-     * upstream) or a {@code modelIds} list. Exactly one is non-null.
-     */
-    private record TagsResult(DiscoveryResult.Error error, List<String> modelIds) {}
-
-    /**
-     * GET {@code <nativeBase>/api/tags} and extract the model id list. On
-     * non-200, returns a {@link TagsResult} carrying a populated {@link DiscoveryResult.Error}.
-     */
-    private static TagsResult fetchOllamaTags(String nativeBase, String apiKey) throws IOException {
-        var tagsReq = new Request.Builder()
-                .url(nativeBase + "/api/tags")
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
-                .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                .get()
-                .build();
-        var tagsCall = HttpFactories.llmSingleShotGuarded().newCall(tagsReq);
-        tagsCall.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-        int tagsStatus;
-        String tagsResponseBody;
-        try (var tagsResp = tagsCall.execute()) {
-            tagsStatus = tagsResp.code();
-            tagsResponseBody = tagsResp.body().string();
-        }
-        if (tagsStatus != 200) {
-            // JCLAW-778: status only — do not reflect the attacker-influenced
-            // upstream body from an agent-settable base URL.
-            return new TagsResult(new DiscoveryResult.Error(502,
-                    "Provider returned HTTP %d from /api/tags".formatted(tagsStatus)),
-                    null);
-        }
-        var tagsBody = JsonParser.parseString(tagsResponseBody).getAsJsonObject();
-        return new TagsResult(null, extractTagIds(tagsBody));
-    }
-
-    /**
-     * Fan out {@code /api/show} calls on virtual threads, one per model id.
-     * Per-future timeouts and parse failures are logged and skipped — the
-     * caller only sees the survivors. Models filtered out by
-     * {@link #parseOllamaShow} (no {@code "completion"} capability) are also
-     * absent from the return.
-     */
-    private static List<Map<String, Object>> fanOutOllamaShow(
-            String showUrl, String apiKey, List<String> modelIds) {
-        var results = new ArrayList<Map<String, Object>>(modelIds.size());
-        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var futures = modelIds.stream()
-                    .map(id -> executor.submit(() -> fetchOllamaShow(showUrl, apiKey, id)))
-                    .toList();
-            for (int i = 0; i < futures.size(); i++) {
-                collectShowResult(futures.get(i), modelIds.get(i), results);
-            }
-        }
-        return results;
-    }
-
-    /**
-     * Await a single {@code /api/show} future. Logs per-model failures (including
-     * timeouts) without aborting the broader discovery; restores the interrupt
-     * status on {@link InterruptedException} for cooperative cancellation.
-     */
-    private static void collectShowResult(
-            Future<Map<String, Object>> future,
-            String modelId,
-            List<Map<String, Object>> out) {
-        try {
-            var model = future.get(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            if (model != null) out.add(model);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-            Logger.warn("Ollama /api/show interrupted for %s", modelId);
-        } catch (Exception e) {
-            Logger.warn("Ollama /api/show failed for %s: %s", modelId, e.getMessage());
-        }
-    }
-
-    /**
      * Strip a trailing {@code /v1} (with or without trailing slash) from
      * a provider base URL. Ollama providers store
      * {@code https://ollama.com/v1} for the OpenAI-compat inference
@@ -1194,33 +939,6 @@ public class ModelDiscoveryService {
         return out;
     }
 
-    @SuppressWarnings("java:S1168") // null means "drop this model from discovery"; empty map would be misread as a successful but empty result
-    private static Map<String, Object> fetchOllamaShow(String url, String apiKey, String id) {
-        try {
-            var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
-            var jsonMediaType = MediaType.get(HttpKeys.APPLICATION_JSON);
-            var req = new Request.Builder()
-                    .url(url)
-                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
-                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                    .post(RequestBody.create(body, jsonMediaType))
-                    .build();
-            var call = HttpFactories.llmSingleShotGuarded().newCall(req);
-            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-            int statusCode;
-            String responseBody;
-            try (var resp = call.execute()) {
-                statusCode = resp.code();
-                responseBody = resp.body().string();
-            }
-            if (statusCode != 200) return null;
-            return parseOllamaShow(id, JsonParser.parseString(responseBody).getAsJsonObject());
-        } catch (Exception _) {
-            return null;
-        }
-    }
-
     /**
      * Parse a single {@code /api/show} response into the same Map shape
      * {@link #parseModels} produces. The context length is namespaced by
@@ -1238,7 +956,7 @@ public class ModelDiscoveryService {
         // /api/show capabilities array distinguishes "completion"
         // (chat-capable) from "embedding" (vector-only). When the array
         // is present and non-empty but lacks "completion", the model
-        // can't serve chat — return null so {@code discoverOllamaNative}
+        // can't serve chat — return null so {@code OllamaDiscoveryStrategy}
         // drops it from the discovery list. A model with no capabilities
         // array (older Ollama versions) is kept; the existing detectors
         // fall back to id-based heuristics.

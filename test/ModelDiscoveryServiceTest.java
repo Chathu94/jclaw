@@ -6,6 +6,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import play.test.UnitTest;
 import services.ModelDiscoveryService;
+import services.discovery.DiscoveryStrategy;
+import services.discovery.LmStudioDiscoveryStrategy;
+import services.discovery.OllamaDiscoveryStrategy;
+import services.discovery.OpenAiCompatDiscoveryStrategy;
 
 /**
  * Tests for ModelDiscoveryService static parsing and inference methods.
@@ -1092,6 +1096,26 @@ class ModelDiscoveryServiceTest extends UnitTest {
             assertEquals(1, ok.models().size());
             assertEquals("qwen3-32b", ok.models().get(0).get("id"));
         }
+    }
+
+    // ─── JCLAW-770: protocol dispatch is a registry lookup ───────────────
+
+    @Test
+    void protocolResolvesThroughTheStrategyRegistry() {
+        // discover() must not branch on provider-name substrings itself — the
+        // registry owns the mapping, so a new protocol is a new subtype.
+        assertInstanceOf(OllamaDiscoveryStrategy.class,
+                DiscoveryStrategy.forProvider("ollama-cloud"));
+        assertInstanceOf(OllamaDiscoveryStrategy.class,
+                DiscoveryStrategy.forProvider("Ollama-Local"),
+                "provider names match case-insensitively");
+        assertInstanceOf(LmStudioDiscoveryStrategy.class,
+                DiscoveryStrategy.forProvider("lm-studio-local"));
+        assertInstanceOf(OpenAiCompatDiscoveryStrategy.class,
+                DiscoveryStrategy.forProvider("groq"));
+        assertInstanceOf(OpenAiCompatDiscoveryStrategy.class,
+                DiscoveryStrategy.forProvider(null),
+                "a null provider name still resolves to the compat fallback");
     }
 
     // ─── JCLAW-324: leaderboard + ranking, exercised via discover() ──────
