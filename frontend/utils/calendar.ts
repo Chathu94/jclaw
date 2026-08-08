@@ -1,9 +1,9 @@
 import type { Task } from '~/types/api'
 
 /**
- * Calendar fire projection (JCLAW-440), extracted from ScheduleCalendar.vue so
- * the cron expander — including the L/# day-of-week modifiers — is unit-testable
- * and shared by the Tasks and Reminders calendars.
+ * Pure calendar helpers (JCLAW-440), extracted from ScheduleCalendar.vue so the
+ * cron expander — including the L/# day-of-week modifiers — and the day-column
+ * lane packer are unit-testable and shared by the Tasks and Reminders calendars.
  */
 
 /** A single projected fire of a task within a calendar window. */
@@ -139,6 +139,66 @@ export function expandCron(expr: string, from: Date, to: Date): Date[] {
     }
     cursor.setMinutes(cursor.getMinutes() + 1)
   }
+  return out
+}
+
+/** A vertical band of a day column, as percentages of the full 24h height. */
+export interface Span {
+  topPct: number
+  heightPct: number
+}
+
+/** Horizontal placement that keeps concurrent spans side by side. */
+export interface Lane {
+  leftPct: number
+  widthPct: number
+}
+
+/**
+ * Assign side-by-side lanes to spans that overlap in time, returning placements
+ * parallel to the input. Without this every run block and fire marker rendered
+ * full-width, so two tasks firing at once drew on top of each other and only the
+ * last was legible.
+ *
+ * Lane count is computed per *cluster* (a maximal transitively-overlapping
+ * group), not per day — one 9am collision must not narrow the whole column.
+ */
+export function packLanes(spans: readonly Span[]): Lane[] {
+  const order = spans.map((_, i) => i).sort((a, b) =>
+    spans[a]!.topPct - spans[b]!.topPct || spans[b]!.heightPct - spans[a]!.heightPct)
+  const out: Lane[] = spans.map(() => ({ leftPct: 0, widthPct: 100 }))
+  let cluster: number[] = []
+  let laneEnds: number[] = [] // end % of the last span placed in each lane
+  const laneOf = new Map<number, number>()
+  let clusterEnd = Number.NEGATIVE_INFINITY
+
+  const flush = () => {
+    const widthPct = 100 / laneEnds.length
+    for (const i of cluster) out[i] = { leftPct: laneOf.get(i)! * widthPct, widthPct }
+    cluster = []
+    laneEnds = []
+    laneOf.clear()
+    clusterEnd = Number.NEGATIVE_INFINITY
+  }
+
+  for (const i of order) {
+    const s = spans[i]!
+    const end = s.topPct + s.heightPct
+    // Starts at or after every span placed so far ⇒ overlaps none of them.
+    if (cluster.length && s.topPct >= clusterEnd) flush()
+    let lane = laneEnds.findIndex(e => e <= s.topPct)
+    if (lane === -1) {
+      lane = laneEnds.length
+      laneEnds.push(end)
+    }
+    else {
+      laneEnds[lane] = end
+    }
+    cluster.push(i)
+    laneOf.set(i, lane)
+    clusterEnd = Math.max(clusterEnd, end)
+  }
+  if (cluster.length) flush()
   return out
 }
 

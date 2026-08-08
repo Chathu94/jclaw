@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Task, RecentRunView } from '~/types/api'
-import type { ProjectedFire } from '~/utils/calendar'
+import type { Lane, ProjectedFire } from '~/utils/calendar'
 import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/vue/24/outline'
 
 /**
@@ -142,6 +142,12 @@ function calToday() {
   calAnchor.value = startOfDay(new Date())
 }
 
+// Month cells cap their fire list at 4; "+N more" drills into that day.
+function openDay(d: Date) {
+  calAnchor.value = startOfDay(d)
+  calGranularity.value = 'day'
+}
+
 const calTitle = computed(() => {
   if (calGranularity.value === 'day') {
     return calAnchor.value.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
@@ -211,13 +217,16 @@ const DAY_MS = 24 * 60 * 60 * 1000
 const HOUR_PX = 48
 const hours = Array.from({ length: 24 }, (_, h) => h)
 const gridBodyStyle = { height: `${24 * HOUR_PX}px` }
+// A marker is a point in time, so lane packing needs its on-screen extent: the
+// ~16px label row as a share of the full-day column height.
+const MARKER_BAND_PCT = (16 / (24 * HOUR_PX)) * 100
 
-interface RunBlock {
+interface RunBlock extends Lane {
   run: RecentRunView
   topPct: number
   heightPct: number
 }
-interface FireMarker {
+interface FireMarker extends Lane {
   fire: ProjectedFire
   topPct: number
 }
@@ -226,6 +235,11 @@ interface DayColumn {
   isToday: boolean
   runs: RunBlock[]
   fires: FireMarker[]
+}
+
+/** Inset a lane by 2px each side so adjacent blocks read as separate. */
+function laneStyle(l: Lane): Record<string, string> {
+  return { left: `calc(${l.leftPct}% + 2px)`, width: `calc(${l.widthPct}% - 4px)` }
 }
 
 const calColumns = computed<DayColumn[]>(() => {
@@ -242,7 +256,7 @@ const calColumns = computed<DayColumn[]>(() => {
     const d = addDays(gridStart, i)
     const dayStart = d.getTime()
     const dayEnd = dayStart + DAY_MS
-    const dayRuns: RunBlock[] = []
+    const runSpans: { run: RecentRunView, topPct: number, heightPct: number }[] = []
     for (const run of runs) {
       if (!run.startedAt) continue
       const s = new Date(run.startedAt).getTime()
@@ -251,15 +265,21 @@ const calColumns = computed<DayColumn[]>(() => {
       const topPct = ((s - dayStart) / DAY_MS) * 100
       const rawH = ((Math.max(endMs, s) - s) / DAY_MS) * 100
       const heightPct = Math.min(100 - topPct, Math.max(1.5, rawH))
-      dayRuns.push({ run, topPct, heightPct })
+      runSpans.push({ run, topPct, heightPct })
     }
+    const runLanes = packLanes(runSpans)
+    const dayRuns: RunBlock[] = runSpans.map((r, i) => ({ ...r, ...runLanes[i]! }))
     // With runs shown, a past fire already has its run block — so only upcoming
     // fires get markers (no double-count). Without runs (Reminders), past fires
     // get markers too (dimmed) so the day still shows what fired.
-    const dayFires: FireMarker[] = allFires
+    const fireSpans = allFires
       .filter(f => (props.showRuns ? !f.isPast : true)
         && f.fireAt.getTime() >= dayStart && f.fireAt.getTime() < dayEnd)
       .map(f => ({ fire: f, topPct: ((f.fireAt.getTime() - dayStart) / DAY_MS) * 100 }))
+    // Runs and markers pack separately: a marker is a pointer-events-none
+    // overlay, so a dashed line crossing a run block still reads fine.
+    const fireLanes = packLanes(fireSpans.map(f => ({ topPct: f.topPct, heightPct: MARKER_BAND_PCT })))
+    const dayFires: FireMarker[] = fireSpans.map((f, i) => ({ ...f, ...fireLanes[i]! }))
     cols.push({ date: d, isToday: dayStart === today, runs: dayRuns, fires: dayFires })
   }
   return cols
@@ -399,11 +419,15 @@ function fmtRunTime(run: RecentRunView): string {
               <span class="font-mono">{{ fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).replace(' ', '') }}</span>
               <span class="ml-1">{{ fire.taskName }}</span>
             </li>
-            <li
-              v-if="cell.fires.length > 4"
-              class="text-[10px] text-fg-muted"
-            >
-              +{{ cell.fires.length - 4 }} more
+            <li v-if="cell.fires.length > 4">
+              <button
+                type="button"
+                class="text-[10px] text-fg-muted hover:text-fg-strong underline underline-offset-2 transition-colors"
+                :aria-label="`Show all ${cell.fires.length} on ${cell.date.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`"
+                @click="openDay(cell.date)"
+              >
+                +{{ cell.fires.length - 4 }} more
+              </button>
             </li>
           </ul>
         </div>
@@ -468,9 +492,9 @@ function fmtRunTime(run: RecentRunView): string {
             v-for="(blk, bi) in col.runs"
             :key="`r${bi}`"
             type="button"
-            class="absolute left-0.5 right-0.5 rounded-sm border px-1 text-[10px] text-white text-left leading-tight overflow-hidden hover:brightness-125 transition z-10"
+            class="absolute rounded-sm border px-1 text-[10px] text-white text-left leading-tight overflow-hidden hover:brightness-125 transition z-10"
             :class="statusBg[blk.run.status ?? ''] ?? 'bg-neutral-600/60 border-neutral-500'"
-            :style="{ top: `${blk.topPct}%`, height: `${blk.heightPct}%` }"
+            :style="{ top: `${blk.topPct}%`, height: `${blk.heightPct}%`, ...laneStyle(blk) }"
             :title="`${blk.run.taskName ?? 'run'} · ${blk.run.status} · ${fmtRunTime(blk.run)}`"
             @click="emit('open-run', blk.run)"
           >
@@ -480,9 +504,9 @@ function fmtRunTime(run: RecentRunView): string {
           <div
             v-for="(fm, fi) in col.fires"
             :key="`f${fi}`"
-            class="absolute left-0.5 right-0.5 flex items-center gap-1 pointer-events-none z-10"
+            class="absolute flex items-center gap-1 pointer-events-none z-10"
             :class="(fm.fire.taskPaused || fm.fire.isPast) ? 'opacity-40' : ''"
-            :style="{ top: `${fm.topPct}%` }"
+            :style="{ top: `${fm.topPct}%`, ...laneStyle(fm) }"
           >
             <span class="w-1.5 h-1.5 rounded-full border border-emerald-400 bg-surface-elevated shrink-0" />
             <span class="flex-1 border-t border-dashed border-emerald-400/50" />
