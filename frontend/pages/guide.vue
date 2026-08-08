@@ -78,14 +78,18 @@ function setupObserver() {
   }
 }
 
+/**
+ * Pick a section from the TOC. Navigates rather than scrolling directly, so the
+ * fragment lands in the URL and the scroll itself runs through the same route
+ * watcher a `/guide#x` link inside the body would — one path, not two.
+ *
+ * `push`, so Back steps back through picks, matching how every anchor-based TOC
+ * behaves. Only a click writes the URL; scrolling deliberately does not.
+ */
 function jumpTo(sectionId: string, anchorId?: string) {
-  const target = anchorId
-    ? document.getElementById(anchorId)
-    : document.querySelector(`[data-section-id="${sectionId}"]`)
-  if (!target) return
-  target.scrollIntoView({ behavior: 'smooth', block: 'start' })
   activeSectionId.value = sectionId
   mobileNavOpen.value = false
+  router.push({ hash: `#${anchorId ?? sectionId}` })
 }
 
 /**
@@ -129,13 +133,13 @@ function sectionIdForHash(bare: string): string | undefined {
     .sort((a, b) => b.id.length - a.id.length)[0]?.id
 }
 
-function jumpToHash(hash: string) {
+function jumpToHash(hash: string, behavior: ScrollBehavior = 'auto') {
   if (!hash) return
   const bare = hash.replace(/^#/, '')
   if (!bare) return
   const el = document.getElementById(bare)
   if (el) {
-    el.scrollIntoView({ behavior: 'auto', block: 'start' })
+    el.scrollIntoView({ behavior, block: 'start' })
   }
   const sectionId = sectionIdForHash(bare)
   if (sectionId) activeSectionId.value = sectionId
@@ -152,35 +156,16 @@ onMounted(async () => {
   updateScrolled()
 })
 
-/**
- * Publish the section being read back into the address bar, so the URL always
- * names something the reader can copy — from a TOC click or from plain
- * scrolling, since both land here through {@code activeSectionId}.
- *
- * {@code replace}, not {@code push}: reading down the page crosses a dozen
- * sections, and each one as a history entry would make Back walk the guide
- * backwards instead of leaving it.
- */
-let syncingHash = false
-
-watch(activeSectionId, (id) => {
-  if (!id) return
-  // A heading-level fragment (`#subagents-async-yield`) already resolves to
-  // this section, and is more precise than the section id — don't coarsen it
-  // while the reader is still inside that section.
-  if (sectionIdForHash(route.hash.replace(/^#/, '')) === id) return
-  syncingHash = true
-  router.replace({ hash: `#${id}` }).finally(() => {
-    syncingHash = false
-  })
-})
-
-// Same-route hash changes (a click on a `/guide#section-id` link from
-// inside the page) don't reload the page; jump to the new anchor. Our own
-// writes are skipped — the view is already where they say.
+// Same-route hash changes don't reload the page, so nothing scrolls on their
+// own: a TOC pick, a `/guide#x` link in the body, and Back between fragments
+// all arrive here. Smooth, because every one of them is a deliberate jump the
+// reader should be able to follow; the mount-time scroll stays instant.
+//
+// The URL is never written while scrolling. Scroll-spy moves the TOC highlight
+// only — the address bar changes on a click and nothing else, which is what
+// MDN, VitePress and Docusaurus all do.
 watch(() => route.hash, (h) => {
-  if (syncingHash) return
-  jumpToHash(h)
+  jumpToHash(h, 'smooth')
 })
 
 onUnmounted(() => {
