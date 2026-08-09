@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronDownIcon, CommandLineIcon, FolderIcon, GlobeAltIcon, WrenchIcon, WrenchScrewdriverIcon } from '@heroicons/vue/24/outline'
+import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import type { ToolCall, ToolCallResultChip } from '~/types/api'
 
 // JCLAW-170: the tool-calls accordion for an assistant turn. Card-level collapse
@@ -14,22 +14,6 @@ const emit = defineEmits<{
   (e: 'toggle-collapse'): void
   (e: 'toggle-call', tc: ToolCall): void
 }>()
-
-/**
- * JCLAW-170: resolve the registry's semantic icon key to a Heroicon component.
- * Keys beyond this switch default to the generic wrench so an unknown tool
- * still renders visibly rather than as a blank cell.
- */
-function toolCallIcon(key: string | null | undefined) {
-  switch (key) {
-    case 'search': return GlobeAltIcon
-    case 'folder': return FolderIcon
-    case 'terminal':
-    case 'shell': return CommandLineIcon
-    case 'wrench': return WrenchIcon
-    default: return WrenchScrewdriverIcon
-  }
-}
 
 /**
  * JCLAW-170: compact one-line preview of a tool call's arguments. For
@@ -150,7 +134,7 @@ function onFaviconError(ev: Event) {
           @click="emit('toggle-call', tc)"
         >
           <component
-            :is="toolCallIcon(tc.icon)"
+            :is="toolIconFor(tc.icon)"
             class="w-3.5 h-3.5 shrink-0"
             aria-hidden="true"
           />

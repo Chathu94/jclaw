@@ -1,35 +1,14 @@
 <script setup lang="ts">
 import {
-  ArrowUturnLeftIcon,
-  BookOpenIcon,
-  ChatBubbleLeftRightIcon,
-  CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
-  ClipboardDocumentCheckIcon,
-  ClockIcon,
   CodeBracketIcon,
-  Cog6ToothIcon,
-  CommandLineIcon,
-  ComputerDesktopIcon,
-  DocumentTextIcon,
   EyeIcon,
-  FolderIcon,
-  GlobeAltIcon,
-  MagnifyingGlassIcon,
-  MicrophoneIcon,
-  SpeakerWaveIcon,
-  PaperAirplaneIcon,
-  PauseIcon,
   PencilSquareIcon,
-  PhotoIcon,
   PlusIcon,
   PuzzlePieceIcon,
-  QueueListIcon,
   TrashIcon,
-  UsersIcon,
-  VideoCameraIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from '@lucide/vue'
@@ -154,46 +133,13 @@ onMounted(() => {
   refreshTools()
 })
 
-// Map the backend-supplied tool icon key (see useToolMeta) to a Heroicons
-// component. Returns null for unknown keys so the caller can suppress rendering.
-const TOOL_ICON_COMPONENTS = {
-  'terminal': CommandLineIcon,
-  'folder': FolderIcon,
-  'document': DocumentTextIcon,
-  'image': PhotoIcon,
-  'video': VideoCameraIcon,
-  'book': BookOpenIcon,
-  'globe': GlobeAltIcon,
-  'search': MagnifyingGlassIcon,
-  'browser': ComputerDesktopIcon,
-  'clock': ClockIcon,
-  'check': CheckCircleIcon,
-  'tasks': ClipboardDocumentCheckIcon,
-  'users': UsersIcon,
-  'pause': PauseIcon,
-  'history': ArrowUturnLeftIcon,
-  'cog': Cog6ToothIcon,
-  'send': PaperAirplaneIcon,
-  'list': QueueListIcon,
-  'chat-bubble': ChatBubbleLeftRightIcon,
-  'mic': MicrophoneIcon,
-  'speaker': SpeakerWaveIcon,
-} as const
-// Per-icon-key class overrides. Heroicons' PaperAirplaneIcon points up-and-
-// right at ~45° by default; the chat-input send button (chat.vue:3751)
-// applies `-rotate-45` to make it horizontal, the conventional "send"
-// affordance. Mirror that here so the `send` tool icon reads the same way
-// it does on the composer.
-const TOOL_ICON_EXTRA_CLASS: Record<string, string> = {
-  send: '-rotate-45',
-}
+// Resolve a tool's icon through the shared dictionary in utils/tool-icons.ts,
+// which is the only place the backend's icon-key vocabulary is mapped.
 function toolIconComponent(name: string) {
-  const key = getToolMeta(name)?.icon as keyof typeof TOOL_ICON_COMPONENTS | undefined
-  return key ? TOOL_ICON_COMPONENTS[key] ?? null : null
+  return toolIconFor(getToolMeta(name)?.icon)
 }
 function toolIconExtraClass(name: string): string {
-  const key = getToolMeta(name)?.icon
-  return key ? TOOL_ICON_EXTRA_CLASS[key] ?? '' : ''
+  return toolIconClassFor(getToolMeta(name)?.icon)
 }
 /**
  * One row in the agent's tools section. Either a single native tool with
@@ -2486,7 +2432,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   >
                     <component
                       :is="toolIconComponent(row.tool.name)"
-                      v-if="toolIconComponent(row.tool.name)"
                       class="w-4 h-4"
                       :class="[getToolMeta(row.tool.name)?.iconColor ?? 'text-fg-muted', toolIconExtraClass(row.tool.name)]"
                       aria-hidden="true"
