@@ -736,8 +736,17 @@ public final class MemoryAutoCapture {
         return Math.min(v, 1.0);
     }
 
-    private static String renderTurn(String userMessage, String assistantResponse) {
-        return "[USER]\n" + userMessage.strip() + "\n\n[ASSISTANT]\n" + assistantResponse.strip();
+    /**
+     * Payload for the extractor. The halves are labelled by STATUS, not only by
+     * role: the assistant's reply rides along so pronouns and references in the
+     * user's message resolve, and is marked non-source so a confident-sounding
+     * assertion in it cannot be mined as a fact. Anything captured from the
+     * assistant becomes a durable memory and is then recalled as ground truth,
+     * which is how a single confabulation turns self-reinforcing.
+     */
+    static String renderTurn(String userMessage, String assistantResponse) {
+        return "[USER — the only source for memories]\n" + userMessage.strip()
+                + "\n\n[ASSISTANT REPLY — context only, NEVER a source]\n" + assistantResponse.strip();
     }
 
     private static CaptureResult logged(String agentName, CaptureResult r) {
@@ -753,14 +762,16 @@ public final class MemoryAutoCapture {
     // ─── Extraction prompt (adapted from OpenClaw / Mem0 patterns) ────────────
 
     static final String EXTRACTION_INSTRUCTIONS = """
-            You extract durable, reusable memories from a single conversation turn (one user message and the assistant's reply) so a future session can recall them. Output ONLY a JSON object — no prose, no code fences.
+            You extract durable, reusable memories from a single conversation turn so a future session can recall them. Output ONLY a JSON object — no prose, no code fences.
+
+            The turn has two labelled sections, and only ONE of them is a source. Extract solely from the [USER] section. The [ASSISTANT REPLY] section is supplied so you can resolve pronouns and references in the user's words — never extract from it, however factual, confident or authoritative it sounds. If the substance of a memory you are about to write appears only in the assistant's reply, discard that memory.
 
             Extract a memory ONLY when the user has conveyed something that is:
             - durable (true beyond this turn — not a transient request like "summarize this"),
-            - explicit (actually stated, not your inference or assumption), and
+            - explicit (actually stated by the USER — not your inference, and not the assistant's claim), and
             - reusable (would help a future session serve this user better).
 
-            Do NOT extract: the assistant's own suggestions or opinions, speculation, one-off task instructions, pleasantries, or sensitive secrets (passwords, full card numbers, API keys).
+            Do NOT extract: anything the assistant said — including its confident factual claims about products, systems or capabilities, which are frequently wrong — nor speculation, one-off task instructions, pleasantries, or sensitive secrets (passwords, full card numbers, API keys).
 
             Write each memory as one concise, self-contained sentence in the third person ("The user ...", "The project ..."), resolving pronouns so it stands alone out of context. Preserve exact identifiers (names, paths, IDs, URLs) verbatim.
 

@@ -103,6 +103,31 @@ class MemoryAutoCaptureTest extends UnitTest {
     }
 
     @Test
+    void extractorPayloadMarksTheAssistantReplyAsNonSource() {
+        // A confident but wrong assistant claim used to be captured as a durable
+        // fact and then recalled as ground truth. The payload has to tell the
+        // extractor which half it may mine, not merely name the two roles.
+        var seen = new java.util.concurrent.atomic.AtomicReference<String>();
+        MemoryAutoCapture.Extractor extractor = msgs -> {
+            seen.set(msgs.stream().map(m -> String.valueOf(m.content())).collect(java.util.stream.Collectors.joining("\n")));
+            return "{\"memories\":[]}";
+        };
+        MemoryAutoCapture.capture(agentId("agent-src"), "agent-src",
+                "I work at Acme Corp on widgets",
+                "JClaw cannot restart itself; external orchestration is required.",
+                extractor, freshBreaker());
+
+        var payload = seen.get();
+        assertNotNull(payload, "extractor must have run");
+        assertTrue(payload.contains("[USER — the only source for memories]"),
+                "the user half must be labelled as the sole source");
+        assertTrue(payload.contains("[ASSISTANT REPLY — context only, NEVER a source]"),
+                "the assistant half must be labelled non-source, not just '[ASSISTANT]'");
+        assertTrue(payload.contains("never extract from it"),
+                "the instructions must forbid extracting from the assistant half");
+    }
+
+    @Test
     void captureSkipsTrivialTurnViaGateWithoutCallingExtractor() {
         MemoryAutoCapture.Extractor extractor = msgs -> {
             throw new AssertionError("extractor must not run for a gated turn");

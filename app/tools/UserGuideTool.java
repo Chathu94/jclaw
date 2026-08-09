@@ -112,10 +112,14 @@ public class UserGuideTool implements ToolRegistry.Tool {
                 skills/tools/MCP, reminders, and the logs/dashboard. Pass the user's question as \
                 'query'; the tool returns the most relevant user-guide sections, each with its \
                 source page and an in-app deep link. Use this whenever the user asks how to do \
-                something in JClaw or how a JClaw feature behaves, then answer concisely from the \
+                something in JClaw, how a JClaw feature behaves, or WHETHER JClaw can do something \
+                at all ("can JClaw…", "does JClaw support…"), then answer concisely from the \
                 returned sections and cite each source as a Markdown link using the "Link" path the \
                 tool returns (e.g. /guide#tasks) — never invent a citation URL, and do not paste \
-                whole sections verbatim.""";
+                whole sections verbatim. The guide is the authority on what JClaw can do: do not \
+                answer from prior knowledge, and do not infer a capability from API output — an \
+                endpoint reporting a feature unavailable on THIS install (e.g. an upgrade refused \
+                on a source checkout) says nothing about whether JClaw supports it in general.""";
     }
 
     @Override
