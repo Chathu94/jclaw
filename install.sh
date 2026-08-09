@@ -453,6 +453,10 @@ substep "extracted"
 mkdir -p "$JCLAW_BIN_DIR"
 cat > "$JCLAW_BIN_DIR/jclaw" <<EOF
 #!/bin/sh
+# An upgrade replaces the install directory, leaving any shell sitting in it
+# with a CWD that no longer resolves; recover before exec so jclaw.sh starts
+# clean instead of behind a getcwd error.
+pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
 exec "$APP_DIR/jclaw.sh" "\$@"
 EOF
 chmod +x "$JCLAW_BIN_DIR/jclaw"

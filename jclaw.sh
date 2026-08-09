@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# `upgrade` replaces the install directory, so a shell sitting in it hands us a
+# dead CWD — without this, every subshell prints getcwd errors before any output.
+pwd -P >/dev/null 2>&1 || cd "${0%/*}" 2>/dev/null || cd / 2>/dev/null
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_PID_FILE="frontend.pid"
 
