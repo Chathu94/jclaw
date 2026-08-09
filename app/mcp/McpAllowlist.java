@@ -2,6 +2,7 @@ package mcp;
 
 import models.Agent;
 import models.AgentSkillAllowedTool;
+import play.db.jpa.JPA;
 
 import java.util.HashSet;
 import java.util.List;
@@ -23,10 +24,18 @@ import java.util.Set;
  * {@code skill_name} already carries the server.
  *
  * <p><b>Granting model.</b> JCLAW-32 broadcasts: on connect, every existing
- * agent gets one row per advertised tool. JCLAW-33's admin UI will layer
- * per-agent toggles on top by selectively deleting rows. The wire-format
+ * top-level agent gets one row per advertised tool. JCLAW-33's admin UI will
+ * layer per-agent toggles on top by selectively deleting rows. The wire-format
  * row (agent, skill, tool) doesn't change between the two stories — only
  * the policy that decides which rows to write.
+ *
+ * <p><b>Spawned subagents are excluded from the broadcast</b> and get their
+ * grants once, from {@link #backfillForAgent} at creation. They outnumber real
+ * agents by two orders of magnitude on a busy instance (each spawn leaves a row
+ * behind), and broadcasting to them made every reconnect rewrite
+ * {@code subagents × tools} rows — minutes of work before a server could report
+ * CONNECTED. The broadcast therefore also leaves their rows ALONE rather than
+ * deleting them, so a reconnect mid-run cannot strip a live subagent's access.
  *
  * <p><b>Transactions.</b> Every method here is tx-agnostic: each call
  * issues plain JPA operations and expects to run inside a caller-supplied
@@ -39,13 +48,27 @@ public final class McpAllowlist {
 
     private static final String QUERY_SKILL_NAME = "skillName = ?1";
 
+    /** Agents the broadcast covers: everything that is not a spawned subagent. */
+    private static final String TOP_LEVEL_AGENTS = "parentAgent is null";
+
+    /** Rows this server broadcast to top-level agents — the set the broadcast owns. */
+    private static final String QUERY_SKILL_TOP_LEVEL = "skillName = ?1 and agent.parentAgent is null";
+
+    /** Same set, phrased for a bulk DELETE: JPQL forbids the implicit join an
+     *  {@code agent.parentAgent} path would need there, so it goes via a subquery. */
+    private static final String DELETE_SKILL_TOP_LEVEL =
+            "skillName = ?1 and agent in (select a from Agent a where a.parentAgent is null)";
+
     private McpAllowlist() {}
 
     /**
-     * Replace this server's allowlist rows for ALL existing agents with the
+     * Replace this server's allowlist rows for every top-level agent with the
      * current tool list. Idempotent — clears prior rows for this server
      * scope first, then inserts fresh. Safe to call on every reconnect or
      * when the server's tool list changes via {@code tools/list_changed}.
+     *
+     * <p>Spawned subagents are outside this scope entirely, read and written —
+     * see the class doc. Their rows are neither counted nor deleted here.
      *
      * <p>No-op short-circuit: an unchanged reconnect (or a {@code list_changed}
      * that didn't actually change anything) is the common case. When the
@@ -59,18 +82,19 @@ public final class McpAllowlist {
     public static int registerForAllAgents(String serverName, List<McpToolDef> tools) {
         var skillName = SKILL_PREFIX + serverName;
 
-        List<Agent> agents = Agent.findAll();
+        List<Agent> agents = Agent.<Agent>find(TOP_LEVEL_AGENTS).fetch();
         Set<String> incoming = new HashSet<>();
         for (var tool : tools) incoming.add(tool.name());
 
-        List<AgentSkillAllowedTool> existing = AgentSkillAllowedTool.find(QUERY_SKILL_NAME, skillName).fetch();
+        List<AgentSkillAllowedTool> existing =
+                AgentSkillAllowedTool.<AgentSkillAllowedTool>find(QUERY_SKILL_TOP_LEVEL, skillName).fetch();
         Set<String> current = new HashSet<>();
         for (var row : existing) current.add(row.toolName);
         if (current.equals(incoming) && existing.size() == agents.size() * incoming.size()) {
             return existing.size();
         }
 
-        AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
+        AgentSkillAllowedTool.delete(DELETE_SKILL_TOP_LEVEL, skillName);
         if (tools.isEmpty()) return 0;
         int written = 0;
         for (var agent : agents) {
@@ -90,6 +114,64 @@ public final class McpAllowlist {
     public static int unregister(String serverName) {
         var skillName = SKILL_PREFIX + serverName;
         return AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
+    }
+
+    /**
+     * Drop every MCP grant held by one agent. A subagent's grants are written
+     * once at spawn and the broadcast never revisits them, so each spawn would
+     * otherwise leak one row per tool per server permanently — the agent row
+     * outlives the run to keep its transcript readable.
+     *
+     * <p>Scoped with a LIKE on the {@code mcp:} namespace so shell-allowlist
+     * rows in the same table, which this class does not own, are left alone.
+     *
+     * @return rows removed
+     */
+    public static int revokeForAgent(Agent agent) {
+        if (agent == null || agent.id == null) return 0;
+        return AgentSkillAllowedTool.delete(
+                "agent = ?1 and skillName like ?2", agent, SKILL_PREFIX + "%");
+    }
+
+    /**
+     * Drop MCP grants belonging to subagents that are no longer running, and
+     * rows naming a server that no longer exists.
+     *
+     * <p>Both are backlog: grants leaked before {@link #revokeForAgent} existed,
+     * and rows stranded when a server was renamed or deleted while disconnected
+     * (the delete path only clears the name it knew). Left in place they are
+     * re-read on every connect, which is what made a large server take minutes
+     * to report CONNECTED.
+     *
+     * @param liveServerNames servers currently configured; rows naming anything
+     *                        else are stranded
+     * @param runningAgentIds subagents with a run still in flight, whose grants
+     *                        must survive
+     * @return rows removed
+     */
+    public static int sweepStaleGrants(Set<String> liveServerNames, Set<Long> runningAgentIds) {
+        int removed = 0;
+        for (var skillName : distinctMcpSkillNames()) {
+            if (!liveServerNames.contains(skillName.substring(SKILL_PREFIX.length()))) {
+                removed += AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
+            }
+        }
+        List<Agent> subagents = Agent.<Agent>find("parentAgent is not null").fetch();
+        for (var agent : subagents) {
+            if (runningAgentIds.contains(agent.id)) continue;
+            removed += revokeForAgent(agent);
+        }
+        return removed;
+    }
+
+    /** Distinct {@code mcp:*} scopes present in the table, live or stranded. */
+    private static List<String> distinctMcpSkillNames() {
+        return JPA.em().createQuery(
+                        "select distinct a.skillName from AgentSkillAllowedTool a "
+                                + "where a.skillName like :prefix",
+                        String.class)
+                .setParameter("prefix", SKILL_PREFIX + "%")
+                .getResultList();
     }
 
     /**

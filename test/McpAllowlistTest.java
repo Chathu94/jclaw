@@ -148,7 +148,117 @@ class McpAllowlistTest extends UnitTest {
         assertEquals(0, written);
     }
 
+    // ==================== spawned subagents ====================
+
+    @Test
+    void broadcastSkipsSpawnedSubagents() {
+        // A subagent gets its grants once, at spawn, from backfillForAgent.
+        // Including them in the broadcast made every reconnect rewrite
+        // subagents x tools rows — the whole reason a busy instance took
+        // minutes to bring a large server up.
+        var ids = Tx.run(() -> {
+            var parent = newAgent("parent");
+            var child = newSubagent("parent-sub-abc", parent);
+            return List.of(parent.id, child.id);
+        });
+
+        var written = Tx.run(() -> McpAllowlist.registerForAllAgents("svc",
+                List.of(toolDef("a"), toolDef("b"))));
+
+        assertEquals(2, written, "only the top-level agent is broadcast to");
+        Tx.run(() -> {
+            assertTrue(allowed(ids.get(0), "svc", "a"));
+            assertFalse(allowed(ids.get(1), "svc", "a"),
+                    "subagent must not be granted by the broadcast");
+        });
+    }
+
+    @Test
+    void reconnectLeavesALiveSubagentsGrantsIntact() {
+        // The delete half of the broadcast is scoped too. If it weren't, a
+        // reconnect mid-run would strip a running subagent's access to a
+        // server it was already using.
+        var childId = Tx.run(() -> {
+            var parent = newAgent("parent");
+            var child = newSubagent("parent-sub-live", parent);
+            grant(child, "mcp:svc", "a");
+            return child.id;
+        });
+
+        Tx.run(() -> McpAllowlist.registerForAllAgents("svc", List.of(toolDef("a"))));
+
+        Tx.run(() -> assertTrue(allowed(childId, "svc", "a"),
+                "a reconnect must not revoke a running subagent's grant"));
+    }
+
+    @Test
+    void revokeForAgentDropsOnlyMcpScopedRows() {
+        var childId = Tx.run(() -> {
+            var parent = newAgent("parent");
+            var child = newSubagent("parent-sub-done", parent);
+            grant(child, "mcp:svc", "a");
+            // A shell-allowlist row in the same table, which McpAllowlist does not own.
+            var shell = new AgentSkillAllowedTool();
+            shell.agent = child;
+            shell.skillName = "my-shell-skill";
+            shell.toolName = "ls";
+            shell.save();
+            return child.id;
+        });
+
+        var removed = Tx.run(() -> McpAllowlist.revokeForAgent(Agent.findById(childId)));
+
+        assertEquals(1, removed);
+        Tx.run(() -> {
+            assertEquals(0, countRows("mcp:svc"));
+            assertEquals(1, countRows("my-shell-skill"), "non-MCP grants are not ours to delete");
+        });
+    }
+
+    @Test
+    void sweepReclaimsFinishedSubagentsAndRemovedServers() {
+        var runningId = Tx.run(() -> {
+            var parent = newAgent("parent");
+            var finished = newSubagent("parent-sub-finished", parent);
+            var running = newSubagent("parent-sub-running", parent);
+            grant(finished, "mcp:svc", "a");
+            grant(running, "mcp:svc", "a");
+            // Rows naming a server that no longer exists.
+            McpAllowlist.registerForAllAgents("gone", List.of(toolDef("x")));
+            McpAllowlist.registerForAllAgents("svc", List.of(toolDef("a")));
+            return running.id;
+        });
+
+        var removed = Tx.run(() ->
+                McpAllowlist.sweepStaleGrants(java.util.Set.of("svc"), java.util.Set.of(runningId)));
+
+        assertTrue(removed >= 2, "the finished subagent's row and the removed server's row, at least");
+        Tx.run(() -> {
+            assertEquals(0, countRows("mcp:gone"), "rows for a server that no longer exists");
+            assertTrue(allowed(runningId, "svc", "a"), "a running subagent keeps its grants");
+            assertEquals(2, countRows("mcp:svc"),
+                    "the top-level agent's row plus the running subagent's");
+        });
+    }
+
     // ==================== helpers ====================
+
+    private Agent newSubagent(String name, Agent parent) {
+        var a = newAgent(name);
+        a.parentAgent = parent;
+        a.save();
+        return a;
+    }
+
+    /** Row written the way backfillForAgent writes one at spawn, without
+     *  needing a live connection manager. */
+    private static void grant(Agent agent, String skillName, String toolName) {
+        var row = new AgentSkillAllowedTool();
+        row.agent = agent;
+        row.skillName = skillName;
+        row.toolName = toolName;
+        row.save();
+    }
 
     private Agent newAgent(String name) {
         var a = new Agent();

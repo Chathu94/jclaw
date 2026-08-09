@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -109,9 +110,35 @@ public final class McpConnectionManager {
     public static void startAll() {
         ensureScheduler();
         var configs = Tx.run(McpServer::findEnabled);
+        sweepStaleGrants();
         var futures = new ArrayList<CompletableFuture<Void>>();
         for (var server : configs) futures.add(connectAndAwait(server));
         startupConnectFutures = futures;
+    }
+
+    /**
+     * Reclaim allowlist rows no live agent or server can use. Boot is the whole
+     * window: no subagent survives a restart (their virtual threads don't), so
+     * every subagent grant present now belongs to a finished run.
+     *
+     * <p>Best-effort — a failure here costs disk, not correctness, and must not
+     * stop servers from connecting.
+     */
+    private static void sweepStaleGrants() {
+        try {
+            var removed = Tx.run(() -> {
+                var live = new HashSet<String>();
+                for (McpServer s : McpServer.<McpServer>findAll()) live.add(s.name);
+                return McpAllowlist.sweepStaleGrants(live, Set.of());
+            });
+            if (removed > 0) {
+                EventLogger.info(CATEGORY_CONNECT,
+                        "Reclaimed %d stale MCP allowlist row(s) from finished subagents and removed servers"
+                                .formatted(removed));
+            }
+        } catch (RuntimeException e) {
+            EventLogger.warn(CATEGORY_CONNECT, "MCP allowlist sweep failed: " + e.getMessage());
+        }
     }
 
     /** JCLAW-496: block (bounded) until every enabled server's first-connect
@@ -139,7 +166,7 @@ public final class McpConnectionManager {
             return true;
         } catch (TimeoutException _) {
             EventLogger.warn("system", "MCP startup: %d/%d servers connected within the %ds budget; proceeding (slow servers keep retrying)"
-                    .formatted(connectionCount(), futures.size(), budget.toSeconds()));
+                    .formatted(connectedCount(), futures.size(), budget.toSeconds()));
             return false;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
@@ -300,6 +327,15 @@ public final class McpConnectionManager {
     }
 
     public static int connectionCount() { return connections.size(); }
+
+    /** Servers whose handshake has actually completed. Distinct from
+     *  {@link #connectionCount()}, which counts entries the moment a connect is
+     *  scheduled and so reads "all of them" while every one is still dialling. */
+    public static int connectedCount() {
+        return (int) connections.values().stream()
+                .filter(e -> e.status == McpServer.Status.CONNECTED)
+                .count();
+    }
 
     /** Names of every server with an in-memory connection entry, regardless
      *  of state. Used by {@link McpAllowlist#backfillForAgent} to know
