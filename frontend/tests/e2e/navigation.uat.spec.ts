@@ -21,7 +21,7 @@ test.describe('UAT-3 navigation', () => {
     // Stamp the window; a full document reload would wipe it, proving the
     // click went through the server instead of the Vue router.
     await page.evaluate(() => {
-      (window as unknown as { __uat: boolean }).__uat = true
+      (globalThis as unknown as { __uat: boolean }).__uat = true
     })
 
     for (const path of ['/tasks', '/agents', '/prompts', '/memories']) {
@@ -30,7 +30,7 @@ test.describe('UAT-3 navigation', () => {
       await expect(page.locator('main')).toBeVisible()
     }
 
-    const survived = await page.evaluate(() => (window as unknown as { __uat?: boolean }).__uat === true)
+    const survived = await page.evaluate(() => (globalThis as unknown as { __uat?: boolean }).__uat === true)
     expect(survived, 'sidebar navigation must stay client-side').toBeTruthy()
   })
 

@@ -36,8 +36,8 @@ for (const path of PAGES) {
     await page.addScriptTag({ path: AXE_PATH })
 
     const results = await page.evaluate(async () => {
-      // @ts-expect-error axe is attached to window by the injected script.
-      return await window.axe.run(document, {
+      // @ts-expect-error axe attaches itself to the page global on inject.
+      return await globalThis.axe.run(document, {
         resultTypes: ['violations'],
         rules: { 'color-contrast': { enabled: false } },
       }) as AxeResult
@@ -97,7 +97,9 @@ test('agent row controls are siblings, not nested inside one control', async ({ 
     // could never fail.
     const nestedIn = await control.evaluate((el) => {
       const owner = el.parentElement?.closest('button, a, [role="button"]')
-      return owner ? `${owner.tagName}${owner.getAttribute('role') ? '[role=button]' : ''}` : null
+      if (!owner) return null
+      const viaRole = owner.getAttribute('role') ? '[role=button]' : ''
+      return `${owner.tagName}${viaRole}`
     })
     expect(nestedIn, 'control must not sit inside another interactive element').toBeNull()
   }

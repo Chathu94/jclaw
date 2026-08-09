@@ -19,7 +19,7 @@ export const E2E_PREFIX = 'e2e-uat-'
  * third-party rate limit into a red suite, including the pre-existing page
  * smoke tests. Blocking it also keeps the suite runnable with no egress.
  */
-const EXTERNAL_HOSTS = ['api.github.com', 'github.com']
+const EXTERNAL_HOSTS = new Set(['api.github.com', 'github.com'])
 
 /**
  * The suite's base test. Identical to Playwright's except that outbound
@@ -35,7 +35,7 @@ export const test = base.extend({
   page: async ({ page }, use) => {
     await page.route('**/*', (route) => {
       const host = new URL(route.request().url()).hostname
-      if (!EXTERNAL_HOSTS.includes(host)) return route.continue()
+      if (!EXTERNAL_HOSTS.has(host)) return route.continue()
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -46,7 +46,7 @@ export const test = base.extend({
   },
 })
 
-export { expect }
+export { expect } from '@playwright/test'
 
 /** Unique per invocation so parallel workers and re-runs never collide on the
  *  unique-name constraints in Agent and Prompt. */
