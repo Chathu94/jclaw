@@ -62,7 +62,9 @@ const steps: TourStep[] = [
     hideNextButton: true,
   },
   {
-    path: '/agents',
+    // The editor is its own route now, not a panel on /agents. `main` is safe
+    // to pin: the Main Agent is a singleton that cannot be renamed.
+    path: '/agents/main',
     selector: '[data-tour="agent-edit-form"]',
     title: 'Choose provider and model',
     description: 'Set <strong>Default Provider</strong> and <strong>Default Model</strong> to the ones you just configured, then click the <strong>Save</strong> icon.',
@@ -89,20 +91,39 @@ const steps: TourStep[] = [
 
 let driverInstance: Driver | null = null
 let advanceObserver: MutationObserver | null = null
+/** Step index `advanceObserver` was installed for. It outlives route changes
+ *  but never its own step — see {@link destroyPopover}. */
+let advanceObserverStep: number | null = null
+
+/**
+ * Tear down the popover alone, leaving any pending advance observer connected.
+ * A step that waits on `advanceOnAppearOf` is waiting for a DOM change the
+ * user's click triggers by navigating, and the route watch fires pre-flush —
+ * before the new page mounts. Disconnecting here would drop the observer on
+ * the very navigation it exists to observe, parking the tour on that step.
+ */
+function destroyPopover() {
+  if (driverInstance) {
+    driverInstance.destroy()
+    driverInstance = null
+  }
+}
+
+function destroyObserver() {
+  if (advanceObserver) {
+    advanceObserver.disconnect()
+    advanceObserver = null
+  }
+  advanceObserverStep = null
+}
 
 /**
  * Tear down any active driver.js popover and pending mutation observer.
  * Stateless (only touches module-level handles), so it lives at module scope.
  */
 function destroy() {
-  if (driverInstance) {
-    driverInstance.destroy()
-    driverInstance = null
-  }
-  if (advanceObserver) {
-    advanceObserver.disconnect()
-    advanceObserver = null
-  }
+  destroyPopover()
+  destroyObserver()
 }
 
 /**
@@ -149,6 +170,8 @@ export function useGuidedTour() {
   const introOpen = useState<boolean>('jclaw-guided-tour-intro', () => false)
 
   function installAdvanceObserver(selector: string) {
+    // Re-driving a step must not stack observers.
+    destroyObserver()
     // If the target is somehow already present (shouldn't happen in our flow
     // but defensive), advance on next tick rather than synchronously — avoids
     // destroying the popover we just created.
@@ -156,6 +179,7 @@ export function useGuidedTour() {
       queueMicrotask(() => advance())
       return
     }
+    advanceObserverStep = state.value.step
     advanceObserver = new MutationObserver(() => {
       if (document.querySelector(selector)) advance()
     })
@@ -165,7 +189,10 @@ export function useGuidedTour() {
   async function showStepForCurrentPage() {
     // Always clear any existing popover first — stops a step-1 popover from
     // dangling on /settings after the user navigates to /skills mid-tour.
-    destroy()
+    destroyPopover()
+    // The observer survives a route change but not a step change: once the tour
+    // is elsewhere, the anchor it waits for is no longer a reason to advance.
+    if (advanceObserverStep !== state.value.step) destroyObserver()
     if (!state.value.active || import.meta.server) return
     const step = steps[state.value.step]
     if (route.path !== step?.path) return

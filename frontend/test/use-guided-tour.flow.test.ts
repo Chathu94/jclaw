@@ -415,11 +415,11 @@ describe('useGuidedTour — popover footer injection (onPopoverRender)', () => {
   })
 
   it('injects a progress counter and a Previous button on step > 0', async () => {
-    // Use step 2 (/agents, anchor data-tour="agent-edit-form").
+    // Use step 2 (/agents/main, anchor data-tour="agent-edit-form").
     const div = document.createElement('div')
     div.setAttribute('data-tour', 'agent-edit-form')
     document.body.appendChild(div)
-    routePath.value = '/agents'
+    routePath.value = '/agents/main'
 
     const tour = useGuidedTour()
     tour.state.value = { step: 2, active: true }
@@ -475,7 +475,7 @@ describe('useGuidedTour — popover footer injection (onPopoverRender)', () => {
     const div = document.createElement('div')
     div.setAttribute('data-tour', 'agent-edit-form')
     document.body.appendChild(div)
-    routePath.value = '/agents'
+    routePath.value = '/agents/main'
 
     const tour = useGuidedTour()
     tour.state.value = { step: 2, active: true }
@@ -546,5 +546,95 @@ describe('installGuidedTourHooks', () => {
   it('is a no-op call surface that installs without throwing', async () => {
     const { installGuidedTourHooks } = await import('~/composables/useGuidedTour')
     expect(() => installGuidedTourHooks()).not.toThrow()
+  })
+})
+
+describe('useGuidedTour — advancing off the Main Agent step', () => {
+  beforeEach(() => {
+    driverFactory.mockClear()
+    driveSpy.mockClear()
+    destroySpy.mockClear()
+    routePath.value = '/'
+  })
+
+  afterEach(() => {
+    document.body.replaceChildren()
+  })
+
+  // The useRoute stub snapshots routePath at composable-construction time, so
+  // a route change is modelled by building a second useGuidedTour() after
+  // moving routePath. State is shared through useState, and the popover and
+  // observer handles are module-scoped, so the pair behaves as one tour.
+
+  it('advances to the editor when the click that opens it also changes route', async () => {
+    // The regression: opening the Main Agent navigates to /agents/main, and the
+    // route watch re-runs showStepForCurrentPage BEFORE the editor mounts. A
+    // teardown that dropped the advance observer there left the tour parked on
+    // this step with no popover and no way forward — indistinguishable from
+    // the tour having exited.
+    const list = document.createElement('div')
+    list.setAttribute('data-tour', 'main-agent')
+    document.body.appendChild(list)
+
+    routePath.value = '/agents'
+    const onList = useGuidedTour()
+    onList.state.value = { step: 1, active: true }
+    await onList.showStepForCurrentPage()
+
+    // Navigation lands first; the editor has not rendered yet.
+    routePath.value = '/agents/main'
+    const onDetail = useGuidedTour()
+    await onDetail.showStepForCurrentPage()
+    expect(onDetail.state.value.step).toBe(1)
+
+    const editor = document.createElement('div')
+    editor.setAttribute('data-tour', 'agent-edit-form')
+    document.body.appendChild(editor)
+
+    await vi.waitFor(() => expect(onDetail.state.value.step).toBe(2))
+  })
+
+  it('drives the editor step on the agent detail route, not the list route', async () => {
+    // /agents stopped rendering the editor when each agent got its own URL. A
+    // step still pointing there resolves no anchor and renders nothing.
+    const editor = document.createElement('div')
+    editor.setAttribute('data-tour', 'agent-edit-form')
+    document.body.appendChild(editor)
+
+    routePath.value = '/agents'
+    const onList = useGuidedTour()
+    onList.state.value = { step: 2, active: true }
+    await onList.showStepForCurrentPage()
+    expect(driverFactory).not.toHaveBeenCalled()
+
+    routePath.value = '/agents/main'
+    const onDetail = useGuidedTour()
+    onDetail.state.value = { step: 2, active: true }
+    await onDetail.showStepForCurrentPage()
+    expect(driverFactory).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a pending advance observer once the tour moves off its step', async () => {
+    // The observer outliving a route change must not mean outliving its step:
+    // a stale one would fire on an anchor the tour has already passed.
+    const list = document.createElement('div')
+    list.setAttribute('data-tour', 'main-agent')
+    document.body.appendChild(list)
+
+    routePath.value = '/agents'
+    const tour = useGuidedTour()
+    tour.state.value = { step: 1, active: true }
+    await tour.showStepForCurrentPage()
+
+    // Jump elsewhere without going through advance()/back().
+    tour.state.value = { step: 0, active: true }
+    await tour.showStepForCurrentPage()
+
+    const editor = document.createElement('div')
+    editor.setAttribute('data-tour', 'agent-edit-form')
+    document.body.appendChild(editor)
+    await flushPromises()
+
+    expect(tour.state.value.step).toBe(0)
   })
 })
