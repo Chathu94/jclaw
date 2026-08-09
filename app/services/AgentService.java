@@ -109,7 +109,26 @@ public class AgentService {
     public static Agent create(String name, String modelProvider, String modelId,
                                 String thinkingMode, String description,
                                 boolean createWorkspace) {
+        return create(name, modelProvider, modelId, thinkingMode, description, createWorkspace, null);
+    }
+
+    /**
+     * Seven-argument variant that stamps the parent link before the agent's MCP
+     * grants are decided.
+     *
+     * <p>The link has to be set here rather than by the caller afterwards: a
+     * subagent inherits its parent's grants and nothing more, and an agent that
+     * becomes a subagent one statement after it was granted every tool on every
+     * connected server has already spent a window over-granted — a window a
+     * failure in between makes permanent.
+     *
+     * @param parentAgent spawning agent for a subagent, null for a top-level one
+     */
+    public static Agent create(String name, String modelProvider, String modelId,
+                                String thinkingMode, String description,
+                                boolean createWorkspace, Agent parentAgent) {
         var agent = new Agent();
+        agent.parentAgent = parentAgent;
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
@@ -142,8 +161,15 @@ public class AgentService {
         // JCLAW-32: backfill MCP allowlist grants for currently-connected
         // servers. JCLAW-31's broadcast happens on connect; without this,
         // an agent created post-connect would silently see zero MCP tools.
+        // A subagent copies its parent's grants instead — it is a delegate, so
+        // every-tool-on-every-server would let it reach servers the parent was
+        // denied.
         try {
-            McpAllowlist.backfillForAgent(agent);
+            if (agent.isSubagent()) {
+                McpAllowlist.inheritFromParent(agent);
+            } else {
+                McpAllowlist.backfillForAgent(agent);
+            }
         } catch (RuntimeException e) {
             EventLogger.warn("MCP_TOOL_REGISTER",
                     "MCP allowlist backfill failed for new agent '%s': %s"

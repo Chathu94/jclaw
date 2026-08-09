@@ -241,6 +241,81 @@ class McpAllowlistTest extends UnitTest {
         });
     }
 
+    @Test
+    void subagentInheritsExactlyItsParentsGrantsAndNoMore() {
+        // A delegate must not out-reach its spawner: the parent holds one
+        // server, so the child gets that one — not every connected server.
+        var ids = Tx.run(() -> {
+            var parent = newAgent("parent");
+            grant(parent, "mcp:allowed", "a");
+            grant(parent, "mcp:allowed", "b");
+            var child = newSubagent("parent-sub-heir", parent);
+            McpAllowlist.inheritFromParent(child);
+            return List.of(parent.id, child.id);
+        });
+
+        Tx.run(() -> {
+            assertTrue(allowed(ids.get(1), "allowed", "a"));
+            assertTrue(allowed(ids.get(1), "allowed", "b"));
+            assertFalse(allowed(ids.get(1), "denied", "x"),
+                    "a server the parent cannot reach must not be reachable by its subagent");
+        });
+    }
+
+    @Test
+    void inheritCopiesNothingForAnAgentWithNoParent() {
+        var agentId = Tx.run(() -> {
+            var a = newAgent("top");
+            grant(a, "mcp:svc", "a");
+            return a.id;
+        });
+        var written = Tx.run(() -> McpAllowlist.inheritFromParent(Agent.findById(agentId)));
+        assertEquals(0, written, "a top-level agent has no parent to inherit from");
+    }
+
+    @Test
+    void inheritSkipsNonMcpGrantsHeldByTheParent() {
+        // Shell allowlist rows live in the same table under a different scope
+        // and are not this class's to propagate.
+        var childId = Tx.run(() -> {
+            var parent = newAgent("parent");
+            grant(parent, "mcp:svc", "a");
+            grant(parent, "some-shell-skill", "rm");
+            var child = newSubagent("parent-sub-scoped", parent);
+            McpAllowlist.inheritFromParent(child);
+            return child.id;
+        });
+
+        Tx.run(() -> {
+            assertTrue(allowed(childId, "svc", "a"));
+            assertEquals(1, AgentSkillAllowedTool.count("agent.id = ?1", childId),
+                    "only the mcp: row is inherited");
+        });
+    }
+
+    @Test
+    void deletingAnAgentRemovesItsAllowlistRows() {
+        // The Subagents page delete path ends in agent.delete(); the FK carries
+        // ON DELETE CASCADE, so the grants must go with it rather than
+        // stranding rows keyed to an id nothing can resolve.
+        var childId = Tx.run(() -> {
+            var parent = newAgent("parent");
+            var child = newSubagent("parent-sub-doomed", parent);
+            grant(child, "mcp:svc", "a");
+            grant(child, "mcp:svc", "b");
+            return child.id;
+        });
+        assertEquals(2, Tx.run(() -> AgentSkillAllowedTool.count("agent.id = ?1", childId)));
+
+        Tx.run(() -> {
+            Agent child = Agent.findById(childId);
+            child.delete();
+        });
+
+        assertEquals(0, Tx.run(() -> AgentSkillAllowedTool.count("agent.id = ?1", childId)),
+                "deleting an agent must take its MCP grants with it");
+    }
+
     // ==================== helpers ====================
 
     private Agent newSubagent(String name, Agent parent) {

@@ -185,13 +185,12 @@ final class SubagentChildBootstrap {
                     label != null && !label.isBlank()
                             ? label
                             : "Subagent of " + parentAgent.name,
-                    /* createWorkspace */ false);
+                    /* createWorkspace */ false,
+                    parentAgent);
         } catch (RuntimeException e) {
             return ResolvedChildAgent.fail(
                     "Error: failed to create child agent: " + e.getMessage());
         }
-        created.parentAgent = parentAgent;
-        created.save();
         return ResolvedChildAgent.ok(created);
     }
 

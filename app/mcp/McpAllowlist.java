@@ -30,8 +30,9 @@ import java.util.Set;
  * the policy that decides which rows to write.
  *
  * <p><b>Spawned subagents are excluded from the broadcast</b> and get their
- * grants once, from {@link #backfillForAgent} at creation. They outnumber real
- * agents by two orders of magnitude on a busy instance (each spawn leaves a row
+ * grants once, from {@link #inheritFromParent} at creation — a delegate's reach
+ * is bounded above by the agent that spawned it. They also outnumber real agents
+ * by two orders of magnitude on a busy instance (each spawn leaves a row
  * behind), and broadcasting to them made every reconnect rewrite
  * {@code subagents × tools} rows — minutes of work before a server could report
  * CONNECTED. The broadcast therefore also leaves their rows ALONE rather than
@@ -94,7 +95,7 @@ public final class McpAllowlist {
             return existing.size();
         }
 
-        AgentSkillAllowedTool.delete(DELETE_SKILL_TOP_LEVEL, skillName);
+        deleteAndEvict(DELETE_SKILL_TOP_LEVEL, skillName);
         if (tools.isEmpty()) return 0;
         int written = 0;
         for (var agent : agents) {
@@ -113,7 +114,7 @@ public final class McpAllowlist {
     /** Remove every allowlist row this server contributed. Returns the row count. */
     public static int unregister(String serverName) {
         var skillName = SKILL_PREFIX + serverName;
-        return AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
+        return deleteAndEvict(QUERY_SKILL_NAME, skillName);
     }
 
     /**
@@ -129,8 +130,7 @@ public final class McpAllowlist {
      */
     public static int revokeForAgent(Agent agent) {
         if (agent == null || agent.id == null) return 0;
-        return AgentSkillAllowedTool.delete(
-                "agent = ?1 and skillName like ?2", agent, SKILL_PREFIX + "%");
+        return deleteAndEvict("agent = ?1 and skillName like ?2", agent, SKILL_PREFIX + "%");
     }
 
     /**
@@ -153,7 +153,7 @@ public final class McpAllowlist {
         int removed = 0;
         for (var skillName : distinctMcpSkillNames()) {
             if (!liveServerNames.contains(skillName.substring(SKILL_PREFIX.length()))) {
-                removed += AgentSkillAllowedTool.delete(QUERY_SKILL_NAME, skillName);
+                removed += deleteAndEvict(QUERY_SKILL_NAME, skillName);
             }
         }
         List<Agent> subagents = Agent.<Agent>find("parentAgent is not null").fetch();
@@ -161,6 +161,21 @@ public final class McpAllowlist {
             if (runningAgentIds.contains(agent.id)) continue;
             removed += revokeForAgent(agent);
         }
+        return removed;
+    }
+
+    /**
+     * Bulk-delete allowlist rows and drop the L2 region.
+     *
+     * <p>{@link AgentSkillAllowedTool} is a cached entity and a bulk JPQL
+     * DELETE bypasses the entity lifecycle, so without the evict a reader can
+     * still be served a row this call removed — and the readers here decide
+     * whether a tool call is permitted. Same discipline as the model's own
+     * {@code deleteByAgent} helpers.
+     */
+    private static int deleteAndEvict(String query, Object... params) {
+        var removed = AgentSkillAllowedTool.delete(query, params);
+        JPA.em().getEntityManagerFactory().getCache().evict(AgentSkillAllowedTool.class);
         return removed;
     }
 
@@ -175,10 +190,41 @@ public final class McpAllowlist {
     }
 
     /**
+     * Grant a spawned subagent exactly its parent's MCP tools — no more.
+     *
+     * <p>A subagent is a delegate, so its reach has to be bounded above by the
+     * agent that spawned it; {@link #backfillForAgent} would instead hand it
+     * every tool on every connected server, which on a parent that had been
+     * denied a server is an escalation, not a convenience. Copying rows (rather
+     * than reading through to the parent at call time) keeps
+     * {@link #isAllowed} a single-table check and keeps the child's grants
+     * frozen at spawn, so a later widening of the parent does not retroactively
+     * widen a run already in flight.
+     *
+     * @return rows written
+     */
+    public static int inheritFromParent(Agent child) {
+        if (child == null || child.id == null || child.parentAgent == null) return 0;
+        List<AgentSkillAllowedTool> parentRows = AgentSkillAllowedTool.<AgentSkillAllowedTool>find(
+                "agent = ?1 and skillName like ?2", child.parentAgent, SKILL_PREFIX + "%").fetch();
+        for (var parentRow : parentRows) {
+            var row = new AgentSkillAllowedTool();
+            row.agent = child;
+            row.skillName = parentRow.skillName;
+            row.toolName = parentRow.toolName;
+            row.save();
+        }
+        return parentRows.size();
+    }
+
+    /**
      * Backfill grants for a newly-created agent against every server
      * already connected. Without this an agent created post-connect
      * would silently see zero MCP tools — JCLAW-31's broadcast would
      * have happened before the agent existed.
+     *
+     * <p>Top-level agents only. A subagent's grants come from
+     * {@link #inheritFromParent} instead.
      */
     public static int backfillForAgent(Agent agent) {
         if (agent == null || agent.id == null) return 0;
