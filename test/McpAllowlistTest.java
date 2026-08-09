@@ -294,6 +294,40 @@ class McpAllowlistTest extends UnitTest {
     }
 
     @Test
+    void releaseDropsGrantsWhenTheRunnerWasASpawnedSubagent() {
+        var childId = Tx.run(() -> {
+            var parent = newAgent("parent");
+            var child = newSubagent("parent-sub-settled", parent);
+            grant(child, "mcp:svc", "a");
+            grant(child, "mcp:svc", "b");
+            return child.id;
+        });
+
+        var removed = Tx.run(() -> McpAllowlist.releaseSubagentGrants(Agent.findById(childId)));
+
+        assertEquals(2, removed);
+        Tx.run(() -> assertEquals(0, AgentSkillAllowedTool.count("agent.id = ?1", childId)));
+    }
+
+    @Test
+    void releaseLeavesAReusedTopLevelAgentsGrantsAlone() {
+        // A spawn may name an existing agent to run as (the agentId path), and
+        // that row stays top-level on purpose. Revoking when its run settles
+        // would strip an operator's agent of MCP access on first delegation.
+        var agentId = Tx.run(() -> {
+            var reused = newAgent("operator-owned");
+            grant(reused, "mcp:svc", "a");
+            grant(reused, "mcp:svc", "b");
+            return reused.id;
+        });
+
+        var removed = Tx.run(() -> McpAllowlist.releaseSubagentGrants(Agent.findById(agentId)));
+
+        assertEquals(0, removed, "a top-level agent's grants are not the run's to release");
+        Tx.run(() -> assertEquals(2, AgentSkillAllowedTool.count("agent.id = ?1", agentId)));
+    }
+
+    @Test
     void deletingAnAgentRemovesItsAllowlistRows() {
         // The Subagents page delete path ends in agent.delete(); the FK carries
         // ON DELETE CASCADE, so the grants must go with it rather than

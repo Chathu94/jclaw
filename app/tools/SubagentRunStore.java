@@ -1,5 +1,6 @@
 package tools;
 
+import mcp.McpAllowlist;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -54,6 +55,7 @@ final class SubagentRunStore {
                 fresh.endedAt = Instant.now();
                 fresh.outcome = outcome;
                 fresh.save();
+                McpAllowlist.releaseSubagentGrants(fresh.childAgent);
             }
         });
     }
@@ -79,6 +81,7 @@ final class SubagentRunStore {
                     fresh.endedAt = Instant.now();
                     fresh.outcome = outcomeText;
                     fresh.save();
+                    McpAllowlist.releaseSubagentGrants(fresh.childAgent);
                 }
             });
         } catch (Throwable t) {

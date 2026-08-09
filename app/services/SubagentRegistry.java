@@ -1,5 +1,6 @@
 package services;
 
+import mcp.McpAllowlist;
 import models.Agent;
 import models.SubagentRun;
 
@@ -410,6 +411,7 @@ public final class SubagentRegistry {
             fresh.endedAt = Instant.now();
             fresh.outcome = reason != null && !reason.isBlank() ? reason : "Killed by operator";
             fresh.save();
+            McpAllowlist.releaseSubagentGrants(fresh.childAgent);
             return SubagentRun.Status.KILLED;
         });
     }

@@ -134,6 +134,23 @@ public final class McpAllowlist {
     }
 
     /**
+     * Release a finished subagent's MCP grants, at the point its run settles.
+     *
+     * <p>No-op unless the agent is genuinely a spawned subagent. A spawn may
+     * instead name an existing agent to run as ({@code agentId}), and that row
+     * is an operator-created agent that deliberately keeps its own
+     * {@code parent_agent_id} null — revoking there would strip a real agent's
+     * MCP access the first time it was delegated to. The check lives here
+     * rather than at each settle point so no future caller has to remember it.
+     *
+     * @return rows removed
+     */
+    public static int releaseSubagentGrants(Agent child) {
+        if (child == null || !child.isSubagent()) return 0;
+        return revokeForAgent(child);
+    }
+
+    /**
      * Drop MCP grants belonging to subagents that are no longer running, and
      * rows naming a server that no longer exists.
      *

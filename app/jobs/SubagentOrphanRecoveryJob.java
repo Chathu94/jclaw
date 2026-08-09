@@ -1,5 +1,6 @@
 package jobs;
 
+import mcp.McpAllowlist;
 import models.SubagentRun;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
@@ -79,6 +80,7 @@ public class SubagentOrphanRecoveryJob extends Job<Void> {
                     fresh.endedAt = Instant.now();
                     fresh.outcome = "Subagent run did not survive JVM restart (VT / harness process gone)";
                     fresh.save();
+                    McpAllowlist.releaseSubagentGrants(fresh.childAgent);
                 });
                 EventLogger.warn(EVENT_CATEGORY_SUBAGENT,
                         "Marked orphaned SubagentRun " + orphanId + " FAILED at boot");
