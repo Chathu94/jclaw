@@ -298,7 +298,9 @@ public final class MemoryAutoCapture {
         try {
             var messages = List.<ChatMessage>of(
                     ChatMessage.system(EXTRACTION_INSTRUCTIONS),
-                    ChatMessage.user(renderTurn(userMessage, assistantResponse)));
+                    ChatMessage.user(userMessage.strip()),
+                    ChatMessage.assistant(assistantResponse.strip()),
+                    ChatMessage.user(EXTRACTION_REQUEST));
             raw = extractor.extract(messages);
             breaker.recordSuccess();
         } catch (Exception e) {
@@ -737,17 +739,16 @@ public final class MemoryAutoCapture {
     }
 
     /**
-     * Payload for the extractor. The halves are labelled by STATUS, not only by
-     * role: the assistant's reply rides along so pronouns and references in the
-     * user's message resolve, and is marked non-source so a confident-sounding
-     * assertion in it cannot be mined as a fact. Anything captured from the
-     * assistant becomes a durable memory and is then recalled as ground truth,
-     * which is how a single confabulation turns self-reinforcing.
+     * Closing turn, so the request ends on a user message.
+     *
+     * <p>Mem0 hands its two role-tagged messages to an ingestion endpoint that
+     * reformats them server-side; this extractor is a plain chat completion,
+     * where a trailing assistant message is prefill on several providers — the
+     * model continues that text instead of answering. Ending here keeps the
+     * role separation without inviting that.
      */
-    static String renderTurn(String userMessage, String assistantResponse) {
-        return "[USER — the only source for memories]\n" + userMessage.strip()
-                + "\n\n[ASSISTANT REPLY — context only, NEVER a source]\n" + assistantResponse.strip();
-    }
+    static final String EXTRACTION_REQUEST =
+            "Extract now, from the user turn above only. Output the JSON object and nothing else.";
 
     private static CaptureResult logged(String agentName, CaptureResult r) {
         String skipSuffix = r.skipped() > 0 ? " (%d skipped)".formatted(r.skipped()) : "";
@@ -764,7 +765,7 @@ public final class MemoryAutoCapture {
     static final String EXTRACTION_INSTRUCTIONS = """
             You extract durable, reusable memories from a single conversation turn so a future session can recall them. Output ONLY a JSON object — no prose, no code fences.
 
-            The turn has two labelled sections, and only ONE of them is a source. Extract solely from the [USER] section. The [ASSISTANT REPLY] section is supplied so you can resolve pronouns and references in the user's words — never extract from it, however factual, confident or authoritative it sounds. If the substance of a memory you are about to write appears only in the assistant's reply, discard that memory.
+            You are given the turn as real messages: a user turn, then the assistant turn that answered it. Only the USER turn is a source. The assistant turn is supplied so you can resolve pronouns and references in the user's words — never extract from it, however factual, confident or authoritative it sounds. If the substance of a memory you are about to write appears only in the assistant turn, discard that memory.
 
             Extract a memory ONLY when the user has conveyed something that is:
             - durable (true beyond this turn — not a transient request like "summarize this"),

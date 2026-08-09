@@ -103,28 +103,32 @@ class MemoryAutoCaptureTest extends UnitTest {
     }
 
     @Test
-    void extractorPayloadMarksTheAssistantReplyAsNonSource() {
+    void extractorSeesTheTurnAsSeparateRolesEndingOnAUserMessage() {
         // A confident but wrong assistant claim used to be captured as a durable
-        // fact and then recalled as ground truth. The payload has to tell the
-        // extractor which half it may mine, not merely name the two roles.
-        var seen = new java.util.concurrent.atomic.AtomicReference<String>();
+        // fact and recalled as ground truth. Roles are now structural, as Mem0
+        // does it, rather than markers inside one flattened user message — text
+        // markers a user could simply type for themselves.
+        var seen = new java.util.concurrent.atomic.AtomicReference<java.util.List<llm.LlmTypes.ChatMessage>>();
         MemoryAutoCapture.Extractor extractor = msgs -> {
-            seen.set(msgs.stream().map(m -> String.valueOf(m.content())).collect(java.util.stream.Collectors.joining("\n")));
+            seen.set(java.util.List.copyOf(msgs));
             return "{\"memories\":[]}";
         };
+        var assistantClaim = "JClaw cannot restart itself; external orchestration is required.";
         MemoryAutoCapture.capture(agentId("agent-src"), "agent-src",
-                "I work at Acme Corp on widgets",
-                "JClaw cannot restart itself; external orchestration is required.",
-                extractor, freshBreaker());
+                "I work at Acme Corp on widgets", assistantClaim, extractor, freshBreaker());
 
-        var payload = seen.get();
-        assertNotNull(payload, "extractor must have run");
-        assertTrue(payload.contains("[USER — the only source for memories]"),
-                "the user half must be labelled as the sole source");
-        assertTrue(payload.contains("[ASSISTANT REPLY — context only, NEVER a source]"),
-                "the assistant half must be labelled non-source, not just '[ASSISTANT]'");
-        assertTrue(payload.contains("never extract from it"),
-                "the instructions must forbid extracting from the assistant half");
+        var msgs = seen.get();
+        assertNotNull(msgs, "extractor must have run");
+        var roles = msgs.stream().map(llm.LlmTypes.ChatMessage::role).toList();
+        assertEquals(java.util.List.of("system", "user", "assistant", "user"), roles,
+                "the turn must carry real roles and close on a user message, so a trailing "
+                        + "assistant turn is never read as a prefill to continue");
+
+        // The assistant's words must live in the assistant turn ONLY — never
+        // folded into the user turn, where they would read as the user's own.
+        assertEquals(assistantClaim, msgs.get(2).content());
+        assertFalse(String.valueOf(msgs.get(1).content()).contains("cannot restart itself"),
+                "the user turn must not carry the assistant's claim");
     }
 
     @Test
