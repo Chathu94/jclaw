@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers'
 
 /**
  * Smoke tests for every top-level page in the JClaw sidebar. Each test navigates

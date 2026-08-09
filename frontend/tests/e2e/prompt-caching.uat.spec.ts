@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './helpers'
 
 /**
  * UAT for the prompt-cache observability flow in the chat UI.
