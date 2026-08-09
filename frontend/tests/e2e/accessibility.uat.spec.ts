@@ -19,20 +19,14 @@ const AXE_PATH = require_.resolve('axe-core/axe.min.js')
 const PAGES = ['/', '/chat', '/agents', '/tasks', '/prompts', '/memories', '/settings', '/conversations']
 
 /**
- * Known-failing rules, per page. These are real defects, not false positives —
- * the entry exists so the suite still catches NEW violations instead of being
- * permanently red. Remove the entry when the underlying markup is fixed; the
- * test fails if a listed rule stops firing, so a stale baseline cannot rot.
+ * Known-failing rules, per page. An entry records a real defect, not a false
+ * positive, so the suite still catches NEW violations instead of being
+ * permanently red. The test also fails if a listed rule stops firing, so an
+ * entry cannot outlive the fix it was waiting on.
  *
- * /agents nested-interactive: each agent row is a <div role="button"
- * tabindex="0"> that contains real <button>s (enable toggle, thinking pill,
- * delete). Screen readers announce the row as one control and the inner
- * buttons become unreachable in some AT. WCAG 4.1.2 — needs the row demoted
- * to a non-interactive container with an explicit open affordance.
+ * Empty is the correct state — add to it only alongside a ticket.
  */
-const KNOWN_VIOLATIONS: Record<string, string[]> = {
-  '/agents': ['nested-interactive'],
-}
+const KNOWN_VIOLATIONS: Record<string, string[]> = {}
 
 type AxeResult = { violations: Array<{ id: string, impact: string, help: string, nodes: Array<{ target: string[] }> }> }
 
@@ -77,4 +71,45 @@ test('keyboard focus reaches the primary navigation', async ({ page }) => {
   await page.keyboard.press('Tab')
   const focused = await page.evaluate(() => document.activeElement?.tagName ?? '')
   expect(['A', 'BUTTON', 'INPUT'], 'first tab stop must be interactive').toContain(focused)
+})
+
+/**
+ * Regression guard for JCLAW-1013. The axe scan above catches the violation in
+ * the abstract; these assert the two properties the fix exists to provide, so
+ * a future refactor that reintroduces a clickable row fails here with a
+ * readable reason rather than only as an axe rule id.
+ */
+test('agent row controls are siblings, not nested inside one control', async ({ page, request }) => {
+  const agents = await (await request.get('/api/agents')).json() as Array<{ name: string, isMain: boolean }>
+  const custom = agents.find(a => !a.isMain)
+  test.skip(!custom, 'no custom agent on this install')
+
+  await gotoPage(page, '/agents')
+  const controls = [
+    page.getByRole('button', { name: custom!.name, exact: true }),
+    page.getByRole('button', { name: `Delete ${custom!.name}` }),
+  ]
+
+  for (const control of controls) {
+    await expect(control).toBeVisible()
+    // Search from parentElement, not from the element: closest() starts at the
+    // node itself, so a <button> would always match itself and the assertion
+    // could never fail.
+    const nestedIn = await control.evaluate((el) => {
+      const owner = el.parentElement?.closest('button, a, [role="button"]')
+      return owner ? `${owner.tagName}${owner.getAttribute('role') ? '[role=button]' : ''}` : null
+    })
+    expect(nestedIn, 'control must not sit inside another interactive element').toBeNull()
+  }
+})
+
+test('an agent can be opened from the keyboard', async ({ page, request }) => {
+  const agents = await (await request.get('/api/agents')).json() as Array<{ name: string }>
+  const target = agents[0]!
+
+  await gotoPage(page, '/agents')
+  await page.getByRole('button', { name: target.name, exact: true }).focus()
+  await page.keyboard.press('Enter')
+
+  await expect(page).toHaveURL(new RegExp(`/agents/${target.name}$`), { timeout: 10_000 })
 })

@@ -1435,18 +1435,19 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         class="bg-surface-elevated border border-border"
         data-tour="main-agent"
       >
-        <!-- Row uses ARIA button semantics on a div because it wraps a ModelCapabilityPills child that emits its own click; an actual button would nest interactive elements. The tabindex plus keydown handlers expose a button click target while keeping the inner controls valid. -->
+        <!-- The row must stay non-interactive: it contains ModelCapabilityPills, whose pills are buttons. Making the row itself a control (element or role) nests them, which screen readers announce as one button and axe flags as nested-interactive (JCLAW-1013). The name is the open affordance instead. -->
         <div
           v-if="mainAgent"
-          role="button"
-          tabindex="0"
-          class="px-4 py-3 flex items-center justify-between hover:bg-muted cursor-pointer transition-colors"
-          @click="openAgent(mainAgent)"
-          @keydown.enter.prevent="openAgent(mainAgent)"
-          @keydown.space.prevent="openAgent(mainAgent)"
+          class="px-4 py-3 flex items-center justify-between"
         >
           <div>
-            <span class="text-sm text-fg-strong">{{ mainAgent.name }}</span>
+            <button
+              type="button"
+              class="text-sm text-fg-strong hover:underline"
+              @click="openAgent(mainAgent)"
+            >
+              {{ mainAgent.name }}
+            </button>
             <div
               v-if="mainAgent.description"
               class="text-xs text-fg-muted mt-0.5"
@@ -1496,21 +1497,22 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         Additional agents you create for specific channels, peers, or workflows.
       </p>
       <div class="bg-surface-elevated border border-border">
-        <!-- Row uses ARIA button semantics on a div because it contains a ModelCapabilityPills child plus nested toggle/delete buttons; an actual button would nest interactive elements. The tabindex plus keydown handlers expose a button click target safely. -->
+        <!-- Non-interactive for the same reason as the main-agent row above: the toggle, the delete button and the capability pills are all controls, and wrapping them in one makes them a nested-interactive violation (JCLAW-1013). -->
         <div
           v-for="agent in customAgents"
           :key="agent.id"
-          role="button"
-          tabindex="0"
-          class="px-4 py-3 border-b border-border last:border-b-0 hover:bg-muted cursor-pointer transition-colors"
-          @click="openAgent(agent)"
-          @keydown.enter.prevent="openAgent(agent)"
-          @keydown.space.prevent="openAgent(agent)"
+          class="px-4 py-3 border-b border-border last:border-b-0"
         >
           <!-- Name + enabled toggle share the top row so the switch aligns with
                the agent name rather than centering against the whole card. -->
           <div class="flex items-center justify-between gap-3">
-            <span class="text-sm text-fg-strong truncate min-w-0">{{ agent.name }}</span>
+            <button
+              type="button"
+              class="text-sm text-fg-strong truncate min-w-0 text-left hover:underline"
+              @click="openAgent(agent)"
+            >
+              {{ agent.name }}
+            </button>
             <div class="flex items-center gap-3 shrink-0">
               <span
                 v-if="agent.enabled && !agent.providerConfigured"
@@ -1521,7 +1523,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
                 class="relative w-9 h-5 rounded-full transition-colors"
                 :title="agent.enabled ? 'Disable agent' : 'Enable agent'"
-                @click.stop="toggleAgentEnabled(agent)"
+                @click="toggleAgentEnabled(agent)"
               >
                 <span
                   :class="agent.enabled ? 'translate-x-4' : 'translate-x-0.5'"
@@ -1539,8 +1541,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           <!-- Bottom row: provider/model + capability pills stay left-aligned and
                share the row with the bottom-right delete button. mt-4 gives a
                consistent, roomy separation from the name/description group above
-               whether or not this agent has a description. @click/keydown .stop
-               keeps the trash from bubbling up and opening the edit form. -->
+               whether or not this agent has a description. -->
           <div class="flex items-center justify-between gap-3 mt-4">
             <div class="min-w-0">
               <div class="text-xs text-fg-muted">
@@ -1558,9 +1559,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :disabled="deletingId === agent.id"
               class="p-1.5 shrink-0 text-fg-muted hover:text-red-400 disabled:opacity-40 transition-colors"
               :title="`Delete ${agent.name}`"
-              @click.stop="deleteAgent(agent)"
-              @keydown.enter.stop="deleteAgent(agent)"
-              @keydown.space.stop.prevent="deleteAgent(agent)"
+              @click="deleteAgent(agent)"
             >
               <TrashIcon
                 class="w-4 h-4"

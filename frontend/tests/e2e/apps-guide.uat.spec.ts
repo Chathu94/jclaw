@@ -1,4 +1,4 @@
-import { test, expect, gotoPage } from './helpers'
+import { test, expect, gotoPage, PLAY_SERVES_SITE } from './helpers'
 
 /**
  * UAT-13 — Hosted apps and the user guide.
@@ -24,6 +24,7 @@ test.describe('UAT-13 hosted apps', () => {
   })
 
   test('a hosted app is served from its slug', async ({ page, request }) => {
+    test.skip(!PLAY_SERVES_SITE, 'hosted apps are served by Play; not reachable in dev mode')
     const { apps } = await (await request.get('/api/apps')).json() as { apps: Array<{ id: string }> }
     test.skip(apps.length === 0, 'no hosted apps on this install')
     const slug = apps[0]!.id
@@ -38,6 +39,7 @@ test.describe('UAT-13 hosted apps', () => {
   })
 
   test('hosted app assets are not long-cached', async ({ request }) => {
+    test.skip(!PLAY_SERVES_SITE, 'the no-cache header comes from Play; not reachable in dev mode')
     const { apps } = await (await request.get('/api/apps')).json() as { apps: Array<{ id: string }> }
     test.skip(apps.length === 0, 'no hosted apps on this install')
     const slug = apps[0]!.id

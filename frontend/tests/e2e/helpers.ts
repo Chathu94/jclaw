@@ -54,6 +54,17 @@ export function uniqueName(kind: string): string {
   return `${E2E_PREFIX}${kind}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+/**
+ * True when the target is the Play backend serving the whole site — production
+ * mode (`./jclaw.sh start`, :9000).
+ *
+ * Under `./jclaw.sh --dev start` Nuxt serves the frontend on :3000 and proxies
+ * only `/api`, so anything Play routes itself is unreachable: `/apps/<slug>/`
+ * falls through to the SPA catch-all and answers 200 HTML, which makes a naive
+ * "the app is served" assertion pass for entirely the wrong reason.
+ */
+export const PLAY_SERVES_SITE = !(process.env.JCLAW_E2E_BASE_URL || '').includes(':3000')
+
 /** Every route reachable from the sidebar, in sidebar order. */
 export const SIDEBAR_ROUTES = [
   { path: '/', label: 'Dashboard' },
