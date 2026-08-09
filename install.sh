@@ -449,17 +449,11 @@ chmod +x "$APP_DIR/jclaw.sh" "$APP_DIR/play" "$APP_DIR/gradlew" 2>/dev/null || t
 write_manifest
 substep "extracted"
 
-# Convenience shim so `jclaw` works from anywhere.
-mkdir -p "$JCLAW_BIN_DIR"
-cat > "$JCLAW_BIN_DIR/jclaw" <<EOF
-#!/bin/sh
-# An upgrade replaces the install directory, leaving any shell sitting in it
-# with a CWD that no longer resolves; recover before exec so jclaw.sh starts
-# clean instead of behind a getcwd error.
-pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
-exec "$APP_DIR/jclaw.sh" "\$@"
-EOF
-chmod +x "$JCLAW_BIN_DIR/jclaw"
+# Convenience shim so `jclaw` works from anywhere. Delegated to the bundle's own
+# `shim` command, for the same reason completion is below: `upgrade` refreshes
+# the shim too, and two writers of one file drift.
+JCLAW_BIN_DIR="$JCLAW_BIN_DIR" "$APP_DIR/jclaw.sh" shim >/dev/null \
+    || die "could not write the jclaw shim to $JCLAW_BIN_DIR"
 substep "linked ${CYAN}jclaw${RESET} → $JCLAW_BIN_DIR/jclaw"
 
 # Shell tab-completion for `jclaw`/`jclaw.sh`. Delegated to the bundle's own

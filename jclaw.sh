@@ -64,7 +64,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|test|e2e|dist|bundle|completion|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|test|e2e|dist|bundle|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -220,7 +220,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|completion|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|completion|shim|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -243,6 +243,9 @@ Commands:
             rolled back automatically. Use --check to look without installing.
   completion Print a shell completion script (completion <bash|zsh>) so
             \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up.
+  shim      Rewrite the \`jclaw\` command so it points at this install. Written
+            by the installer and refreshed by \`upgrade\`; run it by hand only if
+            the command went missing or points somewhere stale.
   uninstall Remove JClaw: undo completion wiring, drop the \`jclaw\` shim, and
             delete the install dir (~/.jclaw). Warns first, then confirms.
   help      Print this usage reference and exit. Equivalent to --help / -h.
@@ -1234,7 +1237,7 @@ while [[ $# -gt 0 ]]; do
             HTTPS_INSTALL_CA=true
             shift
             ;;
-        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|uninstall)
+        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|shim|uninstall)
             COMMAND="$1"
             shift
             ;;
@@ -3737,6 +3740,7 @@ do_completion() {
     fi
     pairs+=(
         completion "Print a shell completion script"
+        shim       "Relink the jclaw command to this install"
         uninstall  "Remove JClaw and undo completion"
         help       "Show usage"
     )
@@ -3906,6 +3910,39 @@ _rc_unwire() {
     fi
     rm -f "$tmp"
     return 0
+}
+
+# Write the `jclaw` shim that puts this install on PATH. Single-sourced here
+# rather than in install.sh so the installer and `upgrade` cannot write two
+# different shims — the same reason install.sh delegates completion here.
+#
+# Unconditional: a fresh install claims the `jclaw` command. Callers that must
+# NOT claim it — `upgrade`, which refreshes a shim rather than taking one over —
+# check ownership before calling.
+write_shim() {
+    local bin_dir="${JCLAW_BIN_DIR:-$HOME/.local/bin}"
+    mkdir -p "$bin_dir" || return 1
+    cat > "$bin_dir/jclaw" <<EOF
+#!/bin/sh
+# An upgrade replaces the install directory, leaving any shell sitting in it
+# with a CWD that no longer resolves; recover before exec so jclaw.sh starts
+# clean instead of behind a getcwd error.
+pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
+exec "$SCRIPT_DIR/jclaw.sh" "\$@"
+EOF
+    chmod +x "$bin_dir/jclaw"
+}
+
+# True when writing the shim would not take one over from a different install:
+# either there is no `jclaw` on PATH yet, or the one there already points here.
+# Mirrors the ownership test do_uninstall applies before it removes anything.
+shim_is_free() {
+    local shim
+    shim="$(command -v jclaw 2>/dev/null || true)"
+    [[ -z "$shim" && -f "${JCLAW_BIN_DIR:-$HOME/.local/bin}/jclaw" ]] \
+        && shim="${JCLAW_BIN_DIR:-$HOME/.local/bin}/jclaw"
+    [[ -z "$shim" ]] && return 0
+    grep -qF "$SCRIPT_DIR/jclaw.sh" "$shim" 2>/dev/null
 }
 
 # Remove an installed JClaw entirely. Refuses on a dev clone. Resolves the
@@ -4431,6 +4468,16 @@ do_upgrade() {
         "$installed" "$new_conf_sha" "$UPGRADE_STARTED" >"$SCRIPT_DIR/.jclaw-manifest" \
         || upgrade_abort "could not write .jclaw-manifest"
 
+    # Refresh the `jclaw` command from the release just installed, so a shim
+    # written by an older installer picks up changes to it. Runs the NEW
+    # jclaw.sh: this script is the old one, and its copy of the shim is exactly
+    # the stale text we are replacing. Best-effort and skipped when `jclaw`
+    # belongs to a different install — a shim is worth refreshing, never worth
+    # failing a good upgrade or taking over.
+    if shim_is_free; then
+        "$SCRIPT_DIR/jclaw.sh" shim >/dev/null 2>&1 || true
+    fi
+
     echo "==> Starting ${installed}…"
     upgrade_status starting 0 "Starting ${installed}…"
     # Past the filesystem work: from here a failure is "the new version doesn't
@@ -4623,6 +4670,9 @@ case "$COMMAND" in
         ;;
     completion)
         do_completion
+        ;;
+    shim)
+        write_shim && echo "Linked jclaw → ${JCLAW_BIN_DIR:-$HOME/.local/bin}/jclaw"
         ;;
     uninstall)
         do_uninstall
