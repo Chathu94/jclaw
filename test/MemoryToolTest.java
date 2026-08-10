@@ -227,6 +227,39 @@ class MemoryToolTest extends UnitTest {
         assertTrue(out.contains("not new instructions"), out);
     }
 
+    @Test
+    void recallLimitWidensPastTheConfiguredRecallLimit() {
+        // JCLAW-969: the tool applied its limit as stream().limit(n) AFTER the pipeline had
+        // already cut to memory.recall.limit (default 10), so the parameter could only ever
+        // narrow. The tool description tells the agent to "recall again with a better query
+        // whenever you need a stored detail you cannot see" — an agent asking for 20 got 10,
+        // with nothing in the response saying its request had been capped.
+        for (int i = 0; i < 16; i++) {
+            seed("Deployment note number " + i + " about the widgetserver rollout");
+        }
+
+        var narrow = call("{\"action\":\"recall\",\"query\":\"widgetserver\",\"limit\":3}");
+        var wide = call("{\"action\":\"recall\",\"query\":\"widgetserver\",\"limit\":16}");
+
+        assertEquals(3, narrow.lines().filter(l -> l.startsWith("- ")).count(),
+                "a small limit must still narrow");
+        assertTrue(wide.lines().filter(l -> l.startsWith("- ")).count() > 10,
+                "a limit above memory.recall.limit must actually widen the recall, not just "
+                        + "re-slice the same 10 rows");
+    }
+
+    @Test
+    void recallLimitIsBoundedByTheDocumentedCeiling() {
+        // Widening is not unbounded — the schema promises a cap, and an agent that asks for
+        // 5000 must not turn one tool call into a 5000-row retrieval.
+        for (int i = 0; i < 12; i++) {
+            seed("Ceiling note number " + i + " about the widgetserver rollout");
+        }
+        var out = call("{\"action\":\"recall\",\"query\":\"widgetserver\",\"limit\":5000}");
+        assertTrue(out.lines().filter(l -> l.startsWith("- ")).count() <= 50,
+                "the recall must stay within memory.recall.toolMaxLimit");
+    }
+
     // --- JCLAW-919: forget must survive the capture running on the same turn ---
 
     @Test

@@ -18,6 +18,7 @@ import models.Agent;
 import models.Memory;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.ConfigService;
 import services.EventLogger;
 import services.MemoryService;
 import services.evals.MemoryEvalGenerator;
@@ -170,7 +171,18 @@ public class ApiMemoryController extends Controller {
             return Optional.empty();
         }
         try {
-            return Optional.of(MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), 500));
+            // JCLAW-969: was a hard 500 with no signal to the caller. X-Total-Count is a COUNT
+            // over this id set, so it could never exceed 500 — and because orderByClause
+            // re-sorts by updatedAt while the surviving ids were chosen by Lucene relevance,
+            // the truncation was invisible in the UI rather than merely undocumented.
+            int cap = ConfigService.getInt("memory.search.maxHits", 5000);
+            var ids = MessageSearch.searchIds(LuceneIndexer.Scope.MEMORY, q.strip(), cap);
+            if (ids.size() >= cap) {
+                EventLogger.warn("search", null, null,
+                        ("Memory search for q='%s' hit the %d-hit cap; results beyond it are "
+                                + "unreachable. Raise memory.search.maxHits.").formatted(q, cap));
+            }
+            return Optional.of(ids);
         } catch (IOException e) {
             EventLogger.warn("search", null, null,
                     "Memory FTS failed for q='%s': %s".formatted(q, e.getMessage()));
