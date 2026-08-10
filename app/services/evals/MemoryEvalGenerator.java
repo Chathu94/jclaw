@@ -58,7 +58,7 @@ public final class MemoryEvalGenerator {
     }
 
     /** A memory lifted out of its transaction, so the model calls hold no connection. */
-    private record Row(Long id, String text) {}
+    private record Row(Long id, String text, String retrievalKey) {}
 
     /**
      * How a coverage question's set of distinct facts is decided.
@@ -88,7 +88,7 @@ public final class MemoryEvalGenerator {
                                            QuestionWriter writer) {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text)).toList());
+                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
         if (rows.isEmpty()) {
             return new MemoryEvalSuite(suiteId, "No memories to sample.", corpusFingerprint(rows), List.of());
         }
@@ -152,7 +152,7 @@ public final class MemoryEvalGenerator {
                                                    Clustering clustering, QuestionWriter writer) {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text)).toList());
+                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
         var cases = new ArrayList<MemoryEvalCase>();
         var used = new java.util.HashSet<Long>();
 
@@ -237,7 +237,7 @@ public final class MemoryEvalGenerator {
                                                  QuestionWriter writer) {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text)).toList());
+                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
         var docFreq = new java.util.HashMap<String, Integer>();
         for (var r : rows) {
             for (var t : MemorySimilarity.contentTokens(r.text())) docFreq.merge(t, 1, Integer::sum);
@@ -317,7 +317,7 @@ public final class MemoryEvalGenerator {
     public static List<Integer> clusterSizes(Agent agent, Clustering clustering) {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text)).toList());
+                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
         var sizes = new ArrayList<Integer>();
         var used = new java.util.HashSet<Long>();
         for (var seed : rows) {
@@ -352,8 +352,13 @@ public final class MemoryEvalGenerator {
     /** Embedding neighbours of the seed, restricted to the corpus rows already in hand. */
     private static List<Row> semanticCluster(Agent agent, Row seed, List<Row> all, double minCosine) {
         var byId = all.stream().collect(java.util.stream.Collectors.toMap(Row::id, r -> r, (a, b) -> a));
+        // Seed embedded as a document, matching what the index holds (JCLAW-529). Bare text
+        // against statement+key vectors compares a format difference rather than a
+        // similarity, which shrinks every cluster and quietly weakens the coverage suites
+        // built from them — the same asymmetry that stopped capture-time dedup firing.
         var ids = MemoryStoreFactory.get().semanticNeighbours(
-                String.valueOf(agent.id), seed.text(), MAX_SEMANTIC_NEIGHBOURS, minCosine);
+                String.valueOf(agent.id), seed.text(), seed.retrievalKey(),
+                MAX_SEMANTIC_NEIGHBOURS, minCosine);
         var cluster = new ArrayList<Row>();
         cluster.add(seed);
         for (var id : ids) {

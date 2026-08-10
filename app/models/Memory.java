@@ -268,6 +268,56 @@ public class Memory extends Model {
                 .executeUpdate();
     }
 
+    /**
+     * Delete this memory, first clearing any supersession pointer aimed at it (JCLAW-529).
+     *
+     * <p>{@code supersededById} is a bare column with no foreign key — only {@code agent_id}
+     * carries one — so nothing at the database level stops a delete from leaving retired
+     * rows pointing at an id that no longer exists. A live store had 265 such pointers, each
+     * one a lineage chain that cannot be walked to its surviving descendant.
+     *
+     * <p>Recall is unaffected either way: it filters on {@code supersededAt}, never on this
+     * pointer. What breaks is the audit question "what replaced this?", and the answer once
+     * the successor is gone is "nothing that still exists" — which null records faithfully
+     * and a dangling id does not.
+     *
+     * <p>Deliberately not a {@code @PreRemove} hook: modifying other entities from a
+     * lifecycle callback is undefined under JPA, and this runs a bulk update.
+     */
+    public void deleteWithLineage() {
+        if (id != null) {
+            // Entity updates, not a bulk JPQL one: a bulk update bypasses the persistence
+            // context, so an entity already loaded in this request would keep reporting the
+            // pointer this method just cleared. The row count here is the number of rows
+            // superseded by this one — almost always zero or one.
+            List<Memory> referencing = find("supersededById = ?1", id).fetch();
+            for (var m : referencing) {
+                m.supersededById = null;
+                m.save();
+            }
+        }
+        delete();
+    }
+
+    /**
+     * Null every supersession pointer whose target row is gone, returning how many were
+     * repaired. Idempotent — a second run updates nothing.
+     *
+     * <p>Bulk JPQL, unlike {@link #deleteWithLineage()}: this runs from a boot job with
+     * nothing else loaded, so there is no persistence context to leave stale, and the row
+     * count on a neglected store can reach the hundreds.
+     */
+    public static int clearDanglingSupersessionPointers() {
+        int repaired = JPA.em().createQuery(
+                        "UPDATE Memory m SET m.supersededById = NULL WHERE m.supersededById IS NOT NULL "
+                                + "AND NOT EXISTS (SELECT 1 FROM Memory x WHERE x.id = m.supersededById)")
+                .executeUpdate();
+        // The bulk update wrote past the persistence context; drop it so any entity read
+        // afterwards comes from the database rather than reporting the pointer just cleared.
+        if (repaired > 0) JPA.em().clear();
+        return repaired;
+    }
+
     /** Parse an agent-id string (the partition key callers pass) to its PK, or null when non-numeric. */
     private static Long parsePk(String agentId) {
         if (agentId == null) return null;

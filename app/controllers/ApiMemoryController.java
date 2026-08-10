@@ -591,7 +591,7 @@ public class ApiMemoryController extends Controller {
             notFound();
             throw ApiResponses.unreachable();
         }
-        memory.delete();
+        memory.deleteWithLineage();
         ApiResponses.ok();
     }
 
@@ -621,7 +621,7 @@ public class ApiMemoryController extends Controller {
             for (var elem : body.getAsJsonArray("ids")) {
                 Memory m = MemoryService.findById(elem.getAsLong());
                 if (m != null) {
-                    m.delete();
+                    m.deleteWithLineage();
                     deleted++;
                 }
             }
@@ -641,7 +641,7 @@ public class ApiMemoryController extends Controller {
             List<Memory> batch;
             while (!(batch = selectMemories(q, agent, category, importance, status, 500, 0)).isEmpty()) {
                 for (Memory m : batch) {
-                    m.delete();
+                    m.deleteWithLineage();
                     deleted++;
                 }
             }
