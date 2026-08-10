@@ -52,7 +52,7 @@ class MemoryCaptureBoundsTest extends UnitTest {
                 lockHeld.countDown();
                 try {
                     release.await(10, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }

@@ -144,10 +144,6 @@ public final class MemoryReembedService {
     private record Row(Long id, String text, String agentId) {}
 
     /**
-     * Whether the stored corpus was embedded with the model now configured. False after
-     * a model switch, which is what the Settings panel turns into a prompt to re-embed.
-     */
-    /**
      * Forget which model the corpus was embedded with, so {@link #upToDate()} reports false and
      * the Settings panel prompts for a re-embed.
      *
@@ -160,6 +156,10 @@ public final class MemoryReembedService {
         ConfigService.delete(MARKER);
     }
 
+    /**
+     * Whether the stored corpus was embedded with the model now configured. False after
+     * a model switch, which is what the Settings panel turns into a prompt to re-embed.
+     */
     public static boolean upToDate() {
         return MemoryVectorSettings.model().equals(ConfigService.get(MARKER, ""));
     }

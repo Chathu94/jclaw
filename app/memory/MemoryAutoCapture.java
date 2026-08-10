@@ -395,7 +395,7 @@ public final class MemoryAutoCapture {
         boolean held;
         try {
             held = lock.tryLock(captureLockWaitSeconds(), TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return logged(agentName, CaptureResult.skipped("interrupted"));
         }
