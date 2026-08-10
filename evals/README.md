@@ -468,7 +468,24 @@ question:      "what is my kid's alias?"
 
 No single embedding is near both "my kid's alias" and "Zephyrin goes by Zeph", and
 the two facts live in different rows, so neither retrieval leg crosses the gap in one
-shot. Hand-authored bridge cases go in a local suite alongside the generated ones.
+shot.
+
+`mode: "bridge"` generates these: it pairs a memory carrying a relation word with one
+that shares a rare content token and carries no relation word of its own, and asks for
+a question phrased through the relation. Gold is the *target* row — the one the
+question cannot reach — not the relation row, which the question's own words already
+find.
+
+The pairing keys on rare shared tokens rather than on capitalisation on purpose. The
+second-hop leg seeds itself from `JpaMemoryStore.entityNames`, a capitalisation rule,
+so generating gold that way would select for pairs the hop can already bridge and
+report the hop's own heuristic back as a score — the same trap the coverage mode's
+note describes for lexical clustering.
+
+Expect bridge numbers well below generic ones, and read them separately. Measured on
+one 89-memory corpus: the generic suite scored R@1 0.625 / R@10 0.925 while the bridge
+suite over the same store scored R@1 0.40 / R@10 0.80. A generic suite alone would
+have reported that recall was healthy.
 
 Two things worth knowing before reading a bridge result:
 
