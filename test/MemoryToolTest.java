@@ -224,11 +224,10 @@ class MemoryToolTest extends UnitTest {
     @Test
     void withoutAVectorBackendForgetMatchesWordingOnly() {
         // Pins the real limit rather than leaving it to be discovered. "kept ... by the
-        // user" restates "keeps ... the user" but shares too few tokens for the lexical
-        // thresholds (Jaccard 0.6, containment 0.75 against 0.85/0.82), and those are the
-        // capture-dedup thresholds measured on a real corpus — not numbers to relax so a
-        // fixture passes. Catching this pair is the semantic tier's job, and the index is
-        // closed here.
+        // user" restates "keeps ... the user" but shares too few tokens: containment 0.667,
+        // under forget's 0.70 floor as well as capture dedup's 0.82. JCLAW-1049 gave forget
+        // its own thresholds and this pair still does not clear them — catching it remains
+        // the semantic tier's job, and the index is closed here.
         seed("The user keeps the NAS in the basement");
         seed("The NAS is kept in the basement by the user");
 

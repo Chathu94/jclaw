@@ -46,10 +46,15 @@ import java.util.Set;
  * exactly what they touched, so an unwanted write is visible in the transcript instead of
  * silent.
  *
- * <p>"The same fact" is deliberately the definition auto-capture dedups on — semantic
- * cosine above the capture threshold, or a lexical near-duplicate — so what counts as
- * already-remembered when storing, and as a match when forgetting, is what counts as a
- * duplicate at capture. One notion, three call sites.
+ * <p>"The same fact" is the definition auto-capture dedups on when <em>storing</em> —
+ * semantic cosine above the capture threshold, or a lexical near-duplicate — so a store
+ * cannot create a row capture would have rejected as a duplicate.
+ *
+ * <p><b>Forgetting no longer shares those constants</b> (JCLAW-1049). One notion across
+ * all three call sites was the original design, and it was wrong for forget: dedup must
+ * not lose a write, forget must not leave behind data the operator has been told is gone,
+ * and those two costs pull in opposite directions. Forget therefore runs on its own
+ * lexical floors; the semantic leg is still shared.
  */
 public class MemoryTool implements ToolRegistry.Tool {
 
@@ -72,6 +77,32 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /** Caps a forget so a broad query cannot clear the store in one call. */
     private static final int FORGET_LIMIT = 25;
+
+    /**
+     * Forget's lexical floors, deliberately below capture dedup's 0.85/0.82 (JCLAW-1049).
+     *
+     * <p>Dedup and forget ask different questions with inverted costs. A dedup false
+     * positive suppresses a write and the memory is gone with nothing to recover it from,
+     * so strict is right there. A forget false negative leaves data the operator has been
+     * told is deleted — and forget reports every row it removes, so an over-match is
+     * visible in the transcript while an under-match is silent.
+     *
+     * <p>0.70 is measured, not picked. UAT: query "user swimming lido Wednesday evenings"
+     * against the stored "The user swims at the lido on Wednesday evenings." sits at
+     * containment 0.750 — one uninflected pair, swims/swimming, out of four content tokens.
+     * The nearest wrong candidate on that corpus ("...at the pool on Wednesday evenings")
+     * sits at 0.500, and the sweep is clean anywhere in 0.60-0.75. 0.70 centres that
+     * window. Below 0.60 the pool row starts matching, which would be a destructive miss.
+     */
+    private static final double FORGET_JACCARD = 0.70;
+    private static final double FORGET_CONTAINMENT = 0.70;
+
+    /**
+     * Length guard, unchanged from capture. Load-bearing: a one-word query scores
+     * containment 1.0 against any memory containing that word, so without it "forget lido"
+     * would delete a memory about Wednesday evenings at the lido.
+     */
+    private static final double MIN_LENGTH_RATIO = 0.5;
 
     @Override
     public String name() {
@@ -398,7 +429,14 @@ public class MemoryTool implements ToolRegistry.Tool {
         if (query.isBlank()) return "Error: `query` is required for forget.";
 
         var matches = sameFact(agentId, query);
-        if (matches.isEmpty()) return "Nothing stored matches \"%s\" — nothing to forget.".formatted(query);
+        if (matches.isEmpty()) {
+            var near = nearestMiss(agentId, query);
+            return near == null
+                    ? "Nothing stored matches \"%s\" — nothing to forget.".formatted(query)
+                    : ("Nothing stored matches \"%s\" closely enough to forget. The nearest stored "
+                        + "memory is: \"%s\". If that is the one you meant, say so and it will be "
+                        + "removed.").formatted(query, snippet(near));
+        }
 
         var store = MemoryStoreFactory.get();
         var removed = new ArrayList<String>();
@@ -426,14 +464,26 @@ public class MemoryTool implements ToolRegistry.Tool {
     // ─── shared matching ─────────────────────────────────────────────────────
 
     /**
-     * Keyless form, for the forget matcher. What the operator types to remove a memory is
-     * a description rather than a stored statement, so there is no key to embed with it —
-     * unlike the store path, where the same tool call supplies one. The asymmetry against
-     * keyed stored vectors is therefore inherent here rather than an oversight, and it
-     * costs recall on the semantic leg only; the lexical leg is unaffected.
+     * Keyless form, for the forget matcher, on forget's own lexical floors.
+     *
+     * <p>What the operator types to remove a memory is a description rather than a stored
+     * statement, so there is no key to embed with it — unlike the store path, where the
+     * same tool call supplies one. The asymmetry against keyed stored vectors is therefore
+     * inherent here rather than an oversight, and it costs recall on the semantic leg only.
      */
     private static List<Memory> sameFact(String agentId, String text) {
-        return sameFact(agentId, text, null);
+        return matching(agentId, text, null,
+                ConfigService.getDouble("memory.forget.match.threshold", FORGET_JACCARD),
+                ConfigService.getDouble("memory.forget.match.containmentThreshold", FORGET_CONTAINMENT));
+    }
+
+    /**
+     * The store-side question: would capture have called this a duplicate? Keeps capture's
+     * own thresholds, so a store cannot create a row capture would have rejected.
+     */
+    private static List<Memory> sameFact(String agentId, String text, String retrievalKey) {
+        return matching(agentId, text, retrievalKey,
+                ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85), 0.82);
     }
 
     /**
@@ -442,14 +492,16 @@ public class MemoryTool implements ToolRegistry.Tool {
      * backend is configured or the wording matches but the vector does not.
      *
      * <p>Both tiers are needed and neither subsumes the other — that is the JCLAW-922
-     * finding, restated here rather than re-derived. Same thresholds as capture, so a
-     * store cannot create a row that capture would have rejected as a duplicate.
+     * finding, restated here rather than re-derived.
      *
      * <p>The semantic leg embeds over HTTP and therefore runs outside any transaction;
-     * only the lexical query and the hydration take one.
+     * only the lexical query and the hydration take one. It stays on the capture cosine for
+     * both callers: the forget query is keyless against keyed stored vectors, so its recall
+     * loss is the embedding asymmetry rather than the threshold, and lowering a cosine
+     * floor on a destructive path without measuring it would be guesswork.
      */
-    private static List<Memory> sameFact(String agentId, String text, String retrievalKey) {
-        double jaccard = ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85);
+    private static List<Memory> matching(String agentId, String text, String retrievalKey,
+            double jaccard, double containment) {
         var ids = semanticNeighbours(agentId, text, retrievalKey);
         return Tx.run(() -> {
             var byId = new LinkedHashMap<Long, Memory>();
@@ -462,11 +514,39 @@ public class MemoryTool implements ToolRegistry.Tool {
                 var m = hit.memory();
                 if (m.supersededAt != null || byId.containsKey(m.id)) continue;
                 if (MemorySimilarity.isDuplicate(probe, MemorySimilarity.Tokens.of(m.text),
-                        jaccard, 0.82, 0.5)) {
+                        jaccard, containment, MIN_LENGTH_RATIO)) {
                     byId.put(m.id, m);
                 }
             }
             return List.copyOf(byId.values());
+        });
+    }
+
+    /**
+     * The closest memory that still did not match, or null when nothing is even close.
+     *
+     * <p>A bare "nothing to forget" reads as "there was nothing there". UAT watched a model
+     * take it that way and invent an explanation — that the fact had been loaded into
+     * context without ever being stored — while the memory sat in the store, one inflected
+     * word under the floor. Naming the near miss makes the two outcomes distinguishable and
+     * gives the operator something to confirm (JCLAW-1049).
+     */
+    private static String nearestMiss(String agentId, String text) {
+        double floor = ConfigService.getDouble("memory.forget.nearMiss.minContainment", 0.4);
+        return Tx.run(() -> {
+            var probe = MemorySimilarity.contentTokens(text);
+            String best = null;
+            double bestScore = floor;
+            for (var hit : Memory.searchByTextScored(agentId, text, FORGET_LIMIT)) {
+                var m = hit.memory();
+                if (m.supersededAt != null) continue;
+                double score = MemorySimilarity.containment(probe, MemorySimilarity.contentTokens(m.text));
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = m.text;
+                }
+            }
+            return best;
         });
     }
 
