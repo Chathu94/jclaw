@@ -42,4 +42,29 @@ class PgVectorProvisionerTest extends UnitTest {
         assertTrue(ddl.get(2).contains("USING hnsw (embedding vector_cosine_ops)"),
                 "the AC pins an HNSW index for cosine distance");
     }
+
+    // --- JCLAW-1005: a dimension change must not leave the leg enabled-and-wrong ---
+
+    @Test
+    void aFirstProvisionIsUsableBecauseThereIsNoColumnYet() {
+        assertTrue(PgVectorProvisioner.dimensionUsable(1536, PgVectorProvisioner.COLUMN_ABSENT),
+                "the normal first-provision case must not be blocked");
+    }
+
+    @Test
+    void aMatchingExistingColumnIsUsable() {
+        assertTrue(PgVectorProvisioner.dimensionUsable(768, 768));
+    }
+
+    @Test
+    void aChangedDimensionRefusesTheVectorLeg() {
+        // "ALTER TABLE ... ADD COLUMN IF NOT EXISTS" is a no-op once the column exists, so the
+        // column keeps its ORIGINAL width forever. Enabling the leg anyway would fuse
+        // new-model query vectors against old-model stored vectors — semantically wrong
+        // neighbours — and semanticNeighbours backs both capture dedup and the forget matcher.
+        assertFalse(PgVectorProvisioner.dimensionUsable(768, 1536),
+                "a deployment provisioned at 1536 that switches to a 768-dim model must refuse");
+        assertFalse(PgVectorProvisioner.dimensionUsable(1536, 768),
+                "the mismatch is symmetric — widening is no safer than narrowing");
+    }
 }

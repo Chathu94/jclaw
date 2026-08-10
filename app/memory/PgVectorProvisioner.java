@@ -53,6 +53,26 @@ public final class PgVectorProvisioner {
                 return false;
             }
             dimensions = configuredDimensions();
+
+            // JCLAW-1005: "ADD COLUMN IF NOT EXISTS embedding vector(N)" is a no-op once the
+            // column exists, so it keeps its ORIGINAL dimension forever — changing the model
+            // or memory.jpa.vector.dimensions never resizes it. Reporting the leg live anyway
+            // would fuse new-model query vectors against old-model stored vectors, and
+            // semanticNeighbours (capture dedup AND the forget matcher) would match the wrong
+            // rows, with the Settings panel showing success throughout. Degrading to
+            // keyword-only LOUDLY is strictly better than that.
+            int observed = observedDimension(conn);
+            if (!dimensionUsable(dimensions, observed)) {
+                EventLogger.error(EVENT_CATEGORY_MEMORY,
+                        ("pgvector dimension mismatch: memory.embedding is vector(%d) but the "
+                         + "configured embedding model needs %d. Vector memory is DISABLED and "
+                         + "recall has degraded to full-text search — the stored vectors were "
+                         + "written by a different model and cannot be compared with the new "
+                         + "one. Migrate the column and re-embed, or restore the previous model.")
+                                .formatted(observed, dimensions));
+                return false;
+            }
+
             for (String ddl : ddlStatements(dimensions)) {
                 try (Statement s = conn.createStatement()) {
                     s.execute(ddl);
@@ -94,5 +114,44 @@ public final class PgVectorProvisioner {
 
     private static int configuredDimensions() {
         return MemoryVectorSettings.dimensions();
+    }
+
+    /** No {@code memory.embedding} column yet — the normal first-provision case. */
+    public static final int COLUMN_ABSENT = -1;
+
+    /**
+     * Whether the vector leg may be enabled, given the configured dimension and the one the
+     * existing column actually has (JCLAW-1005).
+     *
+     * <p>Test-visible and deliberately pure. pgvector's own rejection of a wrong-width vector
+     * can only be observed against live Postgres, and nothing in CI will raise it — but this
+     * decision is what determines whether {@code resolveVectorEnabled} reports the leg live,
+     * and that is the part that must never be wrong.
+     */
+    public static boolean dimensionUsable(int configured, int observed) {
+        return observed == COLUMN_ABSENT || observed == configured;
+    }
+
+    /**
+     * The dimension of the existing {@code memory.embedding} column, or {@link #COLUMN_ABSENT}
+     * when there is none. pgvector stores the declared width in {@code atttypmod}, and an
+     * unparameterised {@code vector} column reports -1 there — which reads as "absent" here,
+     * correctly: an unconstrained column accepts any width, so there is nothing to mismatch.
+     */
+    private static int observedDimension(Connection conn) {
+        var sql = """
+                SELECT a.atttypmod FROM pg_attribute a
+                  JOIN pg_class c ON a.attrelid = c.oid
+                 WHERE c.relname = 'memory' AND a.attname = 'embedding' AND NOT a.attisdropped
+                """;
+        try (var st = conn.createStatement(); var rs = st.executeQuery(sql)) {
+            return rs.next() ? rs.getInt(1) : COLUMN_ABSENT;
+        } catch (Exception e) {
+            // Cannot read the catalog — treat as absent and let the DDL decide. Failing closed
+            // here would disable a working deployment over a permissions quirk.
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "Could not read the memory.embedding column dimension: %s".formatted(e.getMessage()));
+            return COLUMN_ABSENT;
+        }
     }
 }
