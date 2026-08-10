@@ -64,16 +64,45 @@ public final class MemoryForgetLog {
     }
 
     /**
-     * Whether {@code text} states something forgotten within the window, judged by the
-     * same duplicate test capture dedups on — a re-extraction is rarely word-for-word.
+     * Fraction of the forgotten fact's own content tokens that {@code candidate} repeats.
+     *
+     * <p>Directional on purpose, and this is the whole point of the rule. Dedup asks
+     * whether two texts are the <em>same fact</em> and so divides by the smaller token
+     * set; the question here is whether a candidate <em>restates</em> what was just
+     * deleted, however much extra framing it wraps around it. UAT caught the difference:
+     * forgetting "the user's son Arjun plays the cello" produced the memory "the user
+     * wants the memory that Arjun plays the cello to be forgotten", which scored 0.75
+     * against dedup's 0.82 floor and was stored — putting the forgotten fact back in the
+     * store, inside the record of its own deletion, and retrievable at rank 3.
+     */
+    private static double restatement(java.util.Set<String> forgotten, java.util.Set<String> candidate) {
+        if (forgotten.isEmpty()) return 0.0;
+        return (double) forgotten.stream().filter(candidate::contains).count() / forgotten.size();
+    }
+
+    /**
+     * How much of a forgotten fact a candidate may repeat before it counts as re-learning
+     * it. Below dedup's floor because over-suppressing inside a ten-minute window costs a
+     * fact that can be re-stated, while under-suppressing defeats an explicit forget.
+     */
+    private static final double RESTATEMENT_THRESHOLD = 0.6;
+
+    /**
+     * Whether {@code text} states something forgotten within the window. Two tests: the
+     * duplicate rule capture dedups on, for a near-identical re-extraction, and the
+     * directional {@link #restatement} above, for a candidate that buries the forgotten
+     * fact inside other words.
      */
     public static boolean recentlyForgotten(String agentId, String text) {
         if (agentId == null || text == null) return false;
         var probe = MemorySimilarity.Tokens.of(text);
+        var probeContent = MemorySimilarity.contentTokens(text);
         return FORGOTTEN.asMap().keySet().stream()
                 .filter(f -> f.agentId().equals(agentId))
                 .anyMatch(f -> MemorySimilarity.isDuplicate(
-                        probe, MemorySimilarity.Tokens.of(f.text()), 0.85, 0.82, 0.5));
+                            probe, MemorySimilarity.Tokens.of(f.text()), 0.85, 0.82, 0.5)
+                        || restatement(MemorySimilarity.contentTokens(f.text()), probeContent)
+                                >= RESTATEMENT_THRESHOLD);
     }
 
     /**

@@ -104,4 +104,32 @@ class MemoryForgetLogTest extends UnitTest {
         assertFalse(MemoryForgetLog.recentlyForgotten(AGENT, FIRST), "the re-stored fact is cleared");
         assertTrue(MemoryForgetLog.recentlyForgotten(AGENT, SECOND), "the other fact is untouched");
     }
+
+    @Test
+    void suppressesAMemoryAboutHavingForgottenTheFact() {
+        // Caught in UAT: forgetting a fact made the extractor record the request itself,
+        // which put the forgotten content back in the store — inside the note of its own
+        // deletion, and retrievable. Dedup scored it 0.75 against a 0.82 floor, because
+        // dedup asks "same fact?" while this has to ask "restates the deleted one?".
+        MemoryForgetLog.noteForgotten(AGENT, "The user's son Arjun plays the cello");
+
+        assertTrue(MemoryForgetLog.recentlyForgotten(AGENT,
+                "The user wants the memory that Arjun plays the cello to be forgotten"));
+    }
+
+    @Test
+    void suppressesARewordingThatBuriesTheFactInExtraContext() {
+        MemoryForgetLog.noteForgotten(AGENT, "The NAS lives in the basement");
+
+        assertTrue(MemoryForgetLog.recentlyForgotten(AGENT,
+                "The user mentioned in passing that the NAS lives in the basement of the house"));
+    }
+
+    @Test
+    void doesNotSuppressADifferentFactAboutTheSameSubject() {
+        // The window must not swallow genuinely new information about a forgotten subject.
+        MemoryForgetLog.noteForgotten(AGENT, "The user's son Arjun plays the cello");
+
+        assertFalse(MemoryForgetLog.recentlyForgotten(AGENT, "The user's son Arjun studies medicine in Leeds"));
+    }
 }
