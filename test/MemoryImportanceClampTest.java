@@ -60,6 +60,14 @@ class MemoryImportanceClampTest extends UnitTest {
     }
 
     @Test
+    void nanResetsToTheDefault() {
+        // JCLAW-970: NaN compares false against both bounds, so the range clamp alone lets it
+        // through. Persisted, it sorts to the top of every recall candidate list while
+        // findCore's `importance >= x` filter excludes it — high-ranked and never core.
+        assertEquals(0.5, persistWithImportance(Double.NaN).importance, 0.0);
+    }
+
+    @Test
     void updateAlsoClamps() {
         var agent = AgentService.create("clamp-upd-" + System.nanoTime(), "openrouter", "gpt-4.1");
         var m = new Memory();

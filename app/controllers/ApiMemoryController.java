@@ -239,7 +239,9 @@ public class ApiMemoryController extends Controller {
         }
         if (body.has(KEY_IMPORTANCE) && !body.get(KEY_IMPORTANCE).isJsonNull()) {
             double imp = body.get(KEY_IMPORTANCE).getAsDouble();
-            if (imp < 0.0 || imp > 1.0) {
+            // JCLAW-970: the body parser is lenient, so NaN arrives as a number and passes both
+            // range comparisons. Reject rather than let the @PreUpdate backstop silently reset it.
+            if (!Double.isFinite(imp) || imp < 0.0 || imp > 1.0) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "importance must be between 0.0 and 1.0");
             }
             memory.importance = imp;

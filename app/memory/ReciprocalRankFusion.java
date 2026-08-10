@@ -42,10 +42,13 @@ public final class ReciprocalRankFusion {
      */
     @SafeVarargs
     public static List<Ranked> fuse(int k, List<Long>... rankedLists) {
+        // k < 0 makes the first term 1.0/0 = Infinity, and the normalization below then yields
+        // NaN for the top hit and 0.0 for the rest — one id pinned above every other (JCLAW-970).
+        int safeK = Math.max(0, k);
         var scores = new HashMap<Long, Double>();
         for (var list : rankedLists) {
             for (int i = 0; i < list.size(); i++) {
-                scores.merge(list.get(i), 1.0 / (k + i + 1), Double::sum);
+                scores.merge(list.get(i), 1.0 / (safeK + i + 1), Double::sum);
             }
         }
         if (scores.isEmpty()) return List.of();

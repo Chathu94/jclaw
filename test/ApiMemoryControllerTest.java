@@ -355,6 +355,25 @@ class ApiMemoryControllerTest extends FunctionalTest {
     }
 
     @Test
+    void rejectsNonFiniteImportance() {
+        // JCLAW-970: the body parser is lenient, so a bare NaN token arrives as a number and
+        // passes both range comparisons. The @PreUpdate backstop would silently reset it —
+        // the operator has to be told their value was refused, not have it quietly changed.
+        var memId = seedMemory("alice", "x", "fact", 0.4);
+        login();
+        var resp = PUT("/api/memories/" + memId, "application/json", "{\"importance\":NaN}");
+        assertEquals(400, resp.status.intValue());
+        // Assert the message, not just the status: a bare badRequest() from a FAILED parse is
+        // also 400, and would let this test pass without ever reaching the guard under test.
+        assertTrue(getContent(resp).contains("importance must be between"),
+                "must be rejected by the range guard, not by the body parser: " + getContent(resp));
+
+        var stored = fetchInFreshTx(() ->
+                models.Memory.<models.Memory>findById(Long.parseLong(memId)).importance);
+        assertEquals(0.4, stored, 1e-9, "a refused edit must leave the stored value untouched");
+    }
+
+    @Test
     void rejectsOutOfRangeImportance() {
         var memId = seedMemory("alice", "x", "fact", 0.4);
         login();

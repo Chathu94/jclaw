@@ -5,6 +5,7 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import jobs.ToolRegistrationJob;
 import llm.ProviderLocality;
+import memory.JpaMemoryStore;
 import memory.MemoryReranker;
 import memory.MemoryStoreFactory;
 import memory.MemoryVectorSettings;
@@ -212,6 +213,16 @@ public class ConfigService {
                     + "provider on this machine so memory text never leaves it.";
         }
 
+        // JCLAW-970: both keys are writable through POST /api/config, and a bad value is silent
+        // at read — a negative rrfK pins one memory above every other, a non-finite minCosine
+        // drops the vector leg entirely. Rejected here for the reason the timezone guard gives.
+        if (key.equals(JpaMemoryStore.KEY_RRF_K) && !isNonNegativeInt(value)) {
+            return "memory.recall.rrfK must be a non-negative integer.";
+        }
+        if (key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)) {
+            return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
+        }
+
         set(key, value);
 
         // JCLAW-863: switching the sidecar TTS model is the moment the operator
@@ -282,6 +293,25 @@ public class ConfigService {
         }
 
         return null;
+    }
+
+    private static boolean isNonNegativeInt(String value) {
+        try {
+            return Integer.parseInt(value == null ? "" : value.trim()) >= 0;
+        } catch (NumberFormatException _) {
+            return false;
+        }
+    }
+
+    /** A cosine similarity: finite and within [-1.0, 1.0]. Rejects the NaN and Infinity
+     *  literals {@code Double.parseDouble} accepts without throwing. */
+    private static boolean isCosine(String value) {
+        try {
+            double v = Double.parseDouble(value == null ? "" : value.trim());
+            return Double.isFinite(v) && v >= -1.0 && v <= 1.0;
+        } catch (NumberFormatException _) {
+            return false;
+        }
     }
 
     public static void delete(String key) {

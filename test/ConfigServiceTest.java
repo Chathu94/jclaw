@@ -193,6 +193,50 @@ class ConfigServiceTest extends UnitTest {
         assertNull(ConfigService.setWithSideEffects(memory.MemoryReranker.KEY_PROVIDER, ""));
     }
 
+    // --- setWithSideEffects: recall knobs that poison ranking (JCLAW-970) ---
+
+    @Test
+    void setWithSideEffectsRejectsNegativeRrfK() {
+        // k = -1 makes RRF's first term 1.0/0 = Infinity; top-normalization then hands the
+        // best hit NaN and everything else 0.0, pinning one memory above every other.
+        var error = ConfigService.setWithSideEffects(memory.JpaMemoryStore.KEY_RRF_K, "-1");
+        assertNotNull(error, "a negative rrfK must be rejected");
+        assertNull(ConfigService.get(memory.JpaMemoryStore.KEY_RRF_K),
+                "the rejected value must not be persisted");
+    }
+
+    @Test
+    void setWithSideEffectsAcceptsAValidRrfK() {
+        assertNull(ConfigService.setWithSideEffects(memory.JpaMemoryStore.KEY_RRF_K, "5"));
+        assertEquals("5", ConfigService.get(memory.JpaMemoryStore.KEY_RRF_K));
+    }
+
+    @Test
+    void setWithSideEffectsRejectsNonFiniteMinCosine() {
+        // Double.parseDouble("NaN") SUCCEEDS, so getDouble's try/catch cannot reject it at
+        // read — and a NaN floor fails every comparison, silently dropping the vector leg.
+        var error = ConfigService.setWithSideEffects(
+                memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE, "NaN");
+        assertNotNull(error, "a NaN minCosine must be rejected");
+        assertNull(ConfigService.get(memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE),
+                "the rejected value must not be persisted");
+    }
+
+    @Test
+    void setWithSideEffectsRejectsAnOutOfRangeMinCosine() {
+        // It is a cosine, so anything outside [-1, 1] can never be met by a real hit —
+        // 1.5 would disable the vector leg just as silently as NaN.
+        assertNotNull(ConfigService.setWithSideEffects(
+                memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE, "1.5"));
+    }
+
+    @Test
+    void setWithSideEffectsAcceptsAValidMinCosine() {
+        assertNull(ConfigService.setWithSideEffects(
+                memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE, "0.6"));
+        assertEquals("0.6", ConfigService.get(memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE));
+    }
+
     // --- setWithSideEffects: the privilege-guard path ---
 
     @Test

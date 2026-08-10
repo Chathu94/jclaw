@@ -147,9 +147,15 @@ public class Memory extends Model {
      * persist out of range and skew core-memory ranking. The controller already
      * 400s an out-of-range API edit; this is the defense-in-depth backstop for
      * every other writer, applied on both insert and update.
+     *
+     * <p>JCLAW-970: NaN is reset to the {@code 0.5} field default rather than clamped. It
+     * arrives from lenient JSON parsing of extractor output, and leaving it would pin the row
+     * to the top of every recall while {@code findCore}'s {@code importance >= x} excludes it.
      */
     private void clampImportance() {
-        if (importance < 0.0) importance = 0.0;
+        // Must precede the range checks — NaN compares false against both bounds.
+        if (Double.isNaN(importance)) importance = 0.5;
+        else if (importance < 0.0) importance = 0.0;
         else if (importance > 1.0) importance = 1.0;
     }
 

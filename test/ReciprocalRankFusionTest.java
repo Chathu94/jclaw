@@ -37,6 +37,22 @@ class ReciprocalRankFusionTest extends UnitTest {
     }
 
     @Test
+    void negativeKCannotProduceNonFiniteScores() {
+        // JCLAW-970: rrfK is operator-writable through POST /api/config. At k = -1 the i = 0
+        // term was 1.0/0 = Infinity, and normalizing against it gave the top hit
+        // Infinity/Infinity = NaN and every other hit 0.0 — NaN then sorts largest in
+        // rankRecall, pinning one memory to the top of every recall for good.
+        var fused = ReciprocalRankFusion.fuse(-1, List.of(1L, 2L), List.of(2L, 3L));
+
+        assertEquals(3, fused.size());
+        for (var r : fused) {
+            assertTrue(Double.isFinite(r.score()),
+                    "score must stay finite for a negative k, got " + r.score() + " for id " + r.id());
+        }
+        assertEquals(2L, fused.getFirst().id(), "the id in both lists must still fuse to the top");
+    }
+
+    @Test
     void emptyInputYieldsEmptyOutput() {
         assertTrue(ReciprocalRankFusion.fuse(ReciprocalRankFusion.DEFAULT_K, List.of(), List.of()).isEmpty());
     }
