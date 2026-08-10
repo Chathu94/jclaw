@@ -410,6 +410,17 @@ class MemoryEvalGeneratorTest extends UnitTest {
     }
 
     @Test
+    void dropsAQuestionThatNamesItsOwnGoldEntity() {
+        // "Where does Zeph live?" reaches the gold by name, so it measures ordinary recall.
+        // Observed 1 in 11 against a real corpus — the writer is told not to and mostly obeys.
+        seedBridgePair();
+        var suite = MemoryEvalGenerator.generateBridge(agent, "b1", 10,
+                writerReturning("what has Zeph been up to?", new ArrayList<>()));
+
+        assertTrue(suite.cases().isEmpty(), "a question naming its gold is not a bridge: " + suite.cases());
+    }
+
+    @Test
     void anEmptyCorpusYieldsAnEmptyBridgeSuiteRatherThanThrowing() {
         var suite = MemoryEvalGenerator.generateBridge(agent, "b1", 10,
                 writerReturning("q?", new ArrayList<>()));

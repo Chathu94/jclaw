@@ -275,6 +275,11 @@ public final class MemoryEvalGenerator {
                     continue;
                 }
                 if (question.isBlank() || question.lines().count() > 1) continue;
+                // The writer is told not to name the subject and mostly obeys; when it does
+                // not, the query reaches the gold by name and the case is ordinary recall
+                // wearing a bridge label. Measured 1 in 11 on a real corpus — rare enough to
+                // miss by inspection, common enough to move a suite of this size.
+                if (namesItsOwnGold(question, target.text())) continue;
 
                 cases.add(new MemoryEvalCase("bridge-" + target.id(), question,
                         List.of(goldFor(target, rows))));
@@ -285,6 +290,18 @@ public final class MemoryEvalGenerator {
                 "Bridge suite: %d relation-phrased questions over %d memories of agent %s"
                         .formatted(cases.size(), rows.size(), agent.name),
                 corpusFingerprint(rows), cases);
+    }
+
+    /**
+     * Whether {@code question} names an entity the gold memory also names.
+     *
+     * <p>Uses the retrieval leg's own name rule, which is safe here in a way it would not
+     * be for pairing: this only ever <em>removes</em> cases, and the ones it removes are
+     * the ones the keyword leg could already answer. It cannot manufacture a case the hop
+     * happens to be good at.
+     */
+    static boolean namesItsOwnGold(String question, String goldText) {
+        return memory.JpaMemoryStore.entityNames(goldText).stream().anyMatch(question::contains);
     }
 
     /**
