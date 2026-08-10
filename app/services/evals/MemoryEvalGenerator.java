@@ -12,6 +12,7 @@ import services.Tx;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -238,58 +239,84 @@ public final class MemoryEvalGenerator {
         var rows = Tx.run(() -> Memory.<Memory>find(
                         ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
-        var docFreq = new java.util.HashMap<String, Integer>();
-        for (var r : rows) {
-            for (var t : MemorySimilarity.contentTokens(r.text())) docFreq.merge(t, 1, Integer::sum);
-        }
+        var docFreq = docFrequencies(rows);
 
         var cases = new ArrayList<MemoryEvalCase>();
         var usedTargets = new java.util.HashSet<Long>();
         for (var relation : rows) {
             if (cases.size() >= maxCases) break;
-            var relationTokens = MemorySimilarity.contentTokens(relation.text());
-            if (relationTokens.stream().noneMatch(RELATION_WORDS::contains)) continue;
-
-            for (var target : rows) {
-                if (cases.size() >= maxCases) break;
-                if (target.id().equals(relation.id()) || usedTargets.contains(target.id())) continue;
-                var targetTokens = MemorySimilarity.contentTokens(target.text());
-                // The target must NOT already carry the relation, or there is no gap to bridge
-                // and the case would measure ordinary recall under a bridge case's name.
-                if (targetTokens.stream().anyMatch(RELATION_WORDS::contains)) continue;
-                if (relationTokens.stream().noneMatch(t ->
-                        targetTokens.contains(t) && docFreq.getOrDefault(t, 0) <= RARE_TOKEN_MAX_DOCS)) {
-                    continue;
-                }
-
-                String question;
-                try {
-                    question = writer.write(List.of(
-                            ChatMessage.system(BRIDGE_INSTRUCTIONS),
-                            ChatMessage.user("RELATION: %s\nTARGET: %s"
-                                    .formatted(relation.text(), target.text())))).strip();
-                } catch (Exception e) {
-                    EventLogger.warn(EVENT_CATEGORY,
-                            "Bridge question generation failed for memory %d: %s"
-                                    .formatted(target.id(), e.getMessage()));
-                    continue;
-                }
-                if (question.isBlank() || question.lines().count() > 1) continue;
-                // The writer is told not to name the subject and mostly obeys; when it does
-                // not, the query reaches the gold by name and the case is ordinary recall
-                // wearing a bridge label. Measured 1 in 11 on a real corpus — rare enough to
-                // miss by inspection, common enough to move a suite of this size.
-                if (namesItsOwnGold(question, target.text())) continue;
-
-                cases.add(new MemoryEvalCase("bridge-" + target.id(), question,
-                        List.of(goldFor(target, rows))));
-                usedTargets.add(target.id());
-            }
+            cases.addAll(bridgeCasesFor(relation, rows, docFreq, writer,
+                    maxCases - cases.size(), usedTargets));
         }
         return new MemoryEvalSuite(suiteId,
                 "Bridge suite: %d relation-phrased questions over %d memories of agent %s"
                         .formatted(cases.size(), rows.size(), agent.name),
                 corpusFingerprint(rows), cases);
+    }
+
+    /** How many corpus rows each content token appears in — the rarity signal pairing uses. */
+    private static Map<String, Integer> docFrequencies(List<Row> rows) {
+        var docFreq = new java.util.HashMap<String, Integer>();
+        for (var r : rows) {
+            for (var t : MemorySimilarity.contentTokens(r.text())) docFreq.merge(t, 1, Integer::sum);
+        }
+        return docFreq;
+    }
+
+    /**
+     * At most {@code limit} bridge cases pairing {@code relation} with targets it can bridge
+     * to. Adds every target it uses to {@code usedTargets}, so no memory becomes the gold of
+     * two cases.
+     */
+    private static List<MemoryEvalCase> bridgeCasesFor(Row relation, List<Row> rows,
+            Map<String, Integer> docFreq, QuestionWriter writer, int limit, Set<Long> usedTargets) {
+        var relationTokens = MemorySimilarity.contentTokens(relation.text());
+        if (relationTokens.stream().noneMatch(RELATION_WORDS::contains)) return List.of();
+
+        var out = new ArrayList<MemoryEvalCase>();
+        for (var target : rows) {
+            if (out.size() >= limit) break;
+            if (target.id().equals(relation.id()) || usedTargets.contains(target.id())) continue;
+            var question = bridgeQuestion(relation, relationTokens, target, docFreq, writer);
+            if (question == null) continue;
+            out.add(new MemoryEvalCase("bridge-" + target.id(), question,
+                    List.of(goldFor(target, rows))));
+            usedTargets.add(target.id());
+        }
+        return out;
+    }
+
+    /** A bridge question over the pair, or null when the pair cannot carry one. */
+    private static String bridgeQuestion(Row relation, Set<String> relationTokens, Row target,
+            Map<String, Integer> docFreq, QuestionWriter writer) {
+        var targetTokens = MemorySimilarity.contentTokens(target.text());
+        // The target must NOT already carry the relation, or there is no gap to bridge
+        // and the case would measure ordinary recall under a bridge case's name.
+        if (targetTokens.stream().anyMatch(RELATION_WORDS::contains)) return null;
+        if (relationTokens.stream().noneMatch(t ->
+                targetTokens.contains(t) && docFreq.getOrDefault(t, 0) <= RARE_TOKEN_MAX_DOCS)) {
+            return null;
+        }
+
+        String question;
+        try {
+            question = writer.write(List.of(
+                    ChatMessage.system(BRIDGE_INSTRUCTIONS),
+                    ChatMessage.user("RELATION: %s\nTARGET: %s"
+                            .formatted(relation.text(), target.text())))).strip();
+        } catch (Exception e) {
+            EventLogger.warn(EVENT_CATEGORY,
+                    "Bridge question generation failed for memory %d: %s"
+                            .formatted(target.id(), e.getMessage()));
+            return null;
+        }
+        if (question.isBlank() || question.lines().count() > 1) return null;
+        // The writer is told not to name the subject and mostly obeys; when it does
+        // not, the query reaches the gold by name and the case is ordinary recall
+        // wearing a bridge label. Measured 1 in 11 on a real corpus — rare enough to
+        // miss by inspection, common enough to move a suite of this size.
+        if (namesItsOwnGold(question, target.text())) return null;
+        return question;
     }
 
     /**

@@ -72,6 +72,7 @@ public final class MemoryAutoCapture {
     private static final String KEY_TEXT = "text";
     private static final String KEY_CATEGORY = "category";
     private static final String KEY_IMPORTANCE = "importance";
+    private static final String KEY_QUESTIONS = "questions";
 
     // Field names in the consolidation judge's output (see CONSOLIDATION_INSTRUCTIONS).
     private static final String KEY_SUPERSESSIONS = "supersessions";
@@ -717,9 +718,9 @@ public final class MemoryAutoCapture {
      * simply embeds its statement alone.
      */
     private static String parseQuestions(com.google.gson.JsonObject o) {
-        if (!o.has("questions") || !o.get("questions").isJsonArray()) return null;
+        if (!o.has(KEY_QUESTIONS) || !o.get(KEY_QUESTIONS).isJsonArray()) return null;
         var joined = new StringBuilder();
-        for (var q : o.getAsJsonArray("questions")) {
+        for (var q : o.getAsJsonArray(KEY_QUESTIONS)) {
             if (q == null || !q.isJsonPrimitive()) continue;
             var s = q.getAsString().strip();
             if (s.isEmpty()) continue;

@@ -333,6 +333,64 @@ public class MemoryTool implements ToolRegistry.Tool {
                 .formatted(live, cap);
     }
 
+    /**
+     * The {@code questions} array as one newline-joined block, or null when absent
+     * (JCLAW-529). A model that omits it stores a keyless memory — the pre-529 behaviour,
+     * not an error — and {@code MemoryKeyBackfillService} can key it later.
+     */
+    static String parseQuestions(JsonObject args) {
+        if (!args.has(FIELD_QUESTIONS) || args.get(FIELD_QUESTIONS).isJsonNull()) return null;
+        var raw = args.get(FIELD_QUESTIONS);
+        var out = new ArrayList<String>();
+        if (raw.isJsonArray()) {
+            for (var q : raw.getAsJsonArray()) {
+                if (q != null && q.isJsonPrimitive()) addQuestion(out, q.getAsString());
+            }
+        } else if (raw.isJsonPrimitive()) {
+            // A model asked for an array of strings routinely sends one string that merely
+            // looks like an array, and a malformed one: UAT saw
+            // "[\"Who is your daughter's class teacher?\" \"What is Priya's teacher name?\"]"
+            // — no comma between the elements, so no JSON parser recovers it either. Refusing
+            // it stored a keyless memory and the feature silently did nothing, which is the
+            // failure mode JCLAW-927 already recorded for the extractor's category field.
+            // Possessive: the separator's two whitespace runs overlap across the optional
+            // comma, which is polynomial on model-supplied text (1.5 s on a 24k-space run).
+            for (var part : raw.getAsString().split("\"\\s*+,?+\\s*+\"|\\R")) {
+                addQuestion(out, trimArrayPunctuation(part));
+            }
+        }
+        return out.isEmpty() ? null : String.join("\n", out);
+    }
+
+    /**
+     * Strips the array punctuation a stringified JSON array leaves on its elements.
+     *
+     * <p>Hand-rolled rather than {@code replaceAll("^[\\[\"\\s]+|[\\]\"\\s]+$", "")}: an
+     * anchored trailing class is retried at every start offset, so it is quadratic on a long
+     * run — 9.5 s on 48k chars, and possessive quantifiers do not help because the cost is the
+     * repeated scan, not backtracking within one attempt.
+     */
+    private static String trimArrayPunctuation(String s) {
+        int start = 0;
+        int end = s.length();
+        while (start < end && trimmable(s.charAt(start), '[')) start++;
+        while (end > start && trimmable(s.charAt(end - 1), ']')) end--;
+        return s.substring(start, end);
+    }
+
+    /** {@code bracket}, a quote, or one of the six characters regex {@code \s} matches.
+     *  Tab through carriage return are contiguous. ASCII-only on purpose:
+     *  {@code Character.isWhitespace} is wider and would trim more than the regex did. */
+    private static boolean trimmable(char c, char bracket) {
+        return c == bracket || c == '"' || c == ' ' || (c >= '\t' && c <= '\r');
+    }
+
+    private static void addQuestion(List<String> out, String candidate) {
+        if (candidate == null || out.size() >= MAX_QUESTIONS) return;
+        var s = candidate.strip();
+        if (!s.isEmpty() && !out.contains(s)) out.add(s);
+    }
+
     // ─── forget ──────────────────────────────────────────────────────────────
 
     private String forget(JsonObject args, Agent agent, String agentId) {
@@ -368,6 +426,17 @@ public class MemoryTool implements ToolRegistry.Tool {
     // ─── shared matching ─────────────────────────────────────────────────────
 
     /**
+     * Keyless form, for the forget matcher. What the operator types to remove a memory is
+     * a description rather than a stored statement, so there is no key to embed with it —
+     * unlike the store path, where the same tool call supplies one. The asymmetry against
+     * keyed stored vectors is therefore inherent here rather than an oversight, and it
+     * costs recall on the semantic leg only; the lexical leg is unaffected.
+     */
+    private static List<Memory> sameFact(String agentId, String text) {
+        return sameFact(agentId, text, null);
+    }
+
+    /**
      * Memories that state the same thing as {@code text}: embedding neighbours above the
      * capture dedup threshold, plus lexical near-duplicates for the case where no vector
      * backend is configured or the wording matches but the vector does not.
@@ -379,67 +448,9 @@ public class MemoryTool implements ToolRegistry.Tool {
      * <p>The semantic leg embeds over HTTP and therefore runs outside any transaction;
      * only the lexical query and the hydration take one.
      */
-    /**
-     * The {@code questions} array as one newline-joined block, or null when absent
-     * (JCLAW-529). A model that omits it stores a keyless memory — the pre-529 behaviour,
-     * not an error — and {@code MemoryKeyBackfillService} can key it later.
-     */
-    static String parseQuestions(JsonObject args) {
-        if (!args.has(FIELD_QUESTIONS) || args.get(FIELD_QUESTIONS).isJsonNull()) return null;
-        var raw = args.get(FIELD_QUESTIONS);
-        var out = new ArrayList<String>();
-        if (raw.isJsonArray()) {
-            for (var q : raw.getAsJsonArray()) {
-                if (q != null && q.isJsonPrimitive()) addQuestion(out, q.getAsString());
-            }
-        } else if (raw.isJsonPrimitive()) {
-            // A model asked for an array of strings routinely sends one string that merely
-            // looks like an array, and a malformed one: UAT saw
-            // "[\"Who is your daughter's class teacher?\" \"What is Priya's teacher name?\"]"
-            // — no comma between the elements, so no JSON parser recovers it either. Refusing
-            // it stored a keyless memory and the feature silently did nothing, which is the
-            // failure mode JCLAW-927 already recorded for the extractor's category field.
-            for (var part : raw.getAsString().split("\"\\s*[,]?\\s*\"|\\R")) {
-                addQuestion(out, part.replaceAll("^[\\[\"\\s]+|[\\]\"\\s]+$", ""));
-            }
-        }
-        return out.isEmpty() ? null : String.join("\n", out);
-    }
-
-    private static void addQuestion(List<String> out, String candidate) {
-        if (candidate == null || out.size() >= MAX_QUESTIONS) return;
-        var s = candidate.strip();
-        if (!s.isEmpty() && !out.contains(s)) out.add(s);
-    }
-
-    /**
-     * Keyless form, for the forget matcher. What the operator types to remove a memory is
-     * a description rather than a stored statement, so there is no key to embed with it —
-     * unlike the store path, where the same tool call supplies one. The asymmetry against
-     * keyed stored vectors is therefore inherent here rather than an oversight, and it
-     * costs recall on the semantic leg only; the lexical leg is unaffected.
-     */
-    private static List<Memory> sameFact(String agentId, String text) {
-        return sameFact(agentId, text, null);
-    }
-
     private static List<Memory> sameFact(String agentId, String text, String retrievalKey) {
-        double cosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
         double jaccard = ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85);
-
-        List<Long> semanticIds;
-        try {
-            semanticIds = MemoryStoreFactory.get()
-                    .semanticNeighbours(agentId, text, retrievalKey, FORGET_LIMIT, cosine);
-        } catch (Exception e) {
-            // Fail open to the lexical tier, as capture does: no vector backend, no
-            // embedding provider, or a lookup error must not make memory unusable.
-            EventLogger.warn(EVENT_CATEGORY, "Semantic memory match failed, using lexical only: %s"
-                    .formatted(e.getMessage()));
-            semanticIds = List.of();
-        }
-
-        final var ids = semanticIds;
+        var ids = semanticNeighbours(agentId, text, retrievalKey);
         return Tx.run(() -> {
             var byId = new LinkedHashMap<Long, Memory>();
             for (var id : ids) {
@@ -457,6 +468,20 @@ public class MemoryTool implements ToolRegistry.Tool {
             }
             return List.copyOf(byId.values());
         });
+    }
+
+    /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
+     *  must not make memory unusable — fail open to the lexical tier, as capture does. */
+    private static List<Long> semanticNeighbours(String agentId, String text, String retrievalKey) {
+        double cosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
+        try {
+            return MemoryStoreFactory.get()
+                    .semanticNeighbours(agentId, text, retrievalKey, FORGET_LIMIT, cosine);
+        } catch (Exception e) {
+            EventLogger.warn(EVENT_CATEGORY, "Semantic memory match failed, using lexical only: %s"
+                    .formatted(e.getMessage()));
+            return List.of();
+        }
     }
 
     private static String snippet(String text) {
