@@ -347,16 +347,24 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      * system message itself and owns what the blocks contain.
      */
     private static void stripCacheBoundaryMarker(JsonObject request) {
-        var systemMsg = findFirstSystemMessage(request);
-        if (systemMsg == null) return;
-        var content = systemMsg.get(JSON_CONTENT);
-        if (content == null || !content.isJsonPrimitive()) return;
-        var text = content.getAsString();
-        var scrubbed = text
-                .replace(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER, "")
-                .replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, "");
-        if (scrubbed.equals(text)) return;
-        systemMsg.addProperty(JSON_CONTENT, scrubbed);
+        if (!request.has(JSON_MESSAGES) || !request.get(JSON_MESSAGES).isJsonArray()) return;
+        // JCLAW-976: every message, not only the first system one. The markers are provider
+        // protocol; a user turn or a replayed history row carrying one would otherwise ship
+        // the literal HTML comment — exactly what this scrub exists to prevent — and give the
+        // model a JClaw-looking sentinel to quote back.
+        for (var el : request.getAsJsonArray(JSON_MESSAGES)) {
+            if (!el.isJsonObject()) continue;
+            var msg = el.getAsJsonObject();
+            var content = msg.get(JSON_CONTENT);
+            if (content == null || !content.isJsonPrimitive()) continue;
+            var text = content.getAsString();
+            var scrubbed = text
+                    .replace(SystemPromptAssembler.CORE_MEMORY_BOUNDARY_MARKER, "")
+                    .replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, "");
+            if (!scrubbed.equals(text)) {
+                msg.addProperty(JSON_CONTENT, scrubbed);
+            }
+        }
     }
 
     /** The first {@code role=system} message in a serialized request, or null when there is none. */

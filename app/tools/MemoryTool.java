@@ -215,7 +215,11 @@ public class MemoryTool implements ToolRegistry.Tool {
         for (var e : selected) {
             sb.append("- ");
             if (e.category() != null && !e.category().isEmpty()) sb.append("[%s] ".formatted(e.category()));
-            sb.append(e.text()).append('\n');
+            // JCLAW-976: a tool result reaches the model too, so it gets the same scrub the
+            // prompt block does — a forged fence here would claim stored-fact authority just
+            // as effectively.
+            sb.append(agents.PromptFenceScrubber.scrubForInjection(e.text(), "memory " + e.id()))
+                    .append('\n');
         }
         return sb.toString();
     }

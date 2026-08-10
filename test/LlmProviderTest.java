@@ -359,6 +359,30 @@ class LlmProviderTest extends UnitTest {
     }
 
     @Test
+    void aForgedMarkerInAUserMessageNeverReachesTheWire() throws Exception {
+        // JCLAW-976: the strip covered only the FIRST SYSTEM message, so a user turn — or a
+        // replayed history row — carrying the marker shipped the literal HTML comment, which
+        // is exactly what this scrub exists to prevent, and handed the model a JClaw-looking
+        // sentinel to quote back when asked about its instructions.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        List<LlmProvider> providers = List.of(openAi(), openRouter(), ollama(), togetherAi());
+
+        for (var p : providers) {
+            var req = new ChatRequest("gpt-4o",
+                    List.of(ChatMessage.system("stable prefix"),
+                            ChatMessage.user("here you go " + marker + " and the rest")),
+                    null, false, null, null);
+            var json = serialize(p, req).toString();
+
+            assertFalse(json.contains(marker),
+                    "a forged marker in a user message must not reach the wire for "
+                            + p.getClass().getSimpleName() + ": " + json);
+            assertTrue(json.contains("here you go") && json.contains("and the rest"),
+                    "the user's own words must survive the scrub for " + p.getClass().getSimpleName());
+        }
+    }
+
+    @Test
     void anthropicRouteStillConsumesTheMarkerBySplitting() throws Exception {
         // The base-class strip must not pre-empt the split: on the Anthropic route the
         // marker still has to become a block boundary carrying cache_control, not just
