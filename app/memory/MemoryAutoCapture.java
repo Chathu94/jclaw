@@ -368,12 +368,24 @@ public final class MemoryAutoCapture {
 
         // JCLAW-919: the turn that asks to forget a fact states it, so without this the
         // capture running on that same turn re-learns what forget just deleted.
-        final List<Candidate> kept =
+        final List<Candidate> notReforgotten =
                 candidates.stream().filter(c -> !MemoryForgetLog.recentlyForgotten(agentKey, c.text())).toList();
-        int reforgotten = candidates.size() - kept.size();
+        int reforgotten = candidates.size() - notReforgotten.size();
         if (reforgotten > 0) {
             EventLogger.info(EVENT_CATEGORY, agentName, null,
                     "Dropped %d candidate memory(ies) the operator just asked to forget".formatted(reforgotten));
+        }
+
+        // JCLAW-1048: and the request itself is extractable — "the user wants X forgotten"
+        // stores as a durable, well-keyed memory the model then reads as standing policy,
+        // refusing the whole subject. The filter above cannot catch it: it tests for a
+        // restatement of the deleted fact, and this restates the request instead.
+        final List<Candidate> kept =
+                notReforgotten.stream().filter(c -> !MemorySafety.looksLikeForgetRequest(c.text())).toList();
+        int forgetNotes = notReforgotten.size() - kept.size();
+        if (forgetNotes > 0) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) recording a request to forget".formatted(forgetNotes));
         }
 
         if (kept.isEmpty()) {

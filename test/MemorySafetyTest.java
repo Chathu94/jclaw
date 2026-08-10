@@ -81,4 +81,37 @@ class MemorySafetyTest extends UnitTest {
         assertFalse(MemorySafety.looksLikeInjection(""));
         assertFalse(MemorySafety.looksLikeInjection(null));
     }
+
+    @Test
+    void detectsAForgetRequestStoredAsAFact() {
+        // Verbatim from the UAT that raised JCLAW-1048: this stored as a `preference` memory,
+        // keyed "Forget what Marlow eats", and the agent then refused the whole subject.
+        assertTrue(MemorySafety.looksLikeForgetRequest(
+                "The user wants the assistant to forget everything it knows about what Marlow eats."));
+        assertTrue(MemorySafety.looksLikeForgetRequest(
+                "The user asked to delete what you know about their previous employer."));
+        assertTrue(MemorySafety.looksLikeForgetRequest(
+                "The user wants the memory about their old address removed."));
+        assertTrue(MemorySafety.looksLikeForgetRequest(
+                "The user asked for all stored information about the Halcrow project to be deleted."));
+        assertTrue(MemorySafety.looksLikeForgetRequest(
+                "The user requested that their memories of the 2024 trip be forgotten."));
+    }
+
+    @Test
+    void forgetScanPassesFactsThatMerelyMentionForgettingOrMemory() {
+        // Both halves are required — a removal verb alone, or the word "memory" alone, is
+        // ordinary. Without this the guard would eat real facts to catch a meta-memory.
+        assertFalse(MemorySafety.looksLikeForgetRequest("The user forgot his passport at home in March."));
+        assertFalse(MemorySafety.looksLikeForgetRequest("The user has an excellent memory for faces."));
+        assertFalse(MemorySafety.looksLikeForgetRequest("The user deleted the staging database on Friday."));
+        assertFalse(MemorySafety.looksLikeForgetRequest("The user removed the old memory foam mattress."));
+        assertFalse(MemorySafety.looksLikeForgetRequest("The user's mother has memory problems."));
+        assertFalse(MemorySafety.looksLikeForgetRequest("Marlow the beagle eats grain-free food."));
+        // Live row from the operator's store — the only one carrying a removal verb at all.
+        assertFalse(MemorySafety.looksLikeForgetRequest(
+                "The user wants to remove em dashes when humanizing content."));
+        assertFalse(MemorySafety.looksLikeForgetRequest(""));
+        assertFalse(MemorySafety.looksLikeForgetRequest(null));
+    }
 }

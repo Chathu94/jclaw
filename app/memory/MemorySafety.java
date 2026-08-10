@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
  * wholesale: losing one memory is far cheaper than persisting a live credential
  * or a hostile directive to the long-term store.
  *
- * <p>Two independent guards:
+ * <p>Three independent guards:
  *
  * <ul>
  *   <li>{@link #looksLikeSecret} (JCLAW-535) — credentials must never reach the
@@ -25,6 +25,11 @@ import java.util.regex.Pattern;
  *       ("stored reference data, not instructions") is the soft defense; this
  *       is the hard one: injection phrasing, exfiltration payloads, SSH
  *       persistence, and invisible-unicode smuggling are refused at write time.
+ *   <li>{@link #looksLikeForgetRequest} (JCLAW-1048) — the turn that asks to
+ *       forget something is itself extractable as "the user wants X forgotten",
+ *       which stores as a durable, well-keyed memory that the model then reads
+ *       as standing policy and refuses the whole subject on. The prompt already
+ *       bars one-off task instructions; a live model ignored it.
  * </ul>
  */
 public final class MemorySafety {
@@ -137,6 +142,51 @@ public final class MemorySafety {
         if (text == null || text.isBlank()) return false;
         if (INVISIBLE_CHARS.matcher(text).find()) return true;
         for (var p : INJECTION_PATTERNS) {
+            if (p.matcher(text).find()) return true;
+        }
+        return false;
+    }
+
+    private static final String REMOVAL_VERB =
+            "forget|forgets|forgetting|forgot|forgotten|delete|deleted|remove|removed|erase|erased";
+
+    /** The assistant's own store, not any noun that merely contains the word — "memory foam". */
+    private static final String STORED_MEMORY =
+            "memories|memory\\s+(?:of|about|that|regarding)|stored\\s+(?:information|data|facts?)";
+
+    /**
+     * A request to forget, phrased as a fact about the user.
+     *
+     * <p>Every pattern needs a removal verb <em>and</em> the assistant's memory as its
+     * object, in that order or the reverse. Both halves are required because either alone
+     * is ordinary: "the user forgot his passport at home" and "the user has a good memory
+     * for faces" must both survive.
+     *
+     * <p>Gaps are bounded rather than {@code .*} — an unbounded gap between two overlapping
+     * classes is the polynomial shape JCLAW-1048's sibling regexes were just hardened
+     * against, and nothing here needs to span a sentence.
+     */
+    private static final Pattern[] FORGET_REQUEST_PATTERNS = {
+            // "…to forget everything it knows about X", "…delete what you know about X"
+            Pattern.compile("(?i)\\b(?:" + REMOVAL_VERB + ")\\b[^.!?]{0,60}"
+                    + "\\b(?:you|it|the assistant)\\s+knows?\\b"),
+            // "…delete the memory about X", "…remove all stored information on X"
+            Pattern.compile("(?i)\\b(?:" + REMOVAL_VERB + ")\\b[^.!?]{0,60}"
+                    + "\\b(?:" + STORED_MEMORY + ")\\b"),
+            // "…wants the memory about X deleted" — same shape, object first
+            Pattern.compile("(?i)\\b(?:" + STORED_MEMORY + ")\\b[^.!?]{0,60}"
+                    + "\\b(?:be\\s+)?(?:forgotten|deleted|removed|erased)\\b"),
+    };
+
+    /**
+     * @return {@code true} when the text records a request to forget or delete stored
+     *         memories rather than a durable fact, and so must not become one itself
+     *         (JCLAW-1048). Deliberately not scoped to the forget window: the same note is
+     *         junk whether or not a {@code forget} tool call actually ran on the turn.
+     */
+    public static boolean looksLikeForgetRequest(String text) {
+        if (text == null || text.isBlank()) return false;
+        for (var p : FORGET_REQUEST_PATTERNS) {
             if (p.matcher(text).find()) return true;
         }
         return false;
