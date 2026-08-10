@@ -227,11 +227,11 @@ public final class MemoryEvalGenerator {
      * <em>different</em> row, and pairing the two is the whole job.
      *
      * <p><b>Pairs on rare shared content tokens, deliberately not on capitalisation.</b>
-     * The second-hop retrieval leg seeds itself from
-     * {@code JpaMemoryStore.entityNames}, which is a capitalisation rule; generating gold
-     * with that same rule would select for pairs the hop can already bridge and report the
-     * hop's own heuristic back as a score. Rarity is independent of it, so a case survives
-     * or fails on retrieval rather than on agreeing with the fix.
+     * Retrieval-key generation gathers a memory's neighbours from
+     * {@code JpaMemoryStore.entityNames}, a capitalisation rule; generating gold with that
+     * same rule would select for pairs the keys already link and report the mechanism's own
+     * heuristic back as a score. Rarity is independent of it, so a case survives or fails on
+     * retrieval rather than on agreeing with the fix.
      */
     public static MemoryEvalSuite generateBridge(Agent agent, String suiteId, int maxCases,
                                                  QuestionWriter writer) {
@@ -295,10 +295,10 @@ public final class MemoryEvalGenerator {
     /**
      * Whether {@code question} names an entity the gold memory also names.
      *
-     * <p>Uses the retrieval leg's own name rule, which is safe here in a way it would not
-     * be for pairing: this only ever <em>removes</em> cases, and the ones it removes are
-     * the ones the keyword leg could already answer. It cannot manufacture a case the hop
-     * happens to be good at.
+     * <p>Uses the same entity-name rule that retrieval-key generation seeds on, which is
+     * safe here in a way it would not be for pairing: this only ever <em>removes</em> cases,
+     * and the ones it removes are the ones the keyword leg could already answer. It cannot
+     * manufacture a case that entity-name linking happens to be good at.
      */
     static boolean namesItsOwnGold(String question, String goldText) {
         return memory.JpaMemoryStore.entityNames(goldText).stream().anyMatch(question::contains);

@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * naming Kheshav — which is the vocabulary that already worked. Shown the sibling memory
  * that says Kheshav is the user's son, it can write "what do my kids go by?", and that is
  * the question the corpus could not previously answer. Neighbours are found by shared
- * entity name, the same rule the retrieval hop seeds on.
+ * entity name.
  *
  * <p>Rewrites no stored text. A key is additive and reversible; editing the operator's
  * own memories to a shape a model preferred is neither.
@@ -158,7 +158,7 @@ public final class MemoryKeyBackfillService {
         }
     }
 
-    /** Memories sharing an entity name with {@code row} — the same rule the retrieval hop seeds on. */
+    /** Memories sharing an entity name with {@code row}. */
     private static List<String> neighbours(Row row, List<Row> all) {
         var names = JpaMemoryStore.entityNames(row.text());
         var related = new ArrayList<String>();
