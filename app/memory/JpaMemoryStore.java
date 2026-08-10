@@ -588,8 +588,7 @@ public class JpaMemoryStore implements MemoryStore {
             var keywordIds = keywordLeg.stream().map(m -> m.id).toList();
             var preloaded = new HashMap<Long, Memory>();
             for (var m : keywordLeg) preloaded.put(m.id, m);
-            return fuseHydrateRerank(agentId, query, keywordIds, vectorLeg, preloaded, limit,
-                    (hopQuery, n) -> pgFtsRows(pk, hopQuery, n).stream().map(m -> m.id).toList());
+            return fuseHydrateRerank(agentId, query, keywordIds, vectorLeg, preloaded, limit);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
             return fullTextSearch(agentId, query, limit);
@@ -628,9 +627,7 @@ public class JpaMemoryStore implements MemoryStore {
         var knnIds = knn.stream().map(ScoredId::id).toList();
         var preloaded = new HashMap<Long, Memory>();
         for (var s : fts) preloaded.put(s.memory().id, s.memory());
-        return fuseHydrateRerank(agentId, query, ftsIds, knnIds, preloaded, limit,
-                (hopQuery, n) -> Memory.searchByTextScored(agentId, hopQuery, n).stream()
-                        .map(s -> s.memory().id).toList());
+        return fuseHydrateRerank(agentId, query, ftsIds, knnIds, preloaded, limit);
     }
 
     /**
@@ -706,16 +703,10 @@ public class JpaMemoryStore implements MemoryStore {
 
     private List<MemoryEntry> fuseHydrateRerank(String agentId, String query,
             List<Long> keywordIds, List<Long> vectorIds,
-            HashMap<Long, Memory> preloaded, int limit, KeywordSearch keywordSearch) {
-        int k = ConfigService.getInt(KEY_RRF_K, DEFAULT_RECALL_RRF_K);
-        var fused = ReciprocalRankFusion.fuse(k, keywordIds, vectorIds);
+            HashMap<Long, Memory> preloaded, int limit) {
+        var fused = ReciprocalRankFusion.fuse(
+                ConfigService.getInt(KEY_RRF_K, DEFAULT_RECALL_RRF_K), keywordIds, vectorIds);
         hydrateMissing(agentId, fused, preloaded);
-
-        var hopIds = secondHopIds(fused, preloaded, keywordSearch, limit);
-        if (!hopIds.isEmpty()) {
-            fused = ReciprocalRankFusion.fuse(k, keywordIds, vectorIds, hopIds);
-            hydrateMissing(agentId, fused, preloaded);
-        }
 
         // The hydrated shortlist in fused order (stale index ids drop out here).
         var shortlist = new ArrayList<Memory>(fused.size());
@@ -739,29 +730,19 @@ public class JpaMemoryStore implements MemoryStore {
         return out;
     }
 
-    /** The backend's keyword leg, as a reusable query seam for the second hop. */
-    @FunctionalInterface
-    interface KeywordSearch {
-        List<Long> search(String query, int limit);
-    }
-
-    public static final String KEY_SECOND_HOP = "memory.recall.secondHop.enabled";
-
-    /**
-     * JCLAW-529: names lifted from hop-1 hits to seed hop 2. Capped because the hop
-     * query is an OR over these tokens — past a handful it matches the whole corpus.
-     */
-    private static final int MAX_HOP_NAMES = 8;
-
-    /** Month abbreviations read as proper nouns by the capitalisation rule; "The user's
-     *  son X was born on Feb 7" would otherwise seed the hop with every dated memory. */
+    /** Month abbreviations read as proper nouns by the capitalisation rule, which would
+     *  otherwise make every dated memory look like it names an entity. */
     private static final Set<String> NON_ENTITY_CAPITALS = Set.of(
             "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
             "january", "february", "march", "april", "june", "july", "august", "september",
             "october", "november", "december", "monday", "tuesday", "wednesday", "thursday",
             "friday", "saturday", "sunday");
 
-    /** Entity names in {@code text}: capitalised, alphabetic, not boilerplate. */
+    /**
+     * Entity names in {@code text}: capitalised, alphabetic, not boilerplate. Used by
+     * {@link MemoryKeyBackfillService} to find a memory's neighbours when writing its
+     * retrieval key.
+     */
     public static List<String> entityNames(String text) {
         if (text == null) return List.of();
         var out = new ArrayList<String>();
@@ -772,41 +753,6 @@ public class JpaMemoryStore implements MemoryStore {
             if (!out.contains(tok)) out.add(tok);
         }
         return out;
-    }
-
-    /**
-     * JCLAW-529: the bridge leg. A question asks through a relation ("what do my kids
-     * go by?") while the memory holding the answer names only the entity ("Kheshav's
-     * nickname is Lyuvez"). Neither leg can cross that gap in one shot: the relation and
-     * the fact live in different rows, and no single embedding is near both phrasings.
-     *
-     * <p>So hop 1's hits supply the vocabulary hop 2 searches with — the row that does
-     * carry the relation ("the user has two sons named Aaditya and Kheshav") names the
-     * entities, and searching those names reaches the fact. Measured on a 89-memory
-     * corpus: three bridge cases that missed at any depth became reachable.
-     *
-     * <p>Keyword-only by construction. Embedding the hop query would add a provider
-     * round-trip to every recall, which the epic's latency NFR does not have room for —
-     * and a hop seeded with exact names is precisely the case lexical search serves best.
-     */
-    private List<Long> secondHopIds(List<ReciprocalRankFusion.Ranked> fused,
-            HashMap<Long, Memory> preloaded, KeywordSearch keywordSearch, int limit) {
-        if (!ConfigService.getBoolean(KEY_SECOND_HOP, true) || keywordSearch == null) return List.of();
-        var names = new ArrayList<String>();
-        for (var r : fused) {
-            var m = preloaded.get(r.id());
-            if (m == null) continue;
-            for (var name : entityNames(m.text)) {
-                if (!names.contains(name) && names.size() < MAX_HOP_NAMES) names.add(name);
-            }
-        }
-        if (names.isEmpty()) return List.of();
-        try {
-            return keywordSearch.search(String.join(" ", names), limit);
-        } catch (Exception e) {
-            EventLogger.warn(EVENT_CATEGORY_MEMORY, "Second-hop search failed: %s".formatted(e.getMessage()));
-            return List.of();
-        }
     }
 
     /** Load the fused ids the legs didn't already hydrate, re-bounded to the

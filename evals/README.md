@@ -501,13 +501,32 @@ Two things worth knowing before reading a bridge result:
   `memory.recall.rrfK` after a large change in corpus size. Both carry their measurement
   basis in their Javadoc.
 
-### The second hop
+### Why the bridge gap existed at all
 
-`memory.recall.secondHop.enabled` (default on) fuses a third leg: entity names are
-lifted from hop-1's hits and searched again, so the relation row's "Zephyrin" reaches
-the fact row. Keyword-only by construction — embedding the hop query would add a
-provider round-trip to every recall, and a hop seeded with exact names is the case
-lexical search serves best.
+The obvious reading of a missed bridge case is that the vector leg is weak. On this
+corpus it was not: the leg was returning its true nearest neighbours, and the gold
+memory was the **54th of 89** by cosine. No KNN capped at the recall limit returns a
+54th neighbour.
+
+The cause was that queries and documents were embedded the same way, against a model
+that is asymmetric — `snowflake-arctic-embed` wants an instruction prefix on queries and
+documents bare. Prefixing moved that gold from 54th to 16th, and to **2nd** once
+retrieval keys were indexed. Unprefixed, the whole corpus bunched into 0.65–0.69 against
+that query with an unrelated preference about em dashes on top: near-uniform similarity,
+almost no ranking signal.
+
+`memory.jpa.vector.queryPrefix` carries the string and is empty by default, because the
+right one is a property of the model. **Re-sweep `memory.recall.minCosine` whenever it
+changes** — the prefix moves the absolute scale as well as the order (this corpus tops
+out near 0.35 prefixed against 0.69 bare), so a floor written for the bare scale rejects
+every vector leg on every query and leaves recall keyword-only without failing.
+
+A third "second hop" leg once sat here, re-searching the entity names found in hop 1. It
+was built while the vector leg was mis-queried and was removed once that was fixed: with
+the prefix in place it cost more than it bought, pooling R@1 0.705 without it against
+0.639 with it across 61 cases, while R@10 and coverage stayed at 1.00 either way. It is
+worth re-testing on a much larger corpus, where a bridge has more room to matter — the
+measurement above is one 89-memory store.
 
 ### What a bridge suite is not measuring
 
