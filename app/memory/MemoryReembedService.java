@@ -147,6 +147,19 @@ public final class MemoryReembedService {
      * Whether the stored corpus was embedded with the model now configured. False after
      * a model switch, which is what the Settings panel turns into a prompt to re-embed.
      */
+    /**
+     * Forget which model the corpus was embedded with, so {@link #upToDate()} reports false and
+     * the Settings panel prompts for a re-embed.
+     *
+     * <p>JCLAW-961: called when the MEMORY index is rebuilt from the database. The backfill
+     * restores document text but cannot restore KNN vectors — embedding is an HTTP round-trip
+     * per row and must not run at boot — so without this the rebuilt index looks healthy,
+     * keyword recall works, and the vector leg is silently gone for good.
+     */
+    public static void invalidateBackfillMarker() {
+        ConfigService.delete(MARKER);
+    }
+
     public static boolean upToDate() {
         return MemoryVectorSettings.model().equals(ConfigService.get(MARKER, ""));
     }

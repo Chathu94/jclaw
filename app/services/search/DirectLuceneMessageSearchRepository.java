@@ -1,5 +1,6 @@
 package services.search;
 
+import memory.MemoryReembedService;
 import models.Memory;
 import models.Message;
 import models.SubagentRun;
@@ -63,28 +64,38 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * entry per {@link LuceneIndexer.Scope}; {@link #init()} drives them all
      * through {@link #backfill(Backfiller)}.
      */
-    private record Backfiller(LuceneIndexer.Scope scope, String jpql,
+    private record Backfiller(LuceneIndexer.Scope scope, String jpql, String countJpql,
                               Function<Object, Long> id,
                               Function<Object, String> content,
                               Function<Object, String> agent) {
         /** Most scopes carry no per-owner filter field. */
-        Backfiller(LuceneIndexer.Scope scope, String jpql,
+        Backfiller(LuceneIndexer.Scope scope, String jpql, String countJpql,
                    Function<Object, Long> id,
                    Function<Object, String> content) {
-            this(scope, jpql, id, content, null);
+            this(scope, jpql, countJpql, id, content, null);
         }
     }
 
     private static final List<Backfiller> BACKFILLERS = List.of(
             new Backfiller(LuceneIndexer.Scope.TASK_RUN_MESSAGE, "SELECT m FROM TaskRunMessage m",
+                    "SELECT COUNT(m) FROM TaskRunMessage m",
                     row -> ((TaskRunMessage) row).id, row -> ((TaskRunMessage) row).content),
             new Backfiller(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "SELECT m FROM Message m",
+                    "SELECT COUNT(m) FROM Message m",
                     row -> ((Message) row).id, row -> ((Message) row).content),
             new Backfiller(LuceneIndexer.Scope.TASK, "SELECT t FROM Task t",
+                    "SELECT COUNT(t) FROM Task t",
                     row -> ((Task) row).id, row -> taskContent((Task) row)),
             new Backfiller(LuceneIndexer.Scope.SUBAGENT_RUN, "SELECT r FROM SubagentRun r",
+                    "SELECT COUNT(r) FROM SubagentRun r",
                     row -> ((SubagentRun) row).id, row -> subagentRunContent((SubagentRun) row)),
-            new Backfiller(LuceneIndexer.Scope.MEMORY, "SELECT m FROM Memory m",
+            // JCLAW-966: superseded rows are deliberately absent from the index —
+            // Memory.onIndexUpsert removes their document — so re-adding them here would
+            // spend FTS/KNN top-k slots on facts a newer version has already replaced,
+            // crowding the live version out of the k window entirely.
+            new Backfiller(LuceneIndexer.Scope.MEMORY,
+                    "SELECT m FROM Memory m WHERE m.supersededAt IS NULL",
+                    "SELECT COUNT(m) FROM Memory m WHERE m.supersededAt IS NULL",
                     row -> ((Memory) row).id, row -> ((Memory) row).text,
                     row -> String.valueOf(((Memory) row).agent.id)));
 
@@ -98,10 +109,29 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // — slow on a huge transcript history, but JClaw at pre-v1 has
         // hundreds-to-low-thousands of rows.
         for (var b : BACKFILLERS) {
-            if (LuceneIndexer.docCount(b.scope()) == 0) {
-                backfill(b);
+            if (!needsBackfill(b)) continue;
+            backfill(b);
+            if (b.scope() == LuceneIndexer.Scope.MEMORY) {
+                MemoryReembedService.invalidateBackfillMarker();
             }
         }
+    }
+
+    /**
+     * Whether a scope's index has to be rebuilt from the database.
+     *
+     * <p>JCLAW-961: fewer documents than rows, not merely zero. A hard kill loses up to one
+     * commit interval of index writes, and the old {@code docCount() == 0} gate then
+     * guaranteed those rows were never rebuilt — present in the database and on the UI,
+     * permanently invisible to search. Re-running over already-indexed rows is harmless:
+     * {@code upsert} keys on the id term, so the pass is idempotent.
+     */
+    private static boolean needsBackfill(Backfiller b) {
+        return LuceneIndexer.docCount(b.scope()) < rowCount(b);
+    }
+
+    private static long rowCount(Backfiller b) {
+        return Tx.run(() -> (Long) JPA.em().createQuery(b.countJpql()).getSingleResult());
     }
 
     /**

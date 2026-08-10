@@ -564,4 +564,90 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         assertEquals(labelHits.getFirst(), outcomeHits.getFirst(),
                 "both label-token and outcome-token queries must hit the same run id");
     }
+
+    // ─── Backfill: what it rebuilds, and when it decides to (JCLAW-966 / JCLAW-961) ───
+
+    private Long seedMemory(Agent agent, String text) {
+        var m = new models.Memory();
+        m.agent = agent;
+        m.text = text;
+        m.category = "fact";
+        m.importance = 0.5;
+        m.save();
+        return m.id;
+    }
+
+    private Agent seedAgent(String name) {
+        var a = new Agent();
+        a.name = name;
+        a.modelProvider = "openrouter";
+        a.modelId = "gpt-4.1";
+        a.save();
+        return a;
+    }
+
+    @Test
+    void backfillSkipsSupersededMemories() throws Exception {
+        // JCLAW-966: Memory.onIndexUpsert deliberately REMOVES a superseded row's document,
+        // so re-adding it here would spend FTS/KNN top-k slots on a fact that a newer version
+        // has already replaced — able to push the live version out of the k window entirely.
+        repo.init();
+        var agent = seedAgent("backfill-superseded-" + System.nanoTime());
+        seedMemory(agent, "livefacttoken about the basement");
+        var stale = seedMemory(agent, "supersededfacttoken about the basement");
+
+        models.Memory.<models.Memory>findById(stale).supersede(999L);
+        play.db.jpa.JPA.em().flush();
+
+        // Rebuild from scratch, exactly as a wiped index would on the next boot.
+        LuceneIndexer.clear(LuceneIndexer.Scope.MEMORY);
+        repo.init();
+
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.MEMORY, "livefacttoken", 10).size(),
+                "the live memory must be restored by the backfill");
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.MEMORY, "supersededfacttoken", 10).isEmpty(),
+                "a superseded memory must not be re-indexed by the backfill");
+    }
+
+    @Test
+    void backfillRebuildsAPartiallyPopulatedIndex() throws Exception {
+        // JCLAW-961: the gate was docCount() == 0. A hard kill loses up to one commit
+        // interval of writes, and a non-zero docCount then guaranteed those rows were never
+        // rebuilt — in the database and on the UI, permanently invisible to search.
+        repo.init();
+        var agent = seedAgent("backfill-partial-" + System.nanoTime());
+        seedMemory(agent, "survivingdoctoken one");
+        var lost = seedMemory(agent, "lostdoctoken two");
+
+        // Simulate the loss: drop one document while its row stays in the database.
+        LuceneIndexer.remove(LuceneIndexer.Scope.MEMORY, lost);
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.MEMORY, "lostdoctoken", 10).isEmpty(),
+                "precondition: the document is gone while the row remains");
+
+        repo.init();
+
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.MEMORY, "lostdoctoken", 10).size(),
+                "a partially-populated index must be rebuilt, not left as-is");
+    }
+
+    @Test
+    void rebuildingTheMemoryIndexInvalidatesTheReembedMarker() throws Exception {
+        // JCLAW-961: the backfill restores text but cannot restore KNN vectors — embedding is
+        // an HTTP round-trip per row and must not run at boot. Without clearing the marker,
+        // upToDate() keeps reporting true and the operator is never prompted, so recall stays
+        // silently keyword-only for good.
+        repo.init();
+        var agent = seedAgent("backfill-marker-" + System.nanoTime());
+        seedMemory(agent, "markerfacttoken");
+
+        services.ConfigService.set("memory.jpa.vector.backfilledForModel",
+                memory.MemoryVectorSettings.model());
+        assertTrue(memory.MemoryReembedService.upToDate(), "precondition: marker says up to date");
+
+        LuceneIndexer.clear(LuceneIndexer.Scope.MEMORY);
+        repo.init();
+
+        assertFalse(memory.MemoryReembedService.upToDate(),
+                "a rebuilt MEMORY index must retire the marker so the operator is prompted");
+    }
 }
