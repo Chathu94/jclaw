@@ -31,7 +31,7 @@ public final class MemorySimilarity {
      * in the third person ("The user ...", per {@code EXTRACTION_INSTRUCTIONS}), so
      * these tokens are near-universal and inflate overlap between unrelated facts.
      */
-    private static final Set<String> BOILERPLATE = Set.of(
+    static final Set<String> BOILERPLATE = Set.of(
             "the", "user", "s", "a", "an", "and", "or", "to", "of", "for", "in", "is",
             "are", "that", "with", "it", "as", "on", "by", "be", "this", "their",
             "they", "them", "has", "have", "had", "was", "were", "at", "from", "not",

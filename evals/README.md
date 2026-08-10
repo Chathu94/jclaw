@@ -425,3 +425,74 @@ found by trying to use it:
 - **Git already did the versioning half.** History, diffs, and recovering a
   deleted suite were all available; the filename convention added duplication,
   highest-version resolution, and files that accumulate with no defined end.
+
+## Memory-recall suites
+
+A different question from everything above. The behaviour suites ask *what did the
+agent do*; these ask *did retrieval find the memory at all*, scored against a ranked
+list of memory ids with no model call in the loop. `MemoryEvalSuite` is a sibling of
+`EvalSuite` rather than a mode of it, because a recall case carries a query and gold
+ids where a behaviour case carries a turn and checks — see the class note.
+
+```bash
+POST /api/memories/evals/generate   # build a suite from an agent's own corpus
+POST /api/memories/evals/run        # score it against live recall
+```
+
+Scoring runs each case through `SystemPromptAssembler.recall`, the same pipeline the
+system prompt uses, so a number describes production rather than a reimplementation.
+`scope` picks the ranking: `selected` is what the model actually sees (truncated to
+the recall budget), `candidates` is the ranking before that cut. Comparing the two
+separates *retrieval* failure from *budget* truncation — if a case misses at both, a
+larger `memory.recall.limit` would not have saved it.
+
+**These suites are personal data and live only in `evals/local/`**, which is
+gitignored and additionally guarded by `MemoryEvalPaths`. A generated case is not a
+pointer to a secret, it *is* the secret: the query "what is my NAS IP" is the thing
+worth protecting, and the gold answers are the memories themselves. This repository
+is mirrored publicly.
+
+### Bridge cases
+
+`generate()` writes each question *from the gold memory's own text*. That is
+self-referential by construction, so it can only produce cases where the query and the
+answer share vocabulary — and it therefore cannot express the failure mode operators
+actually report, where a question asks through a **relation** and the memory holding
+the answer names only the **entity**:
+
+```
+relation row:  "The user has a son named Zephyrin."
+fact row:      "Zephyrin goes by Zeph."
+question:      "what is my kid's alias?"
+```
+
+No single embedding is near both "my kid's alias" and "Zephyrin goes by Zeph", and
+the two facts live in different rows, so neither retrieval leg crosses the gap in one
+shot. Hand-authored bridge cases go in a local suite alongside the generated ones.
+
+Two things worth knowing before reading a bridge result:
+
+- **A small corpus hides the defect.** Both legs are capped at the recall limit, so on
+  a corpus smaller than that cap the vector leg returns *everything* and the gold
+  arrives without any bridging. `MemorySecondHopTest` pads its fixture for exactly this
+  reason — its first version passed with the second hop disabled.
+- **Relative scores cannot say "nothing here is relevant."** `ReciprocalRankFusion.fuse`
+  divides every fused score by the top one, so the best hit is `1.0` however far away it
+  is. A memory scoring relevance 1.0 is the *least bad* candidate, not a good one.
+  `memory.recall.minCosine` is the absolute floor underneath that, and it is a property
+  of the embedding model — re-sweep it after changing models, and re-sweep
+  `memory.recall.rrfK` after a large change in corpus size. Both carry their measurement
+  basis in their Javadoc.
+
+### The second hop
+
+`memory.recall.secondHop.enabled` (default on) fuses a third leg: entity names are
+lifted from hop-1's hits and searched again, so the relation row's "Zephyrin" reaches
+the fact row. Keyword-only by construction — embedding the hop query would add a
+provider round-trip to every recall, and a hop seeded with exact names is the case
+lexical search serves best.
+
+A stale suite fails quietly rather than loudly, so check the fingerprint before
+trusting a number: gold ids that no longer exist score as clean misses, and a suite
+written before `goldGroups` replaced `goldMemoryIds` deserialises to *no* gold at all
+and reports 0% recall for a retrieval path that may be working fine.
