@@ -23,6 +23,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Memory auto-capture (JCLAW-39). After a conversation turn completes, an
@@ -118,6 +122,16 @@ public final class MemoryAutoCapture {
         static CaptureResult skipped(String reason) {
             return new CaptureResult(0, 0, reason);
         }
+    }
+
+    /** One lock per agent id (JCLAW-965). Bounded by the agent count, so never reaped. */
+    private static final ConcurrentMap<String, ReentrantLock> CAPTURE_LOCKS = new ConcurrentHashMap<>();
+
+    /** Long enough to outlast a normal capture, short enough that a stuck one cannot
+     *  block every later turn for this agent. Configurable so a test can drive the
+     *  contended path without stalling for the production default. */
+    private static long captureLockWaitSeconds() {
+        return ConfigService.getInt("memory.autocapture.lockWaitSeconds", 30);
     }
 
     // Shared breaker for the production async path. Plain default tuning (no DB
@@ -310,7 +324,22 @@ public final class MemoryAutoCapture {
             return CaptureResult.skipped("extraction_error");
         }
 
-        List<Candidate> deduped = dedupeWithinBatch(parseCandidates(raw));
+        // JCLAW-964: bound the extractor's output before anything expensive reads it.
+        // semanticDuplicateIndices embeds EVERY candidate over HTTP and plan runs one FTS
+        // search plus a hydration per candidate, both ahead of the maxPerTurn cut — so a
+        // degenerate extractor returning 200 one-sentence candidates (a known failure mode
+        // for cheap models on long turns) became 200 embedding round-trips and 200 searches
+        // for a turn that can store at most maxPerTurn of them. A ceiling, NOT maxPerTurn
+        // itself: that caps SURVIVORS after dedup, so applying it here would silently store
+        // fewer memories whenever a batch contained duplicates.
+        int maxCandidates = ConfigService.getInt("memory.autocapture.maxCandidates", 25);
+        List<Candidate> parsed = dedupeWithinBatch(parseCandidates(raw));
+        if (parsed.size() > maxCandidates) {
+            EventLogger.warn(EVENT_CATEGORY, agentName, null,
+                    "Extractor returned %d candidates; capping at %d".formatted(parsed.size(), maxCandidates));
+            parsed = parsed.subList(0, maxCandidates);
+        }
+        List<Candidate> deduped = parsed;
 
         // JCLAW-535: deterministic secret scrub — never persist credentials to
         // long-term memory, even if the extractor ignores the prompt's guidance.
@@ -355,18 +384,49 @@ public final class MemoryAutoCapture {
         // call" invariant the pipeline is built around. JCLAW-922 adds the
         // semantic pass ahead of plan for the same reason: it embeds each
         // candidate, and that round-trip must not run inside the plan Tx.
-        var semanticDupes = semanticDuplicateIndices(agentKey, agentName, kept);
-        var plan = Tx.run(() -> plan(agentKey, kept, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
-        var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
-        // Persist the survivor rows inside the apply Tx (capturing their ids), then
-        // generate + write their embeddings AFTER it commits — the embedding HTTP
-        // round-trip must never run inside the write tx (same "slow call OUTSIDE the
-        // Tx" ordering as extract/judge above; the vector leg otherwise pinned one
-        // pooled connection across up to maxPerTurn sequential embedding calls).
-        var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions));
-        embedStored(storedIds);
-        return logged(agentName, new CaptureResult(storedIds.size(),
-                kept.size() - storedIds.size(), null));
+        // JCLAW-965: everything below is check-then-act across three transactions with an LLM
+        // judge call in the middle, and captureAsync spawns an unsynchronized virtual thread
+        // per turn. Two turns for one agent — web chat and Telegram, say — could both find
+        // nothing matching and both store the same fact; Memory's @Table declares only
+        // non-unique indexes, so the DB cannot reject the second write either. The
+        // consolidation judge does not rescue it: identical rows are not "same subject,
+        // changed content". Serialize per agent across the whole window.
+        var lock = CAPTURE_LOCKS.computeIfAbsent(agentKey, _ -> new ReentrantLock());
+        boolean held;
+        try {
+            held = lock.tryLock(captureLockWaitSeconds(), TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return logged(agentName, CaptureResult.skipped("interrupted"));
+        }
+        if (!held) {
+            // Skip rather than queue: the wait is behind a judge call of unbounded duration,
+            // and the turn stays durable as Message rows for a future reprocessing pass.
+            return logged(agentName, CaptureResult.skipped("capture_in_flight"));
+        }
+        try {
+            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, kept);
+            var plan = Tx.run(() -> plan(agentKey, kept, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
+            var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
+            // Persist the survivor rows inside the apply Tx (capturing their ids), then
+            // generate + write their embeddings AFTER it commits — the embedding HTTP
+            // round-trip must never run inside the write tx (same "slow call OUTSIDE the
+            // Tx" ordering as extract/judge above; the vector leg otherwise pinned one
+            // pooled connection across up to maxPerTurn sequential embedding calls).
+            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions));
+            int embedded = embedStored(storedIds);
+            if (embedded < storedIds.size()) {
+                // Distinct from "Auto-capture failed", which reads as "nothing was captured".
+                // Every row here IS stored and keyword-searchable; some lack a vector.
+                EventLogger.warn(EVENT_CATEGORY, agentName, null,
+                        "Auto-capture stored %d memory(ies) but embedded only %d"
+                                .formatted(storedIds.size(), embedded));
+            }
+            return logged(agentName, new CaptureResult(storedIds.size(),
+                    kept.size() - storedIds.size(), null));
+        } finally {
+            lock.unlock();
+        }
     }
 
     /**
@@ -555,12 +615,25 @@ public final class MemoryAutoCapture {
      * and written by the store outside the write tx (a fresh short tx for the pgvector
      * UPDATE, or a no-DB Lucene upsert); a no-op when vector memory is disabled.
      */
-    private static void embedStored(List<String> storedIds) {
-        if (storedIds.isEmpty()) return;
+    private static int embedStored(List<String> storedIds) {
+        if (storedIds.isEmpty()) return 0;
         var store = MemoryStoreFactory.get();
+        int embedded = 0;
         for (var id : storedIds) {
-            store.embedStored(id);
+            try {
+                store.embedStored(id);
+                embedded++;
+            } catch (Exception e) {
+                // JCLAW-1015: JpaMemoryStore.embedStored swallows provider and Lucene failures
+                // internally, but not a throw from its own snapshot transaction — a pool timeout
+                // on one id abandoned every id after it. Those rows are already committed and
+                // FTS-searchable; what they lose is the vector leg, and nothing re-embeds them
+                // because MemoryReembedService reads a marker this path never touches.
+                EventLogger.warn(EVENT_CATEGORY, null, null,
+                        "Memory %s stored but not embedded: %s".formatted(id, e.getMessage()));
+            }
         }
+        return embedded;
     }
 
     private static String snippet(String text) {
