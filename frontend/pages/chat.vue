@@ -571,18 +571,18 @@ function exportConversation() {
 </script>
 
 <template>
-  <!--
-    Height subtracts the 3.5rem (56px) top nav bar (see layouts/default.vue
-    header.h-14) — NOT the parent main's p-6 padding, which is already
-    cancelled by the -m-6 on this element. Using 3rem here leaves main
-    with an 8px hidden scroll range: aggressive scroll in the messages
-    pane chains up to main and pushes the chat header off the top by
-    that amount, compressing its apparent top padding.
-  -->
   <div
     class="flex -m-6"
     style="height: calc(100vh - 3.5rem);"
   >
+    <!--
+      Height subtracts the 3.5rem (56px) top nav bar (see layouts/default.vue
+      header.h-14) — NOT the parent main's p-6 padding, which is already
+      cancelled by the -m-6 on this element. Using 3rem here leaves main
+      with an 8px hidden scroll range: aggressive scroll in the messages
+      pane chains up to main and pushes the chat header off the top by
+      that amount, compressing its apparent top padding.
+    -->
     <!--
       Chat area takes the full main-content width now that the in-page
       Conversations sidebar has been removed. Multi-select delete + bulk
