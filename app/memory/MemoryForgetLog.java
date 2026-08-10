@@ -2,10 +2,9 @@ package memory;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Ticker;
 
 import java.time.Duration;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Facts just forgotten on operator request, so auto-capture does not immediately
@@ -32,15 +31,36 @@ public final class MemoryForgetLog {
     /** Long enough to cover the requesting turn and a follow-up, short enough not to be a policy. */
     private static final Duration TTL = Duration.ofMinutes(10);
 
-    private static final Cache<String, List<String>> FORGOTTEN = Caffeine.newBuilder()
+    /**
+     * One forgotten fact. Keyed per text rather than per agent (JCLAW-971) so each note carries
+     * its own TTL: a per-agent list entry is written once and mutated in place, so Caffeine never
+     * saw a second write and the whole agent's window expired on the FIRST forget's clock.
+     *
+     * <p>{@code expireAfterWrite}, not {@code expireAfterAccess}: capture probes this on every
+     * turn, so refreshing on read would keep an entry alive for as long as the agent stays busy —
+     * turning the deliberately short window into the permanent tombstone this class rejects.
+     */
+    private record Forgotten(String agentId, String text) {}
+
+    /** Swappable clock so a test can drive the window's expiry instead of sleeping ten
+     *  minutes; mirrors the {@code setEmbedderForTest} / {@code setIndexPathForTest} seams. */
+    private static volatile Ticker ticker = Ticker.systemTicker();
+
+    private static final Cache<Forgotten, Boolean> FORGOTTEN = Caffeine.newBuilder()
             .expireAfterWrite(TTL)
+            .ticker(() -> ticker.read())
             .maximumSize(1000)
             .build();
+
+    /** Test-only: install (or clear with {@code null}) a controllable clock. */
+    public static void setTickerForTest(Ticker t) {
+        ticker = t == null ? Ticker.systemTicker() : t;
+    }
 
     /** Note that {@code text} was just forgotten for {@code agentId}. */
     public static void noteForgotten(String agentId, String text) {
         if (agentId == null || text == null || text.isBlank()) return;
-        FORGOTTEN.get(agentId, _ -> new CopyOnWriteArrayList<>()).add(text);
+        FORGOTTEN.put(new Forgotten(agentId, text), Boolean.TRUE);
     }
 
     /**
@@ -48,11 +68,12 @@ public final class MemoryForgetLog {
      * same duplicate test capture dedups on — a re-extraction is rarely word-for-word.
      */
     public static boolean recentlyForgotten(String agentId, String text) {
-        var entries = FORGOTTEN.getIfPresent(agentId);
-        if (entries == null || entries.isEmpty() || text == null) return false;
+        if (agentId == null || text == null) return false;
         var probe = MemorySimilarity.Tokens.of(text);
-        return entries.stream().anyMatch(f -> MemorySimilarity.isDuplicate(
-                probe, MemorySimilarity.Tokens.of(f), 0.85, 0.82, 0.5));
+        return FORGOTTEN.asMap().keySet().stream()
+                .filter(f -> f.agentId().equals(agentId))
+                .anyMatch(f -> MemorySimilarity.isDuplicate(
+                        probe, MemorySimilarity.Tokens.of(f.text()), 0.85, 0.82, 0.5));
     }
 
     /**
@@ -61,11 +82,11 @@ public final class MemoryForgetLog {
      * or the second instruction silently does nothing.
      */
     public static void clearMatching(String agentId, String text) {
-        var entries = FORGOTTEN.getIfPresent(agentId);
-        if (entries == null || text == null) return;
+        if (agentId == null || text == null) return;
         var probe = MemorySimilarity.Tokens.of(text);
-        entries.removeIf(f -> MemorySimilarity.isDuplicate(
-                probe, MemorySimilarity.Tokens.of(f), 0.85, 0.82, 0.5));
+        FORGOTTEN.asMap().keySet().removeIf(f -> f.agentId().equals(agentId)
+                && MemorySimilarity.isDuplicate(
+                        probe, MemorySimilarity.Tokens.of(f.text()), 0.85, 0.82, 0.5));
     }
 
     /** play1 runs tests concurrently in one JVM, so a test that records must reset. */
