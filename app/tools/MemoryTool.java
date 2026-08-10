@@ -385,14 +385,31 @@ public class MemoryTool implements ToolRegistry.Tool {
      * not an error — and {@code MemoryKeyBackfillService} can key it later.
      */
     static String parseQuestions(JsonObject args) {
-        if (!args.has(FIELD_QUESTIONS) || !args.get(FIELD_QUESTIONS).isJsonArray()) return null;
+        if (!args.has(FIELD_QUESTIONS) || args.get(FIELD_QUESTIONS).isJsonNull()) return null;
+        var raw = args.get(FIELD_QUESTIONS);
         var out = new ArrayList<String>();
-        for (var q : args.getAsJsonArray(FIELD_QUESTIONS)) {
-            if (q == null || !q.isJsonPrimitive() || out.size() >= MAX_QUESTIONS) continue;
-            var s = q.getAsString().strip();
-            if (!s.isEmpty()) out.add(s);
+        if (raw.isJsonArray()) {
+            for (var q : raw.getAsJsonArray()) {
+                if (q != null && q.isJsonPrimitive()) addQuestion(out, q.getAsString());
+            }
+        } else if (raw.isJsonPrimitive()) {
+            // A model asked for an array of strings routinely sends one string that merely
+            // looks like an array, and a malformed one: UAT saw
+            // "[\"Who is your daughter's class teacher?\" \"What is Priya's teacher name?\"]"
+            // — no comma between the elements, so no JSON parser recovers it either. Refusing
+            // it stored a keyless memory and the feature silently did nothing, which is the
+            // failure mode JCLAW-927 already recorded for the extractor's category field.
+            for (var part : raw.getAsString().split("\"\\s*[,]?\\s*\"|\\R")) {
+                addQuestion(out, part.replaceAll("^[\\[\"\\s]+|[\\]\"\\s]+$", ""));
+            }
         }
         return out.isEmpty() ? null : String.join("\n", out);
+    }
+
+    private static void addQuestion(List<String> out, String candidate) {
+        if (candidate == null || out.size() >= MAX_QUESTIONS) return;
+        var s = candidate.strip();
+        if (!s.isEmpty() && !out.contains(s)) out.add(s);
     }
 
     /**

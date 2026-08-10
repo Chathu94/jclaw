@@ -393,7 +393,11 @@ public class JpaMemoryStore implements MemoryStore {
     public void delete(String id) {
         var memory = Memory.findById(Long.parseLong(id));
         if (memory != null) {
-            ((Memory) memory).delete();
+            // deleteWithLineage, not delete(): this is the store-level choke point every
+            // caller reaches, including the memory tool's forget action. Routing only the
+            // admin controller through it (as JCLAW-529 first did) left forget able to
+            // strand supersession pointers, which is how the 265 accumulated.
+            ((Memory) memory).deleteWithLineage();
         }
     }
 

@@ -75,9 +75,29 @@ class MemoryToolTest extends UnitTest {
     }
 
     @Test
-    void malformedQuestionsAreIgnoredRatherThanStored() {
-        call("{\"action\":\"store\",\"text\":\"The build runs nightly\",\"questions\":\"oops\"}");
-        assertNull(onlyMemory().retrievalKey, "a non-array must not become a key");
+    void acceptsQuestionsSentAsAStringifiedArray() {
+        // Exactly what a live model produced during UAT: the array arrived as one string,
+        // and a malformed one — no comma between the elements, so no JSON parser recovers
+        // it. Refusing it stored a keyless memory and the feature silently did nothing.
+        call("{\"action\":\"store\",\"text\":\"The user's daughter Priya has a teacher\","
+                + "\"questions\":\"[\\\"Who is my daughter's teacher?\\\" \\\"What is Priya's teacher called?\\\"]\"}");
+
+        assertEquals("Who is my daughter's teacher?\nWhat is Priya's teacher called?",
+                onlyMemory().retrievalKey);
+    }
+
+    @Test
+    void acceptsQuestionsSentAsNewlineSeparatedText() {
+        call("{\"action\":\"store\",\"text\":\"The build runs nightly\","
+                + "\"questions\":\"when does the build run?\\nhow often is the build?\"}");
+
+        assertEquals("when does the build run?\nhow often is the build?", onlyMemory().retrievalKey);
+    }
+
+    @Test
+    void aQuestionsValueWithNoUsableContentLeavesNoKey() {
+        call("{\"action\":\"store\",\"text\":\"The cache warms on startup\",\"questions\":\"   \"}");
+        assertNull(onlyMemory().retrievalKey);
     }
 
     // --- dispatch ---
