@@ -156,7 +156,9 @@ public class MemoryTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION, "Optional 0.0-1.0 for store; defaults to the category's baseline"));
         props.put(FIELD_LIMIT, Map.of(
                 SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                SchemaKeys.DESCRIPTION, "Optional maximum results for recall"));
+                SchemaKeys.DESCRIPTION,
+                "Optional maximum results for recall (default 10, capped at 50). "
+                        + "Raising it widens the search, not just the slice you see."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
@@ -186,13 +188,21 @@ public class MemoryTool implements ToolRegistry.Tool {
     private String recall(JsonObject args, String agentId) {
         var query = JsonArgs.optString(args, FIELD_QUERY, "");
         if (query.isBlank()) return "Error: `query` is required for recall.";
-        int limit = Math.max(1, JsonArgs.optInt(args, FIELD_LIMIT, 10));
+        // JCLAW-969: bounded by a documented ceiling, not by memory.recall.limit. Applying the
+        // agent's number after the pipeline had already cut to the configured limit meant the
+        // parameter could only ever narrow — an agent asking for 30 silently got 10.
+        int maxLimit = ConfigService.getInt("memory.recall.toolMaxLimit", 50);
+        int limit = Math.clamp(JsonArgs.optInt(args, FIELD_LIMIT, 10), 1, maxLimit);
+
+        // JCLAW-960: embed BEFORE the Tx below, so the blocking round-trip never runs with a
+        // pooled connection checked out.
+        var queryEmbedding = MemoryStoreFactory.get().embedQuery(query);
 
         // Tool dispatch carries no ambient transaction — the streaming chat path is
         // @NoTransaction (JCLAW-199) and multi-call batches run on fresh virtual threads
         // that inherit no JPA context — so every DB touch here opens its own.
-        var selected = Tx.run(() -> SystemPromptAssembler.recall(agentId, query, Set.of()).selected())
-                .stream().limit(limit).toList();
+        var selected = Tx.run(() ->
+                SystemPromptAssembler.recall(agentId, query, Set.of(), queryEmbedding, limit).selected());
         if (selected.isEmpty()) return "No memories matched \"%s\".".formatted(query);
 
         // Mirrors prompt-assembly recall: an entry that reached the model has genuinely

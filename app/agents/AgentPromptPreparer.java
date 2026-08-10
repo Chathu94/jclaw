@@ -4,6 +4,7 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
+import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Conversation;
 import services.AttachmentService;
@@ -84,6 +85,9 @@ final class AgentPromptPreparer {
                                         List<AttachmentService.Input> attachments,
                                         boolean skipUserAppend, Long conversationId,
                                         AgentExecutionSink sink, LatencyTrace trace) {
+        // JCLAW-960: BEFORE the Tx. Everything below runs in one transaction by design, so
+        // recall's embedding round-trip would otherwise hold a pooled connection across it.
+        var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             // JCLAW-273: skipUserAppend=true comes from runYieldResume — the
@@ -96,7 +100,8 @@ final class AgentPromptPreparer {
             trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
             trace.agentId(AgentRunner.agentIdOf(agent));
 
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType,
+                    queryEmbedding);
             // JCLAW-38: re-inject the latest compaction summary (if any)
             // into the system prompt so the LLM keeps continuity with
             // turns that have since been dropped from the raw history.
@@ -198,11 +203,14 @@ final class AgentPromptPreparer {
      */
     static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
                                                    String channelType, String userMessage) {
+        // JCLAW-960: BEFORE the Tx — see the sibling call in buildPrologue.
+        var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
         return Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);
             var promptChannel = channelType != null ? channelType : convo.channelType;
-            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel);
+            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel,
+                    queryEmbedding);
             // JCLAW-38: re-inject latest compaction summary (if any)
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.

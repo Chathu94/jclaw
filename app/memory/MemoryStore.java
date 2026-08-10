@@ -83,6 +83,33 @@ public interface MemoryStore {
     List<MemoryEntry> search(String agentId, String query, int limit);
 
     /**
+     * JCLAW-960: the query embedding for a recall, computed with no DB connection held.
+     *
+     * <p><b>Must be called outside a transaction.</b> This is a blocking HTTP round-trip,
+     * and recall's cache barely helps — recall text is a user message, so it is usually
+     * novel. Pair it with {@link #search(String, String, int, float[])}, the read-path
+     * mirror of {@link #storeDeferred} + {@link #embedStored}: embed outside the
+     * transaction, then search and hydrate inside it.
+     *
+     * @return {@code null} when vector memory is disabled, no provider can embed, or the
+     *         backend has no vector leg — callers pass that straight through and get the
+     *         keyword-only degradation they would have got anyway.
+     */
+    default float[] embedQuery(String query) {
+        return null;
+    }
+
+    /**
+     * As {@link #search(String, String, int)}, but with the query embedding already
+     * computed by {@link #embedQuery} outside the caller's transaction. A {@code null}
+     * embedding means "none was precomputed" and leaves the implementation to fall back
+     * to whatever the three-arg form does.
+     */
+    default List<MemoryEntry> search(String agentId, String query, int limit, float[] queryEmbedding) {
+        return search(agentId, query, limit);
+    }
+
+    /**
      * JCLAW-922: ids of the agent's memories whose embedding is at least
      * {@code minCosine} similar to {@code text} — the semantic leg of capture-time
      * dedup, catching a restatement that shares no wording with what it restates.

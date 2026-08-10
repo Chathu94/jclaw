@@ -199,15 +199,34 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public List<MemoryEntry> search(String agentId, String query, int limit) {
+        return search(agentId, query, limit, null);
+    }
+
+    /**
+     * JCLAW-960: {@code queryEmbedding} is the vector {@link #embedQuery} produced outside
+     * the caller's transaction. When it is null the vector leg embeds here, which is the
+     * pre-960 behaviour and still correct for callers that own no transaction boundary to
+     * hoist the call out of (the operator introspection and eval endpoints).
+     */
+    @Override
+    public List<MemoryEntry> search(String agentId, String query, int limit, float[] queryEmbedding) {
         if (vectorEnabled) {
+            var embedding = queryEmbedding != null ? queryEmbedding : generateEmbedding(query);
             return isPostgres
-                    ? hybridSearch(agentId, query, limit)
-                    : luceneHybridSearch(agentId, query, limit);
+                    ? hybridSearch(agentId, query, limit, embedding)
+                    : luceneHybridSearch(agentId, query, limit, embedding);
         }
         if (isPostgres) {
             return fullTextSearch(agentId, query, limit);
         }
         return likeSearch(agentId, query, limit);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public float[] embedQuery(String query) {
+        if (!vectorEnabled || query == null || query.isBlank()) return null;
+        return generateEmbedding(query);
     }
 
     /**
@@ -485,11 +504,10 @@ public class JpaMemoryStore implements MemoryStore {
      * the story's shared-contract AC. Degrades hybrid → FTS → LIKE, same as
      * before.
      */
-    private List<MemoryEntry> hybridSearch(String agentId, String query, int limit) {
+    private List<MemoryEntry> hybridSearch(String agentId, String query, int limit, float[] embedding) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
         try {
-            var embedding = generateEmbedding(query);
             if (embedding == null) {
                 return fullTextSearch(agentId, query, limit);
             }
@@ -517,8 +535,7 @@ public class JpaMemoryStore implements MemoryStore {
      * Degrades to FTS-only when the query embedding is unavailable (no provider,
      * embeddings endpoint down) or the KNN leg fails.
      */
-    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit) {
-        var embedding = generateEmbedding(query);
+    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit, float[] embedding) {
         if (embedding == null) {
             return likeSearch(agentId, query, limit);
         }
@@ -713,7 +730,12 @@ public class JpaMemoryStore implements MemoryStore {
                 stmt.executeUpdate();
             }
         } catch (Exception e) {
-            EventLogger.warn(EVENT_CATEGORY_MEMORY, "Failed to generate embedding: %s".formatted(e.getMessage()));
+            // JCLAW-1005: generation already SUCCEEDED by the time we get here — this is the
+            // pgvector write failing. Blaming generation sent operators to the wrong subsystem,
+            // and a dimension mismatch surfaces here first.
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "Failed to PERSIST embedding for memory %d (generation succeeded): %s"
+                            .formatted(id, e.getMessage()));
         }
     }
 
