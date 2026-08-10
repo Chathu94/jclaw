@@ -403,6 +403,10 @@ public final class LuceneIndexer {
      * Drop the index entry for the row with the given id. Hibernate calls
      * this from each entity's {@code @PostRemove}; same no-throw contract
      * as {@link #upsert}.
+     *
+     * <p>Catches {@link RuntimeException} like {@link #upsert}: {@code deleteDocuments} throws
+     * {@code AlreadyClosedException} on a close race, and escaping a flush-time lifecycle
+     * callback rolls the caller's transaction back. A guard; JCLAW-962 is the cure.
      */
     public static void remove(Scope scope, long id) {
         var writer = writers.get(scope);
@@ -410,7 +414,7 @@ public final class LuceneIndexer {
         try {
             writer.deleteDocuments(new Term(ID_FIELD, String.valueOf(id)));
             // No per-write commit — same cadence-based durability as upsert.
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene remove failed: scope=%s id=%d: %s"
                             .formatted(scope.name(), id, e.getMessage()));
@@ -459,7 +463,7 @@ public final class LuceneIndexer {
         try {
             writer.deleteDocuments(new Term(AGENT_FIELD, agentKey));
             writer.commit();
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene removeByAgent failed: scope=%s agent=%s: %s"
                             .formatted(scope.name(), agentKey, e.getMessage()));
@@ -483,7 +487,7 @@ public final class LuceneIndexer {
         if (writer == null) return;
         try {
             writer.commit();
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene commit failed: scope=%s: %s"
                             .formatted(scope.name(), e.getMessage()));
@@ -506,7 +510,7 @@ public final class LuceneIndexer {
         try {
             writer.deleteAll();
             writer.commit();
-        } catch (IOException e) {
+        } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY, null, null,
                     "Lucene clear failed: scope=%s: %s".formatted(scope.name(), e.getMessage()));
         }
