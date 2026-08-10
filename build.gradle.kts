@@ -253,7 +253,7 @@ dependencies {
     // its classpath from the main dependency set + framework/lib; only transitive
     // dep is slf4j-api, already on the classpath. Never loaded at runtime (only the
     // test class references it), so its presence in the dist is inert.
-    implementation("com.tngtech.archunit:archunit:1.4.2")
+    implementation("com.tngtech.archunit:archunit:1.5.0")
 
     // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
     // native deps — which is the whole point of the printer tool: it works on a
