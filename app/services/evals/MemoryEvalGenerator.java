@@ -12,6 +12,7 @@ import services.Tx;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Builds a memory-recall eval suite from an agent's own corpus (JCLAW-529).
@@ -185,6 +186,103 @@ public final class MemoryEvalGenerator {
         }
         return new MemoryEvalSuite(suiteId,
                 "Coverage suite: %d clusters over %d memories of agent %s"
+                        .formatted(cases.size(), rows.size(), agent.name),
+                corpusFingerprint(rows), cases);
+    }
+
+    private static final String BRIDGE_INSTRUCTIONS = """
+            You write evaluation questions for a memory-retrieval system. You are given two \
+            stored facts about a user: a RELATION fact, which says how the user is connected \
+            to someone or something, and a TARGET fact, which states something about that \
+            same subject without repeating the connection.
+
+            Write the single question the user would ask that refers to the subject through \
+            the RELATION — the way they would actually say it, not by name — and whose answer \
+            is the TARGET fact. Do not name the subject. Do not quote either fact.
+
+            Output only the question, on one line, with no preamble and no quotation marks.""";
+
+    /**
+     * Words that state how the user is connected to a subject. A memory carrying one of
+     * these can bridge a question to a memory that names only the subject.
+     */
+    private static final Set<String> RELATION_WORDS = Set.of(
+            "son", "sons", "daughter", "daughters", "child", "children", "kid", "kids",
+            "wife", "husband", "spouse", "partner", "mother", "father", "parents",
+            "brother", "sister", "sibling", "siblings", "friend", "colleague", "manager",
+            "employer", "company", "team", "client", "landlord", "neighbour", "neighbor",
+            "doctor", "dog", "cat", "pet", "laptop", "phone", "car", "house", "apartment");
+
+    /** A token in this few memories is an entity rather than vocabulary. */
+    private static final int RARE_TOKEN_MAX_DOCS = 3;
+
+    /**
+     * Generate bridge cases: the query asks through a relation, the gold memory names only
+     * the entity (JCLAW-529).
+     *
+     * <p>This is the case class {@link #generate} structurally cannot reach. That mode
+     * writes each question from the gold memory's own text, so query and answer always
+     * share vocabulary — while the failure this measures is precisely a question whose
+     * words appear nowhere in the memory that answers it. The bridging relation lives in a
+     * <em>different</em> row, and pairing the two is the whole job.
+     *
+     * <p><b>Pairs on rare shared content tokens, deliberately not on capitalisation.</b>
+     * The second-hop retrieval leg seeds itself from
+     * {@code JpaMemoryStore.entityNames}, which is a capitalisation rule; generating gold
+     * with that same rule would select for pairs the hop can already bridge and report the
+     * hop's own heuristic back as a score. Rarity is independent of it, so a case survives
+     * or fails on retrieval rather than on agreeing with the fix.
+     */
+    public static MemoryEvalSuite generateBridge(Agent agent, String suiteId, int maxCases,
+                                                 QuestionWriter writer) {
+        var rows = Tx.run(() -> Memory.<Memory>find(
+                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
+                .stream().map(m -> new Row(m.id, m.text)).toList());
+        var docFreq = new java.util.HashMap<String, Integer>();
+        for (var r : rows) {
+            for (var t : MemorySimilarity.contentTokens(r.text())) docFreq.merge(t, 1, Integer::sum);
+        }
+
+        var cases = new ArrayList<MemoryEvalCase>();
+        var usedTargets = new java.util.HashSet<Long>();
+        for (var relation : rows) {
+            if (cases.size() >= maxCases) break;
+            var relationTokens = MemorySimilarity.contentTokens(relation.text());
+            if (relationTokens.stream().noneMatch(RELATION_WORDS::contains)) continue;
+
+            for (var target : rows) {
+                if (cases.size() >= maxCases) break;
+                if (target.id().equals(relation.id()) || usedTargets.contains(target.id())) continue;
+                var targetTokens = MemorySimilarity.contentTokens(target.text());
+                // The target must NOT already carry the relation, or there is no gap to bridge
+                // and the case would measure ordinary recall under a bridge case's name.
+                if (targetTokens.stream().anyMatch(RELATION_WORDS::contains)) continue;
+                if (relationTokens.stream().noneMatch(t ->
+                        targetTokens.contains(t) && docFreq.getOrDefault(t, 0) <= RARE_TOKEN_MAX_DOCS)) {
+                    continue;
+                }
+
+                String question;
+                try {
+                    question = writer.write(List.of(
+                            ChatMessage.system(BRIDGE_INSTRUCTIONS),
+                            ChatMessage.user("RELATION: %s\nTARGET: %s"
+                                    .formatted(relation.text(), target.text())))).strip();
+                } catch (Exception e) {
+                    EventLogger.warn(EVENT_CATEGORY,
+                            "Bridge question generation failed for memory %d: %s"
+                                    .formatted(target.id(), e.getMessage()));
+                    continue;
+                }
+                if (question.isBlank() || question.lines().count() > 1) continue;
+
+                cases.add(new MemoryEvalCase("bridge-" + target.id(), question,
+                        List.of(goldFor(target, rows))));
+                usedTargets.add(target.id());
+            }
+        }
+        return new MemoryEvalSuite(suiteId,
+                "Bridge suite: %d relation-phrased questions over %d memories of agent %s"
                         .formatted(cases.size(), rows.size(), agent.name),
                 corpusFingerprint(rows), cases);
     }

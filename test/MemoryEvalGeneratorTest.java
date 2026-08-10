@@ -351,6 +351,73 @@ class MemoryEvalGeneratorTest extends UnitTest {
                 "a broad question needs every fact it is meant to cover: " + prompt);
     }
 
+    // --- generateBridge: the query asks through a relation stored in another memory ---
+
+    /** The shape the mode exists for: relation in one row, answer in another. */
+    private void seedBridgePair() {
+        seed("The user has a son named Zephyrin");
+        seed("Zephyrin goes by Zeph");
+    }
+
+    @Test
+    void pairsARelationMemoryWithTheEntityFactItBridgesTo() {
+        seedBridgePair();
+        var suite = MemoryEvalGenerator.generateBridge(agent, "b1", 10,
+                writerReturning("what does my kid go by?", new ArrayList<>()));
+
+        assertEquals(1, suite.cases().size(), "one bridgeable pair means one case");
+        var c = suite.cases().getFirst();
+        assertEquals("what does my kid go by?", c.query());
+        // Gold is the TARGET — the row the question cannot reach — not the relation row,
+        // which is already reachable by the words the question uses.
+        var goldText = models.Memory.<models.Memory>findById(c.goldGroups().getFirst().getFirst()).text;
+        assertTrue(goldText.contains("Zeph"), "gold must be the target fact, got: " + goldText);
+    }
+
+    @Test
+    void passesBothFactsToTheWriterSoTheQuestionCanBridgeThem() {
+        seedBridgePair();
+        var seen = new ArrayList<String>();
+        MemoryEvalGenerator.generateBridge(agent, "b1", 10, writerReturning("q?", seen));
+
+        assertFalse(seen.isEmpty());
+        var prompt = seen.getFirst();
+        assertTrue(prompt.contains("son") && prompt.contains("Zeph"),
+                "the writer needs the relation and the target to phrase a bridge: " + prompt);
+    }
+
+    @Test
+    void skipsTargetsThatAlreadyCarryTheRelation() {
+        // Both rows name the relation, so an ordinary question reaches the answer directly.
+        // Scoring that as a bridge case would report ordinary recall under this mode's name.
+        seed("The user has a son named Zephyrin");
+        seed("The user's son Zephyrin goes by Zeph");
+        var suite = MemoryEvalGenerator.generateBridge(agent, "b1", 10,
+                writerReturning("q?", new ArrayList<>()));
+
+        assertTrue(suite.cases().isEmpty(), "nothing to bridge: " + suite.cases());
+    }
+
+    @Test
+    void requiresAnEntitySharedBetweenTheTwoMemories() {
+        // A relation memory and an unrelated fact are not a pair, however well each reads.
+        seed("The user has a son named Zephyrin");
+        seed("Postgres is the production database");
+        var suite = MemoryEvalGenerator.generateBridge(agent, "b1", 10,
+                writerReturning("q?", new ArrayList<>()));
+
+        assertTrue(suite.cases().isEmpty(), "no shared entity means no bridge: " + suite.cases());
+    }
+
+    @Test
+    void anEmptyCorpusYieldsAnEmptyBridgeSuiteRatherThanThrowing() {
+        var suite = MemoryEvalGenerator.generateBridge(agent, "b1", 10,
+                writerReturning("q?", new ArrayList<>()));
+
+        assertTrue(suite.cases().isEmpty());
+        assertTrue(suite.corpusFingerprint().startsWith("0:"), suite.corpusFingerprint());
+    }
+
     // --- writerFor ---
 
     @Test

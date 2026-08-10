@@ -324,9 +324,13 @@ public class ApiMemoryController extends Controller {
         // "coverage" builds broad questions needing several distinct facts — the only
         // mode that can measure how well a block covers a question, since a single-fact
         // question scores three paraphrases exactly as it scores three different facts.
-        var suite = "coverage".equals(mode)
-                ? MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clustering, writer)
-                : MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
+        // "bridge" asks through a relation stored in a different memory than the answer,
+        // which "single" cannot express: it writes each question from the gold text alone.
+        var suite = switch (mode) {
+            case "coverage" -> MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clustering, writer);
+            case "bridge" -> MemoryEvalGenerator.generateBridge(agent, suiteId, sampleSize, writer);
+            default -> MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
+        };
         try {
             MemoryEvalPaths.ensureLocalDir();
             var file = MemoryEvalPaths.suiteFile(suiteId);
