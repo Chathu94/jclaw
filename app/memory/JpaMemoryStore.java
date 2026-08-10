@@ -1,9 +1,12 @@
 package memory;
 
+import jakarta.transaction.Status;
+import jakarta.transaction.Synchronization;
 import llm.LlmProvider;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Memory;
+import org.hibernate.Session;
 import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
@@ -326,8 +329,37 @@ public class JpaMemoryStore implements MemoryStore {
         // MEMORY-scope FTS + HNSW vector docs would orphan. Evict them in one
         // race-free delete by the agent-field term (mirrors the JCLAW-673 evict
         // pattern the other scopes use for their bulk deletes).
-        LuceneIndexer.removeByAgent(LuceneIndexer.Scope.MEMORY, String.valueOf(pk));
+        //
+        // JCLAW-1014: deferred to after the caller's transaction commits. removeByAgent
+        // fsyncs, and AgentDeletionCascade calls this at the top of a cascade that still
+        // has to delete config rows, evict four other scopes and cascade the Agent row —
+        // so a throw anywhere after this point used to leave the rows alive in the DB with
+        // their documents permanently gone, unreachable because init() only backfills a
+        // scope whose docCount() is 0. Same afterCompletion shape as
+        // ConfigService.scheduleRollbackEviction.
+        evictAfterCommit(pk);
         return deleted;
+    }
+
+    /**
+     * Evict {@code pk}'s MEMORY documents once the caller's transaction commits, never on a
+     * rollback. Registered rather than called inline because this store does not own the
+     * transaction boundary and cannot know what the caller still has left to do.
+     */
+    private static void evictAfterCommit(Long pk) {
+        JPA.em().unwrap(Session.class).getTransaction().registerSynchronization(new Synchronization() {
+            @Override
+            public void beforeCompletion() {
+                // no-op: the evict/skip decision is made after completion
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status == Status.STATUS_COMMITTED) {
+                    LuceneIndexer.removeByAgent(LuceneIndexer.Scope.MEMORY, String.valueOf(pk));
+                }
+            }
+        });
     }
 
     // --- Search strategies ---
