@@ -91,15 +91,33 @@ class MemoryAutoCaptureTest extends UnitTest {
 
     @Test
     void captureStoresExtractedMemories() {
+        // Deliberately not an identity fact: this test is about the end-to-end store path,
+        // and an employer or kinship text would route through the JCLAW-529 core promotion
+        // and couple it to a rule it is not testing.
         MemoryAutoCapture.Extractor extractor = msgs ->
-                "{\"memories\":[{\"text\":\"The user works at Acme\",\"category\":\"fact\",\"importance\":0.6}]}";
-        var result = MemoryAutoCapture.capture(agentId("agent-cap"), "agent-cap", "I work at Acme Corp on widgets",
-                "Noted — Acme Corp.", extractor, freshBreaker());
+                "{\"memories\":[{\"text\":\"The staging cluster runs nightly builds\",\"category\":\"fact\",\"importance\":0.6}]}";
+        var result = MemoryAutoCapture.capture(agentId("agent-cap"), "agent-cap",
+                "Our staging cluster runs the builds every night", "Noted.", extractor, freshBreaker());
 
         assertEquals(1, result.captured());
         var stored = MemoryStoreFactory.get().list(agentId("agent-cap"));
         assertEquals(1, stored.size());
         assertEquals("fact", stored.getFirst().category());
+    }
+
+    @Test
+    void captureRoutesAnIdentityFactToTheAlwaysLoadedTier() {
+        // JCLAW-529: the whole point of the change. On a real corpus these facts scored
+        // below unrelated memories for the questions that ask about them, so they are kept
+        // out of the retrieval pool entirely.
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":[{\"text\":\"The user's son Arun goes by Bo\",\"category\":\"entity\",\"importance\":0.7}]}";
+        MemoryAutoCapture.capture(agentId("agent-core"), "agent-core", "my son Arun goes by Bo",
+                "Noted.", extractor, freshBreaker());
+
+        var stored = MemoryStoreFactory.get().list(agentId("agent-core"));
+        assertEquals(1, stored.size());
+        assertEquals(MemoryCategory.CORE.label, stored.getFirst().category());
     }
 
     @Test

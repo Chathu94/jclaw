@@ -61,6 +61,29 @@ public class Memory extends Model {
     public String category;
 
     /**
+     * JCLAW-529: questions this memory answers, indexed and embedded alongside
+     * {@link #text} — never rendered into a prompt, which still uses {@code text}.
+     *
+     * <p>Retrieval matches a question against a statement, and on this corpus the two
+     * are further apart than the statement is from unrelated memories: "the user's son
+     * Kheshav has the nickname Lyuvez" scored 0.588 against "what do I call my
+     * children?" while "the user's name is Tarun" scored 0.656. Indexing the questions
+     * turns that into question-to-question matching, which the same embedding model
+     * scores at 0.830.
+     *
+     * <p>Combined with the statement rather than replacing it, from a measured
+     * trade-off: keys alone win on relation-phrased questions but <em>lose to an
+     * unrelated memory</em> on a direct one ("what's Kheshav's nickname?" 0.715 against
+     * the distractor's 0.763). The concatenation beats the distractor on every query
+     * tried, which is the property that decides ranking.
+     *
+     * <p>Nullable with no DDL default so the column ALTER is safe on a populated table;
+     * a row without a key embeds exactly as before.
+     */
+    @Column(name = "retrieval_key", columnDefinition = "TEXT")
+    public String retrievalKey;
+
+    /**
      * Importance score in [0.0, 1.0] (JCLAW-40). Drives core-memory auto-load
      * ranking and the admin memory view, and is set by the auto-capture
      * extractor (JCLAW-39). NOT NULL with a DDL default so the column ALTER

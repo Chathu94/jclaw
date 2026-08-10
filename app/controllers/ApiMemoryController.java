@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import memory.CoreMemoryCapMigration;
 import memory.JpaMemoryStore;
 import memory.MemoryCategory;
+import memory.MemoryKeyBackfillService;
 import memory.MemoryReembedService;
 import memory.MemoryVectorSettings;
 import models.Agent;
@@ -392,6 +393,36 @@ public class ApiMemoryController extends Controller {
                     : result.candidates().stream().map(x -> Long.parseLong(x.entry().id())).toList());
         }
         renderJSON(gson.toJson(MemoryEvalScorer.score(suite, retrievals)));
+    }
+
+    /**
+     * POST /api/memories/backfill-keys — bring an existing corpus up to the JCLAW-529
+     * storage contract: promote identity facts to core, then generate a retrieval key for
+     * every un-keyed memory and re-embed it.
+     *
+     * <p>Returns immediately; poll the same path with GET. The keying pass is one model
+     * call per memory, so a corpus of any size outlives a request.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryKeyBackfillService.Status.class)))
+    @Operation(summary = "Backfill core promotion and retrieval keys over an existing corpus")
+    public static void backfillKeysStart() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
+        var agent = requireEvalAgent(body);
+        if (!MemoryKeyBackfillService.start(agent)) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, "A backfill is already running");
+        }
+        renderJSON(gson.toJson(MemoryKeyBackfillService.status()));
+    }
+
+    /** GET /api/memories/backfill-keys — progress of the run started above. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryKeyBackfillService.Status.class)))
+    @Operation(summary = "Status of the retrieval-key backfill")
+    public static void backfillKeysStatus() {
+        renderJSON(gson.toJson(MemoryKeyBackfillService.status()));
     }
 
     /** 400/404 unless the body names an agent that exists. */

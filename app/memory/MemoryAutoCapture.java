@@ -104,7 +104,11 @@ public final class MemoryAutoCapture {
         String judge(List<ChatMessage> messages) throws Exception;
     }
 
-    public record Candidate(String text, String category, double importance) {}
+    public record Candidate(String text, String category, double importance, String retrievalKey) {
+        public Candidate(String text, String category, double importance) {
+            this(text, category, importance, null);
+        }
+    }
 
     /** Snapshot of a stored memory the consolidation judge may pair against. */
     public record Existing(Long id, String text) {}
@@ -589,7 +593,8 @@ public final class MemoryAutoCapture {
         var storedIds = new ArrayList<String>(plan.survivors().size());
         for (int i = 0; i < plan.survivors().size(); i++) {
             var c = plan.survivors().get(i);
-            var newIdStr = store.storeDeferred(agentKey, c.text(), c.category(), c.importance());
+            var newIdStr = store.storeDeferred(agentKey, c.text(), c.category(), c.importance(),
+                    c.retrievalKey());
             storedIds.add(newIdStr);
             var olds = supersessions.get(i);
             if (olds == null || olds.isEmpty()) continue;
@@ -685,12 +690,43 @@ public final class MemoryAutoCapture {
                 double importance = (o.has(KEY_IMPORTANCE) && !o.get(KEY_IMPORTANCE).isJsonNull())
                         ? clamp01(safeDouble(o.get(KEY_IMPORTANCE)))
                         : MemoryCategory.defaultImportanceFor(category);
-                out.add(new Candidate(text, category, importance));
+                // JCLAW-529: identity facts go to the always-loaded tier instead of competing
+                // for vector-search slots. The importance lift is not cosmetic — findCore
+                // filters on memory.coreload.minImportance (0.8), and the extractor scores
+                // facts like "the user's son X was born on Y" at 0.7, so a promotion without
+                // it would admit the memory to a tier that then never renders it.
+                if (MemoryIdentityClass.isIdentity(text)) {
+                    category = MemoryCategory.CORE.label;
+                    importance = Math.max(importance, MemoryCategory.defaultImportanceFor(category));
+                }
+                out.add(new Candidate(text, category, importance, parseQuestions(o)));
             }
         } catch (Exception _) {
             return new ArrayList<>();
         }
         return out;
+    }
+
+    /** Cap on stored questions: the prompt asks for two or three, this bounds a model that ignores that. */
+    private static final int MAX_QUESTIONS = 5;
+
+    /**
+     * The {@code questions} array as one newline-joined block, or null when the model
+     * omitted it (JCLAW-529). Absent is the pre-529 behaviour, not an error — the row
+     * simply embeds its statement alone.
+     */
+    private static String parseQuestions(com.google.gson.JsonObject o) {
+        if (!o.has("questions") || !o.get("questions").isJsonArray()) return null;
+        var joined = new StringBuilder();
+        for (var q : o.getAsJsonArray("questions")) {
+            if (q == null || !q.isJsonPrimitive()) continue;
+            var s = q.getAsString().strip();
+            if (s.isEmpty()) continue;
+            if (!joined.isEmpty()) joined.append('\n');
+            joined.append(s);
+            if (joined.chars().filter(ch -> ch == '\n').count() + 1 >= MAX_QUESTIONS) break;
+        }
+        return joined.isEmpty() ? null : joined.toString();
     }
 
     /**
@@ -849,6 +885,14 @@ public final class MemoryAutoCapture {
 
             Write each memory as one concise, self-contained sentence in the third person ("The user ...", "The project ..."), resolving pronouns so it stands alone out of context. Preserve exact identifiers (names, paths, IDs, URLs) verbatim.
 
+            One fact per memory. If the turn states two things, emit two memories — "Kheshav's nickname is Lyuvez and Aaditya's nickname is Dudez" is two facts, not one. State the fact directly: write "The user's daughter Priya is allergic to peanuts", not "The user said that Priya is allergic to peanuts".
+
+            Splitting must not lose anything. A durable fact often arrives inside a passing remark: "my son Arun turns 12 next week" tells you the user has a son named Arun, which is worth keeping even though the birthday itself is transient. Extract the durable part rather than discarding the sentence.
+
+            When the user's turn says how they are related to a person or thing, keep that relationship in the sentence: "The user's son Arun goes by Bo", not "Arun goes by Bo". Only when the turn actually says it — never guess a relationship it did not state.
+
+            Also give each memory "questions": two or three short questions, phrased the way this user would later ask them, that this memory answers. Ask through the relationship where there is one ("what do my kids go by?") rather than by name, because that is how the question will arrive. These are used to find the memory later and are never shown to anyone.
+
             Classify each into exactly one category:
             - fact: a stable factual statement
             - preference: how the user likes things done
@@ -859,7 +903,7 @@ public final class MemoryAutoCapture {
             Assign each an importance from 0.0 to 1.0 (higher = more broadly and lastingly useful).
 
             Respond with exactly this shape, and an empty array when nothing qualifies:
-            {"memories":[{"text":"...","category":"fact","importance":0.6}]}
+            {"memories":[{"text":"...","category":"fact","importance":0.6,"questions":["...","..."]}]}
             """;
 
     // ─── Consolidation prompt (JCLAW-525, Mem0 UPDATE / Zep invalidation) ─────

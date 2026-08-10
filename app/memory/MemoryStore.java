@@ -71,6 +71,16 @@ public interface MemoryStore {
     }
 
     /**
+     * As {@link #storeDeferred}, carrying the questions this memory answers (JCLAW-529).
+     * Backends with no retrieval-key column ignore it and store the statement alone,
+     * which is the pre-529 behaviour rather than a degradation.
+     */
+    default String storeDeferred(String agentId, String text, String category, double importance,
+            String retrievalKey) {
+        return storeDeferred(agentId, text, category, importance);
+    }
+
+    /**
      * JCLAW-807-follow-up: generate and persist the embedding for a row previously
      * written by {@link #storeDeferred}, with the embedding HTTP call held outside
      * any DB transaction. No-op for backends without a vector leg, when vector

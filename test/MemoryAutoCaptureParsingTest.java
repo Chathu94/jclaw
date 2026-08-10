@@ -106,12 +106,79 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
         // explicit "remember that…". Dropping it from the extractor prompt is not enough —
         // the extractor already returns labels outside the set it is given (JCLAW-927), so
         // the parse has to be what refuses it.
+        //
+        // JCLAW-529 narrowed this to the model's *label* only: identity facts are promoted
+        // on their content by MemoryIdentityClass. This text is deliberately outside that
+        // class, so the original refusal is what is asserted here.
         var cands = MemoryAutoCapture.parseCandidates(
                 "[{\"text\":\"The user is a staff engineer\",\"category\":\"core\",\"importance\":0.95}]");
 
         assertEquals(1, cands.size(), "the memory is still captured — only its category changes");
         assertEquals(memory.MemoryCategory.FACT.label, cands.getFirst().category(),
                 "a capture labelled core must be demoted, never stored as core");
+    }
+
+    @Test
+    void parseCandidatesPromotesAnIdentityFactToCore() {
+        // The failure this exists for: an identity fact left in the retrieval pool scored
+        // below an unrelated memory on a real corpus. The always-loaded tier is where it belongs.
+        var cands = MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"The user's son Arun goes by Bo\",\"category\":\"entity\",\"importance\":0.7}]");
+
+        assertEquals(memory.MemoryCategory.CORE.label, cands.getFirst().category());
+    }
+
+    @Test
+    void promotionLiftsImportanceAboveTheCoreLoadThreshold() {
+        // findCore filters on memory.coreload.minImportance (0.8) and the extractor scores
+        // facts of this shape at 0.7, so promoting without the lift admits a memory to a
+        // tier that then never renders it — the defect would survive looking fixed.
+        var cands = MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"The user's wife is named Renu\",\"category\":\"entity\",\"importance\":0.7}]");
+
+        assertTrue(cands.getFirst().importance() >= 0.8,
+                "promoted but unrenderable is not promoted: " + cands.getFirst().importance());
+    }
+
+    @Test
+    void anOrdinaryFactIsNotPromoted() {
+        var cands = MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"The deploy pipeline requires manual approval\",\"category\":\"fact\",\"importance\":0.5}]");
+
+        assertEquals(memory.MemoryCategory.FACT.label, cands.getFirst().category());
+        assertEquals(0.5, cands.getFirst().importance(), 1e-9, "no lift for a non-identity fact");
+    }
+
+    @Test
+    void parseCandidatesKeepsTheQuestionsAsARetrievalKey() {
+        var cands = MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"Arun goes by Bo\",\"category\":\"entity\",\"importance\":0.6,"
+                + "\"questions\":[\"what do my kids go by?\",\"what is Arun's nickname?\"]}]");
+
+        assertEquals("what do my kids go by?\nwhat is Arun's nickname?",
+                cands.getFirst().retrievalKey());
+    }
+
+    @Test
+    void omittedOrMalformedQuestionsLeaveNoKeyRatherThanFailing() {
+        // Absent is the pre-JCLAW-529 behaviour: the row embeds its statement alone.
+        assertNull(MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"t\",\"category\":\"fact\",\"importance\":0.5}]").getFirst().retrievalKey());
+        assertNull(MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"t\",\"category\":\"fact\",\"importance\":0.5,\"questions\":\"oops\"}]")
+                .getFirst().retrievalKey());
+        assertNull(MemoryAutoCapture.parseCandidates(
+                "[{\"text\":\"t\",\"category\":\"fact\",\"importance\":0.5,\"questions\":[\"  \"]}]")
+                .getFirst().retrievalKey());
+    }
+
+    @Test
+    void searchTextCombinesTheStatementWithItsKeyAndPassesThroughWithout() {
+        // Measured trade-off: keys alone beat the statement on relation-phrased questions
+        // but lose to an unrelated memory on a direct one. The concatenation wins on both.
+        assertEquals("stmt\nq1\nq2", memory.JpaMemoryStore.searchText("stmt", "q1\nq2"));
+        assertEquals("stmt", memory.JpaMemoryStore.searchText("stmt", null));
+        assertEquals("stmt", memory.JpaMemoryStore.searchText("stmt", "   "));
     }
 
     @Test

@@ -170,17 +170,43 @@ public class JpaMemoryStore implements MemoryStore {
      */
     @Override
     public String storeDeferred(String agentId, String text, String category, double importance) {
-        return persistRow(agentId, text, category, importance).id.toString();
+        return storeDeferred(agentId, text, category, importance, null);
+    }
+
+    @Override
+    public String storeDeferred(String agentId, String text, String category, double importance,
+            String retrievalKey) {
+        return persistRow(agentId, text, category, importance, retrievalKey).id.toString();
     }
 
     private Memory persistRow(String agentId, String text, String category, double importance) {
+        return persistRow(agentId, text, category, importance, null);
+    }
+
+    private Memory persistRow(String agentId, String text, String category, double importance,
+            String retrievalKey) {
         var memory = new Memory();
         memory.agent = resolveAgent(agentId);   // JCLAW-537: real FK — the agent must exist
         memory.text = text;
         memory.category = category;
         memory.importance = importance;
+        memory.retrievalKey = retrievalKey;
         memory.save();
         return memory;
+    }
+
+    /**
+     * What the search index and the embedding see: the statement plus the questions it
+     * answers (JCLAW-529). Both legs get it — the vector leg so a relation-phrased
+     * question matches question text rather than a statement, and the keyword leg
+     * because the questions carry relation vocabulary ("children", "kids") that the
+     * statement does not, giving BM25 a term to match that it previously had no route to.
+     *
+     * <p>Never what a prompt renders: {@code Memory.text} is still the payload, so a
+     * key cannot leak generated questions into the model's context.
+     */
+    public static String searchText(String text, String retrievalKey) {
+        return (retrievalKey == null || retrievalKey.isBlank()) ? text : text + "\n" + retrievalKey;
     }
 
     /**
@@ -785,14 +811,15 @@ public class JpaMemoryStore implements MemoryStore {
      * would, but nothing mutates {@code Memory.text} after insert.
      */
     private void generateAndIndexEmbedding(Memory memory) {
-        var embedding = generateEmbedding(memory.text);
+        var indexed = searchText(memory.text, memory.retrievalKey);
+        var embedding = generateEmbedding(indexed);
         if (embedding == null) return;
-        LuceneIndexer.upsert(LuceneIndexer.Scope.MEMORY, memory.id, memory.text,
+        LuceneIndexer.upsert(LuceneIndexer.Scope.MEMORY, memory.id, indexed,
                 String.valueOf(memory.agent.id), embedding);
     }
 
     private void generateAndStoreEmbedding(Memory memory) {
-        var embedding = generateEmbedding(memory.text);
+        var embedding = generateEmbedding(searchText(memory.text, memory.retrievalKey));
         if (embedding != null) {
             storeEmbeddingSql(memory.id, embedding);
         }
@@ -835,7 +862,8 @@ public class JpaMemoryStore implements MemoryStore {
         long pk = Long.parseLong(id);
         var target = Tx.run(() -> {
             Memory m = Memory.findById(pk);
-            return m == null ? null : new EmbedTarget(m.id, m.text, String.valueOf(m.agent.id));
+            return m == null ? null
+                    : new EmbedTarget(m.id, searchText(m.text, m.retrievalKey), String.valueOf(m.agent.id));
         });
         if (target == null) return;
         var embedding = generateEmbedding(target.text());   // blocking HTTP — no tx held
