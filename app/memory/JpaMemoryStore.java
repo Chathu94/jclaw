@@ -238,7 +238,7 @@ public class JpaMemoryStore implements MemoryStore {
     @Override
     public List<MemoryEntry> search(String agentId, String query, int limit, float[] queryEmbedding) {
         if (vectorEnabled) {
-            var embedding = queryEmbedding != null ? queryEmbedding : generateEmbedding(query);
+            var embedding = queryEmbedding != null ? queryEmbedding : generateQueryEmbedding(query);
             return isPostgres
                     ? hybridSearch(agentId, query, limit, embedding)
                     : luceneHybridSearch(agentId, query, limit, embedding);
@@ -253,7 +253,49 @@ public class JpaMemoryStore implements MemoryStore {
     @Override
     public float[] embedQuery(String query) {
         if (!vectorEnabled || query == null || query.isBlank()) return null;
-        return generateEmbedding(query);
+        return generateQueryEmbedding(query);
+    }
+
+    public static final String KEY_QUERY_PREFIX = "memory.jpa.vector.queryPrefix";
+
+    /**
+     * JCLAW-529: instruction prefix for <em>query</em> embeddings only.
+     *
+     * <p>Asymmetric retrieval models are trained with queries and documents in different
+     * input formats and degrade badly when both are embedded the same way. Measured on this
+     * corpus with {@code snowflake-arctic-embed} (which wants
+     * {@code "Represent this sentence for searching relevant passages: "} on queries and
+     * documents bare): the memory answering "what do I call my children?" ranked <b>54th of
+     * 89</b> by cosine unprefixed and <b>16th</b> prefixed; with retrieval keys indexed,
+     * 13th against <b>2nd</b>. Unprefixed the whole corpus bunched into 0.65–0.69 — a
+     * near-uniform similarity that carries almost no ranking signal.
+     *
+     * <p>Empty by default because the correct string is a property of the model, and a wrong
+     * prefix is worse than none. Documents are never prefixed, so setting this needs no
+     * re-embedding — only the query path changes.
+     *
+     * <p><b>Re-sweep {@link #KEY_RECALL_MIN_COSINE} whenever this changes.</b> The prefix
+     * moves the absolute scale, not only the order: the same corpus tops out near 0.35
+     * prefixed against 0.69 bare, so the 0.60 floor written for the bare scale would reject
+     * every vector leg on every query and silently leave recall keyword-only.
+     */
+    private String queryPrefix() {
+        return ConfigService.get(KEY_QUERY_PREFIX, "");
+    }
+
+    /**
+     * Embed a search query. Distinct from {@link #generateEmbedding}, which stays bare and
+     * is what documents and the symmetric dedup comparison in {@link #semanticNeighbours}
+     * must keep using — prefixing a document would compare a query format against itself.
+     */
+    private float[] generateQueryEmbedding(String query) {
+        return generateEmbedding(prefixQuery(queryPrefix(), query));
+    }
+
+    /** Pure half of {@link #generateQueryEmbedding}, so the rule is testable without
+     *  flipping a process-global config key across concurrent test lanes. */
+    public static String prefixQuery(String prefix, String query) {
+        return (prefix == null || prefix.isEmpty()) ? query : prefix + query;
     }
 
     /**

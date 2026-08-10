@@ -170,6 +170,20 @@ class MemorySecondHopTest extends UnitTest {
         assertEquals(List.of("Renu"), JpaMemoryStore.entityNames("Renu and Renu, aka R, met renu."));
     }
 
+    // --- asymmetric query embedding ---
+
+    @Test
+    void prefixesOnlyWhenAModelNeedsIt() {
+        // Measured on a live corpus with snowflake-arctic-embed: the memory answering
+        // "what do I call my children?" ranked 54th of 89 unprefixed and 16th prefixed —
+        // the index was returning its true nearest neighbours the whole time, and the gold
+        // simply was not among them.
+        assertEquals("Q: hello", JpaMemoryStore.prefixQuery("Q: ", "hello"));
+        assertEquals("hello", JpaMemoryStore.prefixQuery("", "hello"),
+                "empty is the default: a wrong prefix is worse than none");
+        assertEquals("hello", JpaMemoryStore.prefixQuery(null, "hello"));
+    }
+
     @Test
     void toleratesNullAndEmptyText() {
         assertEquals(List.of(), JpaMemoryStore.entityNames(null));
