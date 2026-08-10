@@ -48,6 +48,38 @@ class MemoryToolTest extends UnitTest {
                 MemoryCategory.FACT.label, 0.6);
     }
 
+    // --- JCLAW-529: universal retrieval keys ---
+
+    private static models.Memory onlyMemory() {
+        var all = models.Memory.<models.Memory>find("order by id desc").<models.Memory>fetch();
+        return all.isEmpty() ? null : all.getFirst();
+    }
+
+    @Test
+    void storeKeepsTheQuestionsTheAgentSuppliedAsARetrievalKey() {
+        // The agent is already emitting this tool call, so the questions ride along at no
+        // extra round-trip — the same bargain auto-capture gets from its extractor call.
+        call("{\"action\":\"store\",\"text\":\"The user's son Arun goes by Bo\","
+                + "\"questions\":[\"what do my kids go by?\",\"what is Arun's nickname?\"]}");
+
+        assertEquals("what do my kids go by?\nwhat is Arun's nickname?", onlyMemory().retrievalKey);
+    }
+
+    @Test
+    void storeWithoutQuestionsLeavesNoKeyRatherThanFailing() {
+        // Pre-529 behaviour: the row is still stored and embeds its statement alone.
+        // MemoryKeyBackfillService can key it later.
+        call("{\"action\":\"store\",\"text\":\"The staging cluster runs nightly builds\"}");
+
+        assertNull(onlyMemory().retrievalKey);
+    }
+
+    @Test
+    void malformedQuestionsAreIgnoredRatherThanStored() {
+        call("{\"action\":\"store\",\"text\":\"The build runs nightly\",\"questions\":\"oops\"}");
+        assertNull(onlyMemory().retrievalKey, "a non-array must not become a key");
+    }
+
     // --- dispatch ---
 
     @Test

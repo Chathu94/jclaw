@@ -64,6 +64,10 @@ public class MemoryTool implements ToolRegistry.Tool {
     private static final String FIELD_TEXT = "text";
     private static final String FIELD_CATEGORY = "category";
     private static final String FIELD_IMPORTANCE = "importance";
+    private static final String FIELD_QUESTIONS = "questions";
+
+    /** Matches the auto-capture cap, so both write paths bound a key the same way. */
+    private static final int MAX_QUESTIONS = 5;
     private static final String FIELD_LIMIT = "limit";
 
     /** Caps a forget so a broad query cannot clear the store in one call. */
@@ -154,6 +158,15 @@ public class MemoryTool implements ToolRegistry.Tool {
         props.put(FIELD_IMPORTANCE, Map.of(
                 SchemaKeys.TYPE, SchemaKeys.NUMBER,
                 SchemaKeys.DESCRIPTION, "Optional 0.0-1.0 for store; defaults to the category's baseline"));
+        props.put(FIELD_QUESTIONS, Map.of(
+                SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                SchemaKeys.ITEMS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                SchemaKeys.DESCRIPTION,
+                "For store: two or three short questions, phrased the way the operator would "
+                        + "later ask them, that this fact answers. Ask through a relationship "
+                        + "where there is one (\"what do my kids go by?\") rather than by name, "
+                        + "because the name already matches the fact's own words. Used to find "
+                        + "the memory later and never shown to anyone."));
         props.put(FIELD_LIMIT, Map.of(
                 SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
@@ -243,7 +256,13 @@ public class MemoryTool implements ToolRegistry.Tool {
                     + "as a fact to remember.";
         }
 
-        var existing = sameFact(agentId, text);
+        // JCLAW-529: parsed before the duplicate check, not after. Stored vectors are
+        // statement+key, so a candidate embedded bare is compared across a format
+        // difference rather than a similarity — the asymmetry that stopped the semantic
+        // leg firing on exact duplicates. The key has to exist by the time sameFact runs.
+        var retrievalKey = parseQuestions(args);
+
+        var existing = sameFact(agentId, text, retrievalKey);
         if (!existing.isEmpty()) {
             return "Already remembered: \"%s\"".formatted(snippet(existing.getFirst().text));
         }
@@ -273,7 +292,7 @@ public class MemoryTool implements ToolRegistry.Tool {
         // HTTP call and store() would run it inside this transaction, pinning a pooled
         // connection across the network (the JCLAW-807 shape). Same split as applyPlan.
         var store = MemoryStoreFactory.get();
-        var storedId = Tx.run(() -> store.storeDeferred(agentId, text, category, importance));
+        var storedId = Tx.run(() -> store.storeDeferred(agentId, text, category, importance, retrievalKey));
         store.embedStored(storedId);
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
                 "Memory stored on operator request: \"%s\"".formatted(snippet(text)));
@@ -360,13 +379,41 @@ public class MemoryTool implements ToolRegistry.Tool {
      * <p>The semantic leg embeds over HTTP and therefore runs outside any transaction;
      * only the lexical query and the hydration take one.
      */
+    /**
+     * The {@code questions} array as one newline-joined block, or null when absent
+     * (JCLAW-529). A model that omits it stores a keyless memory — the pre-529 behaviour,
+     * not an error — and {@code MemoryKeyBackfillService} can key it later.
+     */
+    static String parseQuestions(JsonObject args) {
+        if (!args.has(FIELD_QUESTIONS) || !args.get(FIELD_QUESTIONS).isJsonArray()) return null;
+        var out = new ArrayList<String>();
+        for (var q : args.getAsJsonArray(FIELD_QUESTIONS)) {
+            if (q == null || !q.isJsonPrimitive() || out.size() >= MAX_QUESTIONS) continue;
+            var s = q.getAsString().strip();
+            if (!s.isEmpty()) out.add(s);
+        }
+        return out.isEmpty() ? null : String.join("\n", out);
+    }
+
+    /**
+     * Keyless form, for the forget matcher. What the operator types to remove a memory is
+     * a description rather than a stored statement, so there is no key to embed with it —
+     * unlike the store path, where the same tool call supplies one. The asymmetry against
+     * keyed stored vectors is therefore inherent here rather than an oversight, and it
+     * costs recall on the semantic leg only; the lexical leg is unaffected.
+     */
     private static List<Memory> sameFact(String agentId, String text) {
+        return sameFact(agentId, text, null);
+    }
+
+    private static List<Memory> sameFact(String agentId, String text, String retrievalKey) {
         double cosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
         double jaccard = ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85);
 
         List<Long> semanticIds;
         try {
-            semanticIds = MemoryStoreFactory.get().semanticNeighbours(agentId, text, FORGET_LIMIT, cosine);
+            semanticIds = MemoryStoreFactory.get()
+                    .semanticNeighbours(agentId, text, retrievalKey, FORGET_LIMIT, cosine);
         } catch (Exception e) {
             // Fail open to the lexical tier, as capture does: no vector backend, no
             // embedding provider, or a lookup error must not make memory unusable.
