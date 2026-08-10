@@ -311,10 +311,27 @@ public class JpaMemoryStore implements MemoryStore {
      */
     @Override
     public List<Long> semanticNeighbours(String agentId, String text, int limit, double minCosine) {
+        return semanticNeighbours(agentId, text, null, limit, minCosine);
+    }
+
+    /**
+     * JCLAW-529: the candidate is embedded exactly as a stored memory is — statement plus
+     * the questions it answers — because this compares it against those stored vectors.
+     *
+     * <p>Embedding it bare against a keyed index is not a stricter test, it is a different
+     * one: measured on this corpus, an <em>identical</em> memory scored a mean 0.869 that
+     * way (min 0.710) against a 0.90 threshold, so the semantic leg stopped firing on the
+     * exact duplicates it exists to catch. Nothing looked wrong, because the deterministic
+     * Jaccard rule still caught those and the corpus showed no survivors — it was the
+     * paraphrases only this leg can catch that were silently getting through.
+     */
+    @Override
+    public List<Long> semanticNeighbours(String agentId, String text, String retrievalKey,
+            int limit, double minCosine) {
         if (!vectorEnabled || text == null || text.isBlank()) return List.of();
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        var embedding = generateEmbedding(text);
+        var embedding = generateEmbedding(searchText(text, retrievalKey));
         if (embedding == null) return List.of();
         try {
             return isPostgres

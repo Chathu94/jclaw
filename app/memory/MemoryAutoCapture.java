@@ -453,7 +453,8 @@ public final class MemoryAutoCapture {
         var store = MemoryStoreFactory.get();
         var out = new HashSet<Integer>();
         for (int i = 0; i < candidates.size(); i++) {
-            var matches = store.semanticNeighbours(agentKey, candidates.get(i).text(), limit, minCosine);
+            var matches = store.semanticNeighbours(agentKey, candidates.get(i).text(),
+                    candidates.get(i).retrievalKey(), limit, minCosine);
             if (matches.isEmpty()) continue;
             out.add(i);
             EventLogger.info(EVENT_CATEGORY, agentName, null,

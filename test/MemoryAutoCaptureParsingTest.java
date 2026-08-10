@@ -173,15 +173,6 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
     }
 
     @Test
-    void searchTextCombinesTheStatementWithItsKeyAndPassesThroughWithout() {
-        // Measured trade-off: keys alone beat the statement on relation-phrased questions
-        // but lose to an unrelated memory on a direct one. The concatenation wins on both.
-        assertEquals("stmt\nq1\nq2", memory.JpaMemoryStore.searchText("stmt", "q1\nq2"));
-        assertEquals("stmt", memory.JpaMemoryStore.searchText("stmt", null));
-        assertEquals("stmt", memory.JpaMemoryStore.searchText("stmt", "   "));
-    }
-
-    @Test
     void parseCandidatesRootPrimitiveYieldsEmpty() {
         assertTrue(MemoryAutoCapture.parseCandidates("42").isEmpty(),
                 "a bare JSON primitive is neither object nor array → empty");

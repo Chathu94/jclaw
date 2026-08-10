@@ -28,6 +28,21 @@ class MemoryRetrievalRulesTest extends UnitTest {
         assertEquals("hello", JpaMemoryStore.prefixQuery(null, "hello"));
     }
 
+    // --- dedup embeds a candidate the way documents are embedded ---
+
+    @Test
+    void searchTextIsWhatBothTheIndexAndDedupSee() {
+        // The regression this guards: dedup embedded the candidate bare while the index
+        // held statement+key, so an identical memory scored a mean 0.869 against a 0.90
+        // threshold and the semantic leg stopped firing on exact duplicates. Nothing
+        // looked wrong — the deterministic Jaccard rule still caught those, and only the
+        // paraphrases this leg exists for were getting through.
+        assertEquals("stmt\nq1\nq2", JpaMemoryStore.searchText("stmt", "q1\nq2"));
+        assertEquals("stmt", JpaMemoryStore.searchText("stmt", null),
+                "an unkeyed memory must embed exactly as it did before keys existed");
+        assertEquals("stmt", JpaMemoryStore.searchText("stmt", "   "));
+    }
+
     // --- entity names: what the key backfill uses to find a memory's neighbours ---
 
     @Test

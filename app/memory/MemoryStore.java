@@ -130,6 +130,11 @@ public interface MemoryStore {
      * {@code text}, which is a blocking HTTP round-trip; the capture pipeline calls
      * this in its own phase precisely so the plan transaction never spans it.
      */
+    default List<Long> semanticNeighbours(String agentId, String text, String retrievalKey,
+            int limit, double minCosine) {
+        return semanticNeighbours(agentId, text, limit, minCosine);
+    }
+
     default List<Long> semanticNeighbours(String agentId, String text, int limit, double minCosine) {
         return List.of();
     }
