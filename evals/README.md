@@ -509,6 +509,40 @@ the fact row. Keyword-only by construction — embedding the hop query would add
 provider round-trip to every recall, and a hop seeded with exact names is the case
 lexical search serves best.
 
+### What a bridge suite is not measuring
+
+Two things sit *outside* retrieval and will move these numbers without the ranker
+changing, so read a bridge score knowing where each fact actually lives.
+
+**Identity facts are not retrieved at all.** Category `core` renders into every system
+prompt, so a promoted memory reaches the model whether or not recall finds it. Capture
+assigns it on content, not on the extractor's say-so — `MemoryIdentityClass` is a closed
+pattern list, because core sits above the prompt-cache boundary and each admission
+invalidates the cacheable prefix. Consequence for measurement: a suite case whose gold is
+a core memory is scoring a path the agent does not depend on. On the corpus this was
+built against, 8 of 89 memories are core, and the questions people actually ask most —
+family, home, employer — land there rather than here.
+
+**Memories are indexed by the questions they answer, not only by their text.**
+`Memory.retrievalKey` holds two or three questions written at capture time and is
+concatenated with the statement for both the vector and the keyword leg, never rendered
+into a prompt. Retrieval otherwise matches a question against a statement, and those are
+further apart than the statement is from unrelated memories: on this corpus "the user's
+son Kheshav has the nickname Lyuvez" scored 0.588 against "what do I call my children?"
+while "the user's name is Tarun" scored 0.656. Keying it turns the comparison into
+question-to-question, which the same model scores at 0.830.
+
+Keys are combined with the statement rather than replacing it, from a measurement worth
+repeating before anyone "simplifies" it: keys alone win on relation-phrased questions but
+**lose to an unrelated memory** on a direct one ("what's Kheshav's nickname?" 0.715
+against the distractor's 0.763). The concatenation beat the distractor on every query
+tried, and beating the distractor is what decides ranking.
+
+`MemoryKeyBackfillService` applies both to a corpus stored before either existed, which
+is the usual reason an old suite and a new one disagree. Its keys are generated with each
+memory's entity neighbours in view — without them a model can only write questions naming
+the entity, which is the vocabulary that already worked.
+
 A stale suite fails quietly rather than loudly, so check the fingerprint before
 trusting a number: gold ids that no longer exist score as clean misses, and a suite
 written before `goldGroups` replaced `goldMemoryIds` deserialises to *no* gold at all
