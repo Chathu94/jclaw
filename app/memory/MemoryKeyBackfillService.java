@@ -54,13 +54,18 @@ public final class MemoryKeyBackfillService {
             some RELATED memories for context, write two or three short questions, phrased the \
             way this user would later ask them, that the MEMORY answers.
 
-            Use the RELATED memories only to learn how the user refers to things — if they say \
-            the memory's subject is the user's son, ask "what do my kids ...", not "what does \
-            <name> ...". Prefer asking through a relationship over asking by name; the name \
-            already matches the memory's own words, the relationship does not.
+            Every question must be answered by the MEMORY itself. The RELATED memories are \
+            background only: use them to learn how the user refers to the MEMORY's subject, \
+            never as subject matter. If the MEMORY says the user's name and a RELATED memory \
+            says they own a company, ask about the name — a question about the company is wrong \
+            here however sensible it looks.
 
-            Do not answer the MEMORY and do not write questions the RELATED memories answer \
-            instead. Output only the questions, one per line, no numbering and no quotation marks.""";
+            Given that, prefer asking through a relationship over asking by name: if a RELATED \
+            memory shows the MEMORY's subject is the user's son, ask "what do my kids ...", not \
+            "what does <name> ...". The name already matches the memory's own words; the \
+            relationship is what it cannot be found by today.
+
+            Output only the questions, one per line, no numbering and no quotation marks.""";
 
     private static final AtomicBoolean running = new AtomicBoolean(false);
     private static final AtomicInteger processed = new AtomicInteger();
@@ -153,7 +158,8 @@ public final class MemoryKeyBackfillService {
         }
     }
 
-    private static String keyFor(Row row, List<Row> all, MemoryEvalGenerator.QuestionWriter writer) {
+    /** Memories sharing an entity name with {@code row} — the same rule the retrieval hop seeds on. */
+    private static List<String> neighbours(Row row, List<Row> all) {
         var names = JpaMemoryStore.entityNames(row.text());
         var related = new ArrayList<String>();
         for (var other : all) {
@@ -161,6 +167,29 @@ public final class MemoryKeyBackfillService {
             if (other.id().equals(row.id())) continue;
             if (names.stream().anyMatch(n -> other.text().contains(n))) related.add(other.text());
         }
+        return related;
+    }
+
+    /*
+     * No deterministic guard rejects a key for describing a neighbour instead of its own
+     * memory, though the failure is real: "The user's name is Tarun." came back keyed "what
+     * does my business do / what is abundent", which a neighbouring memory answers.
+     *
+     * A token-overlap guard was written for it and then measured against the corpus, where it
+     * flagged 5 of 89 — including the single most valuable key in the store, the one keying
+     * the children's-nicknames memory as "what are my sons' nicknames / what do my kids
+     * have". That key is the entire point of the feature, and the guard rejected it for the
+     * same property that makes it work: a bridge key borrows the neighbour's relation
+     * vocabulary by construction, so it necessarily overlaps the neighbour more than its own
+     * memory. Stemming makes it worse — "nickname" and "nicknames" do not match.
+     *
+     * The measured miskey rate is roughly 2 in 89 and its cost is bounded: a bad key adds a
+     * wrong candidate that ranking still has to beat the rest of the corpus to surface. A
+     * guard that removes the best key to remove the worst one is the more expensive trade.
+     */
+
+    private static String keyFor(Row row, List<Row> all, MemoryEvalGenerator.QuestionWriter writer) {
+        var related = neighbours(row, all);
         var prompt = "MEMORY: %s\nRELATED:\n%s".formatted(row.text(),
                 related.isEmpty() ? "(none)" : String.join("\n", related));
         try {
