@@ -114,4 +114,42 @@ class MemorySimilarityTest extends UnitTest {
         // returns 0 for an empty side, so these must not read as duplicates.
         assertFalse(dup("The user has it.", "They are from that."));
     }
+
+    // ─── JCLAW-1054: one normalization, shared with search ───────────────────
+
+    @Test
+    void tokenizationMatchesTheSearchAnalyzer() throws Exception {
+        // The point of the change: this rule and the keyword leg must agree on what "the
+        // same text" means. Compared against the analyzer directly rather than against a
+        // restatement of it, so swapping the analyzer moves both or fails here.
+        var text = "The user's daughters were reading books about volcanoes.";
+        var viaAnalyzer = new java.util.HashSet<String>();
+        try (var ts = services.search.LuceneIndexer.ANALYZER.tokenStream("memory", text)) {
+            var term = ts.addAttribute(org.apache.lucene.analysis.tokenattributes.CharTermAttribute.class);
+            ts.reset();
+            while (ts.incrementToken()) viaAnalyzer.add(term.toString());
+            ts.end();
+        }
+        assertEquals(viaAnalyzer, MemorySimilarity.tokenize(text),
+                "memory tokenization diverged from the search analyzer");
+    }
+
+    @Test
+    void boilerplateIsStrippedAfterNormalizationNotBefore() {
+        // If the stopword list were matched unnormalized it would silently stop removing
+        // anything the analyzer rewrites, inflating every content set at once — the failure
+        // mode is invisible because nothing throws, the thresholds just quietly change meaning.
+        var content = MemorySimilarity.contentTokens("The user has it and they were at that assistant.");
+        assertTrue(content.isEmpty(),
+                "every token here is boilerplate; content set should be empty, got: " + content);
+    }
+
+    @Test
+    void pluralAndSingularFormsCountAsTheSameToken() {
+        // What the shared normalization buys dedup: a restatement that only differs by
+        // inflection now overlaps instead of reading as fresh vocabulary.
+        assertTrue(MemorySimilarity.contentTokens("The user's nicknames are recorded.")
+                        .containsAll(MemorySimilarity.contentTokens("The user's nickname is recorded.")),
+                "singular and plural must normalize to the same token");
+    }
 }

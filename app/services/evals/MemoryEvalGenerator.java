@@ -26,6 +26,14 @@ import java.util.Set;
  * <p>The generated artifact is personal data, so it is written only through
  * {@link MemoryEvalPaths}, never returned wholesale to a caller and never placed beside
  * the tracked suites.
+ *
+ * <p><b>Suites generated before JCLAW-1054 are not comparable with ones generated after.</b>
+ * Clustering and the rare-shared-token pairing both run on {@link MemorySimilarity}, which
+ * moved onto the search analyzer's normalization — so the cases this produces changed, not
+ * merely the scores they earn. Nothing tracked is affected (these suites live outside the
+ * repo by design), but a recall baseline measured on an older generated suite should be
+ * re-generated rather than compared across the change. The suite fingerprint will not warn
+ * about it: it covers case content, not the generator's inputs.
  */
 public final class MemoryEvalGenerator {
 

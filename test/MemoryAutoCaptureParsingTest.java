@@ -223,9 +223,13 @@ class MemoryAutoCaptureParsingTest extends UnitTest {
     @Test
     void tokenizeLowercasesSplitsAndDropsBlanks() throws Exception {
         assertTrue(tokenize(null).isEmpty(), "null → empty set");
-        assertEquals(Set.of("hello", "world", "foo", "bar"),
+        // JCLAW-1054 moved this onto the search analyzer, which keeps an underscored
+        // identifier whole where the old split broke it apart. That is the improvement, not
+        // a side effect: splitting made every *_id identifier share the token "id", so two
+        // unrelated memories mentioning task_id and run_id overlapped on nothing real.
+        assertEquals(Set.of("hello", "world", "foo_bar"),
                 tokenize("Hello, WORLD!  foo_bar"),
-                "lowercased, split on non-alphanumerics (underscore included), blanks dropped");
+                "lowercased, word-boundary tokenized, identifiers kept whole");
     }
 
     @Test

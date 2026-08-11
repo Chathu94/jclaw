@@ -93,6 +93,13 @@ public class MemoryTool implements ToolRegistry.Tool {
      * The nearest wrong candidate on that corpus ("...at the pool on Wednesday evenings")
      * sits at 0.500, and the sweep is clean anywhere in 0.60-0.75. 0.70 centres that
      * window. Below 0.60 the pool row starts matching, which would be a destructive miss.
+     *
+     * <p>Re-derived for JCLAW-1054 and it stays. The hope there was that sharing the search
+     * analyzer's normalization would let this climb back to capture dedup's 0.82; it does
+     * not. KStem leaves swim/swimming distinct — that pair is derivational, the same class
+     * as schooling/school — so every 1049 case still measures 0.750 after the change, and
+     * 0.82 gets three of them wrong. This floor is compensating for a gap stemming does not
+     * close, not for the old tokenizer.
      */
     private static final double FORGET_JACCARD = 0.70;
     private static final double FORGET_CONTAINMENT = 0.70;
@@ -144,6 +151,11 @@ public class MemoryTool implements ToolRegistry.Tool {
                 user's opening message as the query, so anything that message did not match \
                 is missing until you ask for it — recall again with a better query whenever \
                 you need a stored detail you cannot see.
+
+                Ask with a short phrase, not a single keyword. Meaning-based matching needs \
+                a few words to work with: "my daughter's schooling" finds a memory that a \
+                bare "schooling" does not, because one word on its own carries too little \
+                signal and falls back to matching stored wording literally.
 
                 Do NOT use `store` to save things you notice. Durable memories are captured \
                 automatically from every turn; calling store yourself duplicates that and \

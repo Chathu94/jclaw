@@ -522,6 +522,13 @@ public final class MemoryAutoCapture {
         // pairs with no false positive, 0.85 catches 8. Below 0.80 unrelated facts
         // sharing a sentence template start matching (two different hosted apps, two
         // different providers), so this is the floor, not a tuning knob to lower.
+        //
+        // Re-swept for JCLAW-1054 when MemorySimilarity moved onto the search analyzer's
+        // normalization, because changing tokenization redefines what these numbers measure.
+        // They hold: over 792 real memory texts the stemmed rule at the SAME 0.85/0.82 finds
+        // 29 restatement pairs the old one missed and drops 8, about half of which were false
+        // positives (it had been collapsing two printers at different IP addresses into one).
+        // Raising them to compensate would only give the misses back.
         double containment = ConfigService.getDouble("memory.autocapture.dedup.containmentThreshold", 0.82);
         double minLengthRatio = ConfigService.getDouble("memory.autocapture.dedup.minLengthRatio", 0.5);
         int retrievalLimit = ConfigService.getInt("memory.autocapture.dedup.retrievalLimit", 25);
