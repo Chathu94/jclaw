@@ -114,6 +114,61 @@ class MemoryConsolidationTest extends UnitTest {
                 "the newer write always wins — recency by serial comparison");
     }
 
+    // ─── JCLAW-1050: a supersession must not shrink the fact ─────────────────
+
+    /** Extractor output for one candidate, with the JSON quoting the harness needs. */
+    private static String extractorJson(String text) {
+        return "{\"memories\":[{\"text\":\"" + text + "\",\"category\":\"fact\",\"importance\":0.7}]}";
+    }
+
+    @Test
+    void aNarrowerRestatementDoesNotSupersedeTheFullerMemory() {
+        // Found in UAT, not by inspection: capture re-extracted a thinner version of a fact
+        // already stored, the judge paired them as the same subject, and the serial guard let
+        // the thinner row win — taking the clinic address with it. The agent then said, of its
+        // own accord, "I don't have a location stored for her clinic".
+        var full = "The user's osteopath is called Ines and her clinic is on Rua do Almada";
+        var thin = "The user's osteopath is named Ines";
+        var agent = agentId("narrower");
+        var fullId = Long.valueOf(MemoryStoreFactory.get().store(agent, full, "fact", 0.7));
+
+        MemoryAutoCapture.Extractor extractor = msgs -> extractorJson(thin);
+        MemoryAutoCapture.Consolidator consolidator = msgs -> SUPERSEDE_JSON;
+        MemoryAutoCapture.capture(agent, "narrower",
+                "Reminder that my osteopath is Ines.", "Noted.",
+                extractor, consolidator, freshBreaker());
+
+        Memory kept = Memory.findById(fullId);
+        assertNull(kept.supersededAt,
+                "the fuller memory was superseded by a narrower restatement, losing its content");
+        var active = Memory.findByAgent(agent);
+        assertEquals(2, active.size(), "both rows must survive: " + active);
+        assertTrue(active.stream().anyMatch(m -> m.text.contains("Rua do Almada")),
+                "the clinic address is unreachable: " + active);
+    }
+
+    @Test
+    void aRicherCorrectionStillSupersedes() {
+        // The guard must not neuter consolidation. A replacement that carries at least as
+        // much content is exactly what supersession is for, and still wins on recency.
+        var older = "The user drives an Xpeng G6";
+        var richer = "The user drives a Volvo EX30 since March";
+        var agent = agentId("richer");
+        var olderId = Long.valueOf(MemoryStoreFactory.get().store(agent, older, "fact", 0.7));
+
+        MemoryAutoCapture.Extractor extractor = msgs -> extractorJson(richer);
+        MemoryAutoCapture.Consolidator consolidator = msgs -> SUPERSEDE_JSON;
+        MemoryAutoCapture.capture(agent, "richer",
+                "I swapped the Xpeng for a Volvo EX30 in March.", "Noted.",
+                extractor, consolidator, freshBreaker());
+
+        Memory replaced = Memory.findById(olderId);
+        assertNotNull(replaced.supersededAt, "a richer correction must still supersede");
+        var active = Memory.findByAgent(agent);
+        assertEquals(1, active.size(), "only the newer fact should remain active: " + active);
+        assertEquals(richer, active.getFirst().text);
+    }
+
     @Test
     void supersededMemoriesAreExcludedFromRecallPaths() {
         var agent = agentId("excl");

@@ -55,7 +55,10 @@ import java.util.concurrent.locks.ReentrantLock;
  *       {@link Consolidator} judge (JCLAW-525) marks same-subject older
  *       memories superseded — never hard-deleted — when a new write updates or
  *       contradicts them. The judge only pairs subjects; recency is resolved
- *       by deterministic serial comparison, never by the LLM.</li>
+ *       by deterministic serial comparison, never by the LLM. Recency alone is
+ *       not enough to replace a row, though: a survivor must also carry a
+ *       comparable amount of content, or a thinner restatement of a stored fact
+ *       supersedes the fuller one and the difference is lost (JCLAW-1050).</li>
  *   <li><b>Cheap extraction.</b> The extractor model is configurable via
  *       {@code memory.autocapture.model}; operators should point it at a cheap
  *       model. It falls back to the agent's effective model when unset.</li>
@@ -615,7 +618,14 @@ public final class MemoryAutoCapture {
             long newId = Long.parseLong(newIdStr);
             for (int oldIdx : olds) {
                 var ex = plan.shortlist().get(oldIdx);
-                if (ex.id() >= newId) continue;   // serial guard: newer always wins
+                if (ex.id() >= newId) continue;   // serial guard: of two facts, the newer wins
+                if (!atLeastAsInformative(ex.text(), c.text())) {
+                    EventLogger.info(EVENT_CATEGORY, agentName, null,
+                            ("Kept memory %d instead of superseding it with %d — the newer text drops "
+                                    + "content: \"%s\" vs \"%s\"")
+                                    .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
+                    continue;
+                }
                 Memory old = Memory.findById(ex.id());
                 if (old == null || old.supersededAt != null) continue;
                 old.supersede(newId);
@@ -653,6 +663,35 @@ public final class MemoryAutoCapture {
             }
         }
         return embedded;
+    }
+
+    /**
+     * How much of the superseded row's content a survivor must carry to replace it
+     * (JCLAW-1050). Measured on the shapes consolidation actually pairs: narrower
+     * restatements land at 0.375-0.500 ("osteopath is called Ines and her clinic is on Rua
+     * do Almada" → "osteopath is named Ines"), genuine corrections at 1.0 or above ("lives
+     * in Porto" → "lives in Lisbon"; "flight is at 08:00" → "at 11:30 from Gate 4"). The
+     * sweep is clean anywhere in 0.55-1.00 and breaks at 0.50; 0.75 centres that gap.
+     */
+    private static final double SUPERSEDE_MIN_CONTENT_RATIO = 0.75;
+
+    /**
+     * Whether {@code replacement} may supersede {@code existing}, by content volume.
+     *
+     * <p>Recency decides between two facts that disagree — that is the JCLAW-525 rule and it
+     * stays. It is the wrong rule for a candidate that merely restates an existing memory
+     * with less in it: UAT watched a clinic address vanish because the extractor re-emitted
+     * a thinner version of a fact already stored, and the serial guard let it win.
+     *
+     * <p>Refusing costs a redundant row that both remain visible and recallable; allowing
+     * costs content with nothing to recover it from. A stale row an operator can see beats
+     * a detail they cannot.
+     */
+    private static boolean atLeastAsInformative(String existing, String replacement) {
+        int older = MemorySimilarity.contentTokens(existing).size();
+        if (older == 0) return true;
+        int newer = MemorySimilarity.contentTokens(replacement).size();
+        return newer >= SUPERSEDE_MIN_CONTENT_RATIO * older;
     }
 
     private static String snippet(String text) {
