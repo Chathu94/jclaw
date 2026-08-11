@@ -191,4 +191,36 @@ public final class MemorySafety {
         }
         return false;
     }
+
+    /**
+     * Instructions about driving the memory tool itself.
+     *
+     * <p>Matches a reference to the tool or one of its actions by name, which a durable fact
+     * about the user has no reason to contain. Deliberately narrow: a standing preference
+     * that merely concerns what gets remembered ("the user does not want medical details
+     * stored") names no tool and survives.
+     */
+    private static final Pattern[] TOOL_INSTRUCTION_PATTERNS = {
+            Pattern.compile("(?i)\\bmemory\\s+tool\\b"),
+            Pattern.compile("(?i)\\b(?:recall|store|forget)\\s+action\\b"),
+            Pattern.compile("(?i)\\baction\\s*[:=]\\s*(?:recall|store|forget)\\b"),
+    };
+
+    /**
+     * @return {@code true} when the text records an instruction to operate the memory tool
+     *         rather than a durable fact, and so must not become a memory (JCLAW-1051).
+     *
+     * <p>Complements {@link #looksLikeForgetRequest} rather than replacing it, and UAT
+     * showed neither subsumes the other: "the user wants the assistant to forget everything
+     * it knows about what Marlow eats" names no tool, while "the user wants the assistant to
+     * use the recall action of its memory tool" carries no removal verb. Both were stored,
+     * and both then ranked in recall on the topic that produced them.
+     */
+    public static boolean looksLikeToolInstruction(String text) {
+        if (text == null || text.isBlank()) return false;
+        for (var p : TOOL_INSTRUCTION_PATTERNS) {
+            if (p.matcher(text).find()) return true;
+        }
+        return false;
+    }
 }

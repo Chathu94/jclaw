@@ -383,12 +383,25 @@ public final class MemoryAutoCapture {
         // stores as a durable, well-keyed memory the model then reads as standing policy,
         // refusing the whole subject. The filter above cannot catch it: it tests for a
         // restatement of the deleted fact, and this restates the request instead.
-        final List<Candidate> kept =
+        final List<Candidate> noForgetNotes =
                 notReforgotten.stream().filter(c -> !MemorySafety.looksLikeForgetRequest(c.text())).toList();
-        int forgetNotes = notReforgotten.size() - kept.size();
+        int forgetNotes = notReforgotten.size() - noForgetNotes.size();
         if (forgetNotes > 0) {
             EventLogger.info(EVENT_CATEGORY, agentName, null,
                     "Dropped %d candidate memory(ies) recording a request to forget".formatted(forgetNotes));
+        }
+
+        // JCLAW-1051: and the same for any other instruction to drive the tool. UAT stored
+        // "the user wants the assistant to use the recall action of its memory tool", which
+        // then ranked ABOVE the real fact when recalling that topic. The filter above misses
+        // it — it carries no removal verb — just as this one misses a forget note naming no
+        // tool. Two shapes, neither subsuming the other.
+        final List<Candidate> kept =
+                noForgetNotes.stream().filter(c -> !MemorySafety.looksLikeToolInstruction(c.text())).toList();
+        int toolNotes = noForgetNotes.size() - kept.size();
+        if (toolNotes > 0) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) recording a memory-tool instruction".formatted(toolNotes));
         }
 
         if (kept.isEmpty()) {

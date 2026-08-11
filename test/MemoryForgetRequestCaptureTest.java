@@ -102,6 +102,24 @@ class MemoryForgetRequestCaptureTest extends UnitTest {
     }
 
     @Test
+    void anInstructionToDriveTheToolIsNotStoredEither() {
+        // JCLAW-1051. Both texts are verbatim from UAT, which stored them as `preference`
+        // memories; the first then ranked ABOVE the real fact when recalling that topic.
+        // Neither carries a removal verb, so the forget guard above does not see them.
+        var a = agent("tool-note");
+
+        MemoryAutoCapture.capture(String.valueOf(a.id), a.name,
+                "Use your memory tool's recall action to search for anything about schooling.",
+                "The recall action returned nothing for that term.",
+                extractorReturning("The user wants the assistant to use the recall action of its "
+                        + "memory tool to search for anything about schooling."),
+                freshBreaker());
+
+        assertEquals(0L, Memory.count("agent.id = ?1", a.id),
+                "an instruction to operate the memory tool was stored as a durable memory");
+    }
+
+    @Test
     void aLaterFactAboutTheSameSubjectIsStillCaptured() {
         // The guard must reject the shape of the note, not blacklist its subject. Without this
         // the obvious fix - suppress anything mentioning Marlow - would pass the test above.
