@@ -13,7 +13,7 @@
  * caller. Do not move these into a factory or per-call path — the /api/ src+href
  * allow-list and the cache bound both depend on the single-instance semantics.
  */
-import { marked } from 'marked'
+import { marked, Renderer, type Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
@@ -23,6 +23,24 @@ marked.setOptions({
   breaks: true,
   gfm: true,
 })
+
+// Fenced code blocks get a copy button, emitted as part of the markdown output
+// rather than injected after mount: every consumer renders through v-html, and
+// the streaming bubble re-renders at ~12.5 fps, which a post-render DOM walk
+// would race. Click handling is delegated in plugins/code-copy.client.ts —
+// DOMPurify strips inline handlers, so the markup cannot carry its own.
+//
+// The wrapper div exists to be the positioning context: `pre` is
+// overflow-x:auto, and an absolute button inside a scrolling box slides out of
+// view with the content. A per-call renderer (not marked.setOptions) keeps the
+// button off pages/skills.vue, which parses through the same shared instance.
+const chatRenderer = new Renderer()
+const renderCodeBlock = chatRenderer.code.bind(chatRenderer)
+chatRenderer.code = (token: Tokens.Code) =>
+  `<div class="code-block">`
+  + `<button type="button" class="code-copy">Copy</button>`
+  + renderCodeBlock(token)
+  + `</div>`
 
 export function formatTokensPerSec(usage: MessageUsage): string | null {
   if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
@@ -64,7 +82,7 @@ const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
 
 function renderMarkdownInner(text: string, agentId: number | null): string {
-  const html = marked.parse(normalizeMarkdownLinks(text)) as string
+  const html = marked.parse(normalizeMarkdownLinks(text), { renderer: chatRenderer }) as string
   const sanitized = DOMPurify.sanitize(html, {
     ADD_TAGS: ['img', 'audio', 'video', 'source'],
     ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],

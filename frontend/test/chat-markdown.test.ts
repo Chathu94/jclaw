@@ -33,6 +33,27 @@ describe('renderMarkdown /api/ allow-list', () => {
   })
 })
 
+describe('renderMarkdown code-block copy button', () => {
+  it('wraps a fenced block and emits a copy button that survives sanitization', () => {
+    const html = renderMarkdown('```js\nconsole.log("hi")\n```')
+    expect(html).toContain('<div class="code-block">')
+    expect(html).toContain('<button type="button" class="code-copy">Copy</button>')
+  })
+
+  it('leaves the code text free of the button label', () => {
+    const doc = new DOMParser().parseFromString(
+      renderMarkdown('```py\na = 1\nb = 2\n```'),
+      'text/html',
+    )
+    expect(doc.querySelector('.code-block pre code')?.textContent).toBe('a = 1\nb = 2\n')
+  })
+
+  it('does not decorate inline code spans', () => {
+    const html = renderMarkdown('use `yield` here')
+    expect(html).not.toContain('code-copy')
+  })
+})
+
 describe('renderMarkdownStreaming', () => {
   it('returns empty string for empty input', () => {
     expect(renderMarkdownStreaming('')).toBe('')
