@@ -232,6 +232,48 @@ public final class MemoryAutoCapture {
     }
 
     /**
+     * Run one turn through the real capture pipeline, synchronously, with no conversation
+     * behind it (JCLAW-942 eval corpus ingestion).
+     *
+     * <p>Exists so a benchmark corpus can be loaded through the pipeline that is actually
+     * under test — the gate, the extractor, all six content guards, dedup and the
+     * consolidation judge — rather than by writing rows straight to the store, which would
+     * measure retrieval against memories capture would never have produced.
+     *
+     * <p><b>Synchronous on purpose, and callers must stay sequential.</b>
+     * {@link #captureAsync} spawns a virtual thread per turn and {@link #capture} serializes
+     * per agent on {@link #CAPTURE_LOCKS}, skipping rather than queueing when the lock is
+     * held. Firing a corpus at the async form would therefore drop most of it as
+     * {@code capture_in_flight} and quietly ingest a fraction of what was asked for.
+     *
+     * <p>Unlike {@code captureAsync} this takes no conversation id, so it resolves the
+     * provider from the agent directly and passes a null channel — there is no channel to
+     * be ineligible (JCLAW-866 gates voice turns, which a corpus has none of).
+     */
+    public static CaptureResult captureSync(Agent agent, String userMessage, String assistantResponse) {
+        if (agent == null || userMessage == null || userMessage.isBlank()
+                || assistantResponse == null || assistantResponse.isBlank()) {
+            return CaptureResult.skipped("empty_turn");
+        }
+        if (!captureEligible(agent)) {
+            return CaptureResult.skipped("ineligible_agent");
+        }
+        var provider = resolveProvider(agent);
+        if (provider == null) {
+            return CaptureResult.skipped("no_provider");
+        }
+        var modelId = resolveModelId(agent);
+        int maxOutput = ConfigService.getInt("memory.autocapture.maxTokens", 1024);
+        int judgeOutput = ConfigService.getInt("memory.consolidation.maxTokens", 512);
+        Extractor extractor = msgs -> SessionCompactor.firstChoiceText(
+                provider.chat(modelId, msgs, List.of(), maxOutput, null, null));
+        Consolidator consolidator = msgs -> SessionCompactor.firstChoiceText(
+                provider.chat(modelId, msgs, List.of(), judgeOutput, null, null));
+        return capture(String.valueOf(agent.id), agent.name, userMessage, assistantResponse,
+                extractor, consolidator, SHARED_BREAKER);
+    }
+
+    /**
      * Whether a just-completed turn on {@code agent} is eligible for auto-capture,
      * independent of the async / test-mode plumbing in {@link #captureAsync}.
      * Capture is for operator-facing (root) agents only — subagents process

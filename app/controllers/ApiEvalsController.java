@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.JsonObject;
+import memory.MemoryAutoCapture;
 import models.Agent;
 import play.mvc.Before;
 import play.mvc.Controller;
@@ -87,6 +88,63 @@ public class ApiEvalsController extends Controller {
                 1, MAX_CONCURRENCY);
 
         renderJSON(GSON.toJson(EvalCapture.run(suite, agent, concurrency)));
+    }
+
+    /** Bound on one ingest request, so a corpus load cannot become an unbounded write. */
+    private static final int MAX_INGEST_PAIRS = 500;
+
+    /** What one ingest run did. {@code perPairMs} is what tells a caller whether the
+     *  rest of a corpus fits the time it has. */
+    public record IngestResult(String agent, int pairs, int captured, int storedMemories,
+                               long elapsedMs, long perPairMs) {}
+
+    /**
+     * {@code POST /api/evals/memory-ingest} with
+     * {@code {"agent": "<name>", "pairs": [{"user": "...", "assistant": "..."}], "limit": <n>?}}.
+     *
+     * <p>Loads a benchmark corpus through the real capture pipeline (JCLAW-942), so what a
+     * memory eval then scores is what capture would actually have stored — extractor,
+     * content guards, dedup and the consolidation judge included. Writing rows straight to
+     * the store would measure retrieval against a corpus the system never produces.
+     *
+     * <p><b>Sequential by construction.</b> {@link MemoryAutoCapture#capture} serializes per
+     * agent and skips rather than queues when the lock is held, so a parallel fan-out would
+     * silently drop most of the corpus as {@code capture_in_flight}. One pair at a time is
+     * the only shape that ingests what was asked for; {@code perPairMs} comes back so the
+     * caller can size the remainder rather than guess.
+     *
+     * <p>Same loopback + {@code X-Loadtest-Auth} gate as the rest of this controller. It
+     * spends a model call per pair and writes to an agent's long-term memory, which is
+     * exactly the pair of properties that gate exists for.
+     */
+    public static void memoryIngest() {
+        var body = JsonBodyReader.readJsonBody();
+        var agentName = JsonBodyReader.requiredOr400(body, "agent");
+        var agent = Agent.findByName(agentName);
+        if (agent == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
+        }
+        if (body == null || !body.has("pairs") || !body.get("pairs").isJsonArray()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "pairs must be a JSON array");
+            throw ApiResponses.unreachable();
+        }
+        var pairs = body.getAsJsonArray("pairs");
+        int limit = Math.clamp(readInt(body, "limit", pairs.size()), 0, MAX_INGEST_PAIRS);
+
+        long before = models.Memory.count("agent.id = ?1", agent.id);
+        long t0 = System.currentTimeMillis();
+        int captured = 0;
+        int n = Math.min(limit, pairs.size());
+        for (int i = 0; i < n; i++) {
+            var p = pairs.get(i).getAsJsonObject();
+            var user = p.has("user") ? p.get("user").getAsString() : null;
+            var assistant = p.has("assistant") ? p.get("assistant").getAsString() : null;
+            captured += MemoryAutoCapture.captureSync(agent, user, assistant).captured();
+        }
+        long elapsed = System.currentTimeMillis() - t0;
+        long after = models.Memory.count("agent.id = ?1", agent.id);
+        renderJSON(GSON.toJson(new IngestResult(agent.name, n, captured, (int) (after - before),
+                elapsed, n == 0 ? 0 : elapsed / n)));
     }
 
     /**

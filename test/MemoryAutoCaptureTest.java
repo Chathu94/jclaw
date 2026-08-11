@@ -283,4 +283,34 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertTrue(MemoryAutoCapture.channelEligible("some-future-channel"));
         assertTrue(MemoryAutoCapture.channelEligible(null));
     }
+
+    // --- corpus ingestion (JCLAW-942) ---
+
+    private models.Agent realAgent(String name) {
+        agentId(name);
+        return models.Agent.find("name = ?1", name).<models.Agent>first();
+    }
+
+    @Test
+    void captureSyncRefusesATurnItCannotLearnFrom() {
+        // Each of these must return a REASON rather than reach a provider: an ingest run
+        // reports captured counts, and a silent zero would read as "the corpus held
+        // nothing worth keeping" instead of "the turn never ran".
+        var a = realAgent("ingest-guards");
+        assertEquals("empty_turn", MemoryAutoCapture.captureSync(a, null, "reply").skipReason());
+        assertEquals("empty_turn", MemoryAutoCapture.captureSync(a, "   ", "reply").skipReason());
+        assertEquals("empty_turn", MemoryAutoCapture.captureSync(a, "hello there", null).skipReason());
+        assertEquals("empty_turn", MemoryAutoCapture.captureSync(null, "hello", "reply").skipReason());
+    }
+
+    @Test
+    void captureSyncRefusesAnAgentThatOptedOut() {
+        // captureEligible already governs the async path; ingestion must not be a way
+        // around it, or a corpus could be written into an agent with capture disabled.
+        var a = realAgent("ingest-disabled");
+        a.memoryAutocaptureEnabled = false;
+        a.save();
+        assertEquals("ineligible_agent",
+                MemoryAutoCapture.captureSync(a, "My optometrist is Dr Kerans.", "Noted.").skipReason());
+    }
 }
