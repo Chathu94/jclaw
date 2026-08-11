@@ -380,7 +380,8 @@ public class Memory extends Model {
     /**
      * JCLAW-415: full-text memory search for one agent. When the search backend
      * is initialized (production Personal Edition), query the Lucene MEMORY
-     * scope — agent-filtered, token-based (StandardAnalyzer), matching the
+     * scope — agent-filtered, token-based (the shared analyzer on
+     * {@code LuceneIndexer}, which stems since JCLAW-1052), matching the
      * Postgres {@code to_tsvector} path rather than the old substring LIKE — and
      * hydrate the rows from the DB in relevance order (re-bounding to the agent
      * and dropping any stale index ids whose rows no longer exist).

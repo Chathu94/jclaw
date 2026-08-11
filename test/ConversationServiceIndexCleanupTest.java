@@ -22,7 +22,7 @@ import java.util.List;
  * indexes each message, then {@code deleteByIds} must drop them from the index.
  *
  * <p>Uses {@code LuceneTestSync} to serialize against the JVM-global index and
- * distinctive concatenated tokens (immune to StandardAnalyzer word-boundary
+ * distinctive concatenated tokens (immune to StandardTokenizer word-boundary
  * splitting) so the assertions can't be muddied by another scope's docs.
  */
 class ConversationServiceIndexCleanupTest extends UnitTest {

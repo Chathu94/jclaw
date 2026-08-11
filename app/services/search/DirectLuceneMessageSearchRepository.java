@@ -295,13 +295,19 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     /**
      * Build the content-field query from free text: tokenize with the index-time
      * analyzer, then match each token as a bounded, scored {@link PrefixQuery} so a
-     * partial/base term surfaces its longer forms — "marissa" finds "marissa's",
-     * "phone" finds "phones". (StandardAnalyzer keeps the possessive as one token,
-     * so plain term matching treated "marissa" and "marissa's" as unrelated.) Tokens
-     * shorter than {@link #MIN_PREFIX_LEN} match exactly. {@code requireAll} ANDs the
-     * tokens (admin filter — all must appear), else ORs them (agent recall — any
-     * token, then relevance-ranked + floored). Returns {@code null} when the query
-     * yields no usable tokens (e.g. all stopwords).
+     * partial term surfaces its longer forms — "pho" finds "phone".
+     *
+     * <p>Partial matching is now the only thing the prefix contributes. It was introduced
+     * for possessives and plurals too, and the analyzer took both over in JCLAW-1052:
+     * measured against the shipped analyzer, plain term matching alone already resolves
+     * "marissa" to "Marissa's" (the possessive filter) and "phones" to "phone" (KStem).
+     * Only "pho" still needs it — 0 hits as a term, 2 as a prefix — so the prefix stays,
+     * on a narrower justification than it was added with.
+     *
+     * <p>Tokens shorter than {@link #MIN_PREFIX_LEN} match exactly. {@code requireAll} ANDs
+     * the tokens (admin filter — all must appear), else ORs them (agent recall — any token,
+     * then relevance-ranked + floored). Returns {@code null} when the query yields no
+     * usable tokens (e.g. all stopwords).
      */
     private static Query buildContentQuery(String query, boolean requireAll) throws IOException {
         var terms = analyzeToTerms(query);
@@ -341,9 +347,9 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     private static List<ScoredId> collectScored(SearcherManager sm, String query,
                                                 String agentKey, int limit, boolean requireAll) throws IOException {
         // Prefix-match each query token (see buildContentQuery) rather than the
-        // free-form QueryParser: operators typing free text get partial-word +
-        // possessive matching ("marissa" → "marissa's"), and stray Lucene operator
-        // characters can't ParseException the query out from under the UI.
+        // free-form QueryParser: operators typing free text get partial-word matching,
+        // and stray Lucene operator characters can't ParseException the query out from
+        // under the UI. Possessives and plurals are the analyzer's job since JCLAW-1052.
         Query content = buildContentQuery(query, requireAll);
         if (content == null) return List.of(); // no usable tokens (e.g. all stopwords)
         Query q = content;

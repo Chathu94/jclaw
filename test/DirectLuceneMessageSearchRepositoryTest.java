@@ -31,7 +31,7 @@ import java.util.List;
  *       doesn't recreate the index.</li>
  *   <li>Persist-then-search round-trip works: a row written after init
  *       becomes findable on its own content.</li>
- *   <li>Case-insensitive single-term match (StandardAnalyzer lowercases).</li>
+ *   <li>Case-insensitive single-term match (the analyzer lowercases).</li>
  *   <li>Limit caps the result count.</li>
  *   <li>Blank / null query returns empty (non-exceptional contract).</li>
  *   <li>Malformed Lucene query syntax returns empty rather than 500ing.</li>
@@ -157,9 +157,10 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
     @Test
     void prefixMatchesPossessiveAndPartialTerms() throws Exception {
-        // Query tokens match as PREFIXES, so a base/partial term surfaces its longer forms.
-        // Both cases still hold under the stemming analyzer (JCLAW-1052): EnglishAnalyzer's
-        // possessive filter strips "'s" at both ends, and "pho" still prefixes "phone".
+        // Query tokens match as PREFIXES, so a partial term surfaces its longer forms.
+        // Since JCLAW-1052 only the "pho" case actually needs the prefix: the analyzer's
+        // possessive filter already resolves "marissa" to "Marissa's" on its own. Both are
+        // kept here because the prefix path must keep serving both.
         repo.init();
 
         // Agent-recall path (searchMemoryIds).
@@ -416,7 +417,7 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         // SearcherManagers onto one shared directory.
         //
         // Token choice: each scope gets a single contiguous lowercase
-        // token. StandardAnalyzer decomposes hyphenated strings on word
+        // token. StandardTokenizer decomposes hyphenated strings on word
         // boundaries (so {@code "unique-task-token"} would tokenize as
         // {@code [unique, task, token]} and the shared "token" word
         // would leak across every seed), which would make the cross-

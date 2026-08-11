@@ -28,7 +28,7 @@ import java.util.List;
  * asserts the doc is gone from search.
  *
  * <p>Uses {@code LuceneTestSync} to serialize against the JVM-global index and
- * distinctive concatenated tokens (immune to StandardAnalyzer word-boundary
+ * distinctive concatenated tokens (immune to StandardTokenizer word-boundary
  * splitting) so one scope's assertions can't be muddied by another's docs.
  */
 class CascadeLuceneCleanupTest extends UnitTest {
