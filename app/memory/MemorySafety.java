@@ -1,5 +1,7 @@
 package memory;
 
+import java.util.Collections;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -10,7 +12,9 @@ import java.util.regex.Pattern;
  * wholesale: losing one memory is far cheaper than persisting a live credential
  * or a hostile directive to the long-term store.
  *
- * <p>Three independent guards:
+ * <p>Four independent guards. The first three read the candidate alone; the fourth reads it
+ * against the turn that produced it, because what it rejects is indistinguishable from an
+ * ordinary fact in isolation.
  *
  * <ul>
  *   <li>{@link #looksLikeSecret} (JCLAW-535) — credentials must never reach the
@@ -30,6 +34,10 @@ import java.util.regex.Pattern;
  *       which stores as a durable, well-keyed memory that the model then reads
  *       as standing policy and refuses the whole subject on. The prompt already
  *       bars one-off task instructions; a live model ignored it.
+ *   <li>{@link #assertsOnlyPresupposition} (JCLAW-1055) — a request or question
+ *       presupposes its subject without stating it, and the extractor writes the
+ *       presupposition down as a fact: "forget my dentist's name" produced "The
+ *       user has a dentist." for an operator who never said they had one.
  * </ul>
  */
 public final class MemorySafety {
@@ -222,5 +230,68 @@ public final class MemorySafety {
             if (p.matcher(text).find()) return true;
         }
         return false;
+    }
+
+    /**
+     * Clause boundaries, delimiter kept on the clause it closes so a trailing {@code ?} is
+     * still visible. A comma counts: a directive's object is a noun phrase, so in "forget my
+     * dentist's name, it's Dr Vela" the dentist is presupposed and the name is asserted.
+     */
+    private static final Pattern CLAUSE_SPLIT = Pattern.compile("(?<=[.!?;,\\n])");
+
+    /** Interrogative openers, for questions written without a question mark. */
+    private static final Pattern QUESTION_OPENER = Pattern.compile(
+            "(?i)^\\W*(?:what|which|who|whom|whose|where|when|why|how|do|does|did|is|are|was"
+                    + "|were|can|could|will|would|have|has|had|should)\\b");
+
+    private static final Pattern REMOVAL_VERB_ANYWHERE =
+            Pattern.compile("(?i)\\b(?:" + REMOVAL_VERB + ")\\b");
+
+    /**
+     * Whether a candidate memory rests only on what the turn presupposed rather than on
+     * anything the operator asserted (JCLAW-1055).
+     *
+     * <p>Unlike the three guards above this one cannot work on the candidate alone: "The user
+     * has a dentist." is a perfectly ordinary memory, and the only thing wrong with it is that
+     * the turn behind it was "forget my dentist's name" — a request whose object is taken for
+     * granted, not claimed. So the turn is split into what it asserts and what it merely
+     * presupposes (a question in full; a removal directive from its verb onward, leaving
+     * "my dentist retired so delete his number" asserting the retirement), and a candidate is
+     * refused only when it draws on the second and nothing from the first. That asymmetry is
+     * what keeps a fact stated in the same breath as the request — "forget my dentist's name,
+     * it's Dr Vela" — capturable.
+     *
+     * <p>Tokens come from {@link MemorySimilarity#contentTokens}, the normalization shared with
+     * search and dedup (JCLAW-1054), which strips "The user has a" boilerplate and folds
+     * "dentist's" onto "dentist" so the comparison is about substance rather than phrasing.
+     *
+     * <p>Bounded on purpose: an object continued past a comma ("delete what you know about my
+     * dog, my cat and my dentist") reads as a second clause and only the first noun is covered.
+     */
+    public static boolean assertsOnlyPresupposition(String userTurn, String text) {
+        if (userTurn == null || userTurn.isBlank() || text == null || text.isBlank()) return false;
+
+        var asserted = new StringBuilder();
+        var presupposed = new StringBuilder();
+        for (var clause : CLAUSE_SPLIT.split(userTurn)) {
+            var trimmed = clause.strip();
+            if (trimmed.isEmpty()) continue;
+            if (trimmed.endsWith("?") || QUESTION_OPENER.matcher(trimmed).find()) {
+                presupposed.append(' ').append(trimmed);
+                continue;
+            }
+            var m = REMOVAL_VERB_ANYWHERE.matcher(trimmed);
+            if (m.find()) {
+                asserted.append(' ').append(trimmed, 0, m.start());
+                presupposed.append(' ').append(trimmed.substring(m.start()));
+            } else {
+                asserted.append(' ').append(trimmed);
+            }
+        }
+
+        Set<String> candidate = MemorySimilarity.contentTokens(text);
+        if (candidate.isEmpty()) return false;
+        return Collections.disjoint(candidate, MemorySimilarity.contentTokens(asserted.toString()))
+                && !Collections.disjoint(candidate, MemorySimilarity.contentTokens(presupposed.toString()));
     }
 }

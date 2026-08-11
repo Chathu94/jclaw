@@ -156,4 +156,61 @@ class MemorySafetyTest extends UnitTest {
         assertTrue(MemorySafety.looksLikeToolInstruction(toolNote));
         assertFalse(MemorySafety.looksLikeForgetRequest(toolNote), "the tool note carries no removal verb");
     }
+
+    // ─── presupposition (JCLAW-1055) ─────────────────────────────────────────
+
+    @Test
+    void refusesWhatTheTurnOnlyTookForGranted() {
+        // Verbatim from the UAT sweep that raised JCLAW-1055: a negative-control forget
+        // against an empty store minted an existence claim the operator never made.
+        assertTrue(MemorySafety.assertsOnlyPresupposition(
+                "Use your memory tool to forget my dentist's name.",
+                "The user has a dentist."));
+        assertTrue(MemorySafety.assertsOnlyPresupposition(
+                "What did I say about my accountant?",
+                "The user has an accountant."));
+        assertTrue(MemorySafety.assertsOnlyPresupposition(
+                "Delete everything you know about my sailing club.",
+                "The user belongs to a sailing club."));
+    }
+
+    @Test
+    void keepsAFactStatedInTheSameTurnAsTheRequest() {
+        // The AC that stops the guard from suppressing real content: the request presupposes
+        // the dentist, the clause after it states the name, and only the first is refused.
+        var turn = "Forget my dentist's name, it's Dr Vela.";
+        assertTrue(MemorySafety.assertsOnlyPresupposition(turn, "The user has a dentist."));
+        assertFalse(MemorySafety.assertsOnlyPresupposition(turn, "The user's dentist is Dr Vela."));
+
+        // A removal directive splits at its verb, so what precedes it is still an assertion.
+        assertFalse(MemorySafety.assertsOnlyPresupposition(
+                "My dentist retired last month so delete his number.",
+                "The user's dentist retired."));
+    }
+
+    @Test
+    void leavesOrdinaryTurnsAlone() {
+        assertFalse(MemorySafety.assertsOnlyPresupposition(
+                "I finally found a dentist near the office.", "The user has a dentist."));
+        // No directive anywhere in the turn: nothing is presupposed, so nothing is refused
+        // however loosely the candidate relates to it.
+        assertFalse(MemorySafety.assertsOnlyPresupposition(
+                "Marlow turned four last week.", "The user's beagle Marlow turned four years old."));
+        // A candidate the turn does not touch at all is left to the other guards.
+        assertFalse(MemorySafety.assertsOnlyPresupposition(
+                "Forget my dentist's name.", "The user lives in Porto."));
+        assertFalse(MemorySafety.assertsOnlyPresupposition(null, "The user has a dentist."));
+        assertFalse(MemorySafety.assertsOnlyPresupposition("Forget my dentist's name.", ""));
+    }
+
+    @Test
+    void theTurnIsTheOnlyThingThatSeparatesTheTwo() {
+        // Why this guard could not have been a fourth pattern list: the refused text and the
+        // kept text are the same string. Only the turn behind it differs.
+        var fabricated = "The user has a dentist.";
+        assertTrue(MemorySafety.assertsOnlyPresupposition("Forget my dentist's name.", fabricated));
+        assertFalse(MemorySafety.assertsOnlyPresupposition("I've got a dentist now.", fabricated));
+        assertFalse(MemorySafety.looksLikeForgetRequest(fabricated));
+        assertFalse(MemorySafety.looksLikeToolInstruction(fabricated));
+    }
 }

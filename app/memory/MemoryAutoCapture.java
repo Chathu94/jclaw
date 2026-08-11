@@ -396,12 +396,25 @@ public final class MemoryAutoCapture {
         // then ranked ABOVE the real fact when recalling that topic. The filter above misses
         // it — it carries no removal verb — just as this one misses a forget note naming no
         // tool. Two shapes, neither subsuming the other.
-        final List<Candidate> kept =
+        final List<Candidate> noToolNotes =
                 noForgetNotes.stream().filter(c -> !MemorySafety.looksLikeToolInstruction(c.text())).toList();
-        int toolNotes = noForgetNotes.size() - kept.size();
+        int toolNotes = noForgetNotes.size() - noToolNotes.size();
         if (toolNotes > 0) {
             EventLogger.info(EVENT_CATEGORY, agentName, null,
                     "Dropped %d candidate memory(ies) recording a memory-tool instruction".formatted(toolNotes));
+        }
+
+        // JCLAW-1055: the third shape, and the one the two filters above are structurally
+        // unable to see. "Forget my dentist's name" stored "The user has a dentist." — text
+        // that carries neither a removal verb nor a tool name because it is not a note about
+        // the request at all. It is the request's presupposition asserted as fact, so the
+        // guard has to read the candidate against the turn rather than on its own.
+        final List<Candidate> kept = noToolNotes.stream()
+                .filter(c -> !MemorySafety.assertsOnlyPresupposition(userMessage, c.text())).toList();
+        int presupposed = noToolNotes.size() - kept.size();
+        if (presupposed > 0) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) the turn only presupposed".formatted(presupposed));
         }
 
         if (kept.isEmpty()) {
@@ -955,6 +968,8 @@ public final class MemoryAutoCapture {
             - reusable (would help a future session serve this user better).
 
             Do NOT extract: anything the assistant said — including its confident factual claims about products, systems or capabilities, which are frequently wrong — nor speculation, one-off task instructions, pleasantries, or sensitive secrets (passwords, full card numbers, API keys).
+
+            A request or a question takes its subject for granted rather than stating it. "Forget my dentist's name" does not tell you the user has a dentist, and "what did I say about my accountant" does not tell you they have one. Extract what the user claims, never what their wording assumes.
 
             Write each memory as one concise, self-contained sentence in the third person ("The user ...", "The project ..."), resolving pronouns so it stands alone out of context. Preserve exact identifiers (names, paths, IDs, URLs) verbatim.
 

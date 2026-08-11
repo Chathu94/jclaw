@@ -19,6 +19,9 @@ import utils.CircuitBreaker;
  * reading it as standing policy and refusing the whole subject, so an operator who asked to
  * forget one fact got a permanent gag order on it instead.
  *
+ * <p>Now also the two later shapes the same UAT sweep found on the same path: an instruction
+ * to drive the tool (JCLAW-1051), and a fact the request only presupposed (JCLAW-1055).
+ *
  * <p>{@link MemoryForgetLog#recentlyForgotten} cannot catch this: it tests whether a
  * candidate <em>restates the deleted fact</em>, and this restates the <em>request</em>. The
  * offending note repeated roughly "marlow"/"eats" out of the forgotten fact's eight content
@@ -66,9 +69,11 @@ class MemoryForgetRequestCaptureTest extends UnitTest {
         return a;
     }
 
-    private static MemoryAutoCapture.Extractor extractorReturning(String text) {
-        var json = "{\"memories\":[{\"text\":\"%s\",\"category\":\"preference\",\"importance\":0.7}]}"
-                .formatted(text);
+    private static MemoryAutoCapture.Extractor extractorReturning(String... texts) {
+        var memories = java.util.Arrays.stream(texts)
+                .map("{\"text\":\"%s\",\"category\":\"preference\",\"importance\":0.7}"::formatted)
+                .collect(java.util.stream.Collectors.joining(","));
+        var json = "{\"memories\":[%s]}".formatted(memories);
         return _ -> json;
     }
 
@@ -145,5 +150,41 @@ class MemoryForgetRequestCaptureTest extends UnitTest {
                         + "the shape of a forget note, not the topic");
         var kept = Memory.<Memory>find("agent.id = ?1", a.id).<Memory>first();
         assertTrue(kept.text.contains("four"), "expected the new fact, got: " + kept.text);
+    }
+
+    @Test
+    void whatTheRequestOnlyPresupposesIsNotStoredAsAFact() {
+        // JCLAW-1055, verbatim from UAT: a forget against a store holding no dentist. Forget
+        // correctly reported nothing to remove, and capture wrote down the request's
+        // presupposition as an entity. Neither guard above sees it - the text carries no
+        // removal verb and names no tool, because it is not a note about the request at all.
+        var a = agent("presupposition");
+
+        MemoryAutoCapture.capture(String.valueOf(a.id), a.name,
+                "Use your memory tool to forget my dentist's name.",
+                "I have no stored memory of your dentist's name, so there was nothing to remove.",
+                extractorReturning("The user has a dentist."),
+                freshBreaker());
+
+        assertEquals(0L, Memory.count("agent.id = ?1", a.id),
+                "the request's presupposition was stored as a fact - an existence claim about "
+                        + "the operator that they never made");
+    }
+
+    @Test
+    void aFactStatedAlongsideTheRequestIsStillCaptured() {
+        // The AC that stops the fix from suppressing real content: refusing the whole turn
+        // would pass the test above and lose the name the operator actually gave.
+        var a = agent("presupposition-mixed");
+
+        MemoryAutoCapture.capture(String.valueOf(a.id), a.name,
+                "Forget my dentist's name, it's Dr Vela.", "Done.",
+                extractorReturning("The user has a dentist.", "The user's dentist is Dr Vela."),
+                freshBreaker());
+
+        assertEquals(1L, Memory.count("agent.id = ?1", a.id),
+                "expected exactly the asserted fact to survive");
+        var kept = Memory.<Memory>find("agent.id = ?1", a.id).<Memory>first();
+        assertTrue(kept.text.contains("Vela"), "expected the stated fact, got: " + kept.text);
     }
 }
