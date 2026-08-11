@@ -157,9 +157,9 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
     @Test
     void prefixMatchesPossessiveAndPartialTerms() throws Exception {
-        // Query tokens match as PREFIXES, so a base/partial term surfaces its
-        // longer forms — "marissa" finds "marissa's" (StandardAnalyzer keeps the
-        // possessive as one token, so the old token-exact match missed it).
+        // Query tokens match as PREFIXES, so a base/partial term surfaces its longer forms.
+        // Both cases still hold under the stemming analyzer (JCLAW-1052): EnglishAnalyzer's
+        // possessive filter strips "'s" at both ends, and "pho" still prefixes "phone".
         repo.init();
 
         // Agent-recall path (searchMemoryIds).
@@ -455,11 +455,12 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
     @Test
     void stemmingMatchesSingularAndPluralForms() throws Exception {
-        // StandardAnalyzer doesn't stem (it lowercases + tokenizes only);
-        // singular/plural bridging now comes from PREFIX matching instead —
-        // a query token matches any indexed term it prefixes, so "quota" finds
-        // "quota" (and would find "quotas"). Pin the shipping contract: the exact
-        // token still matches, case-folded, so a future analyzer change stays visible.
+        // Written against StandardAnalyzer, which did not stem: singular/plural bridging came
+        // from PREFIX matching alone, so "quota" found "quotas" but never the reverse. That is
+        // the gap JCLAW-1052 closed by moving to KStem, and this test did its job — it was
+        // added so an analyzer change would stay visible, and it is what surfaced the change.
+        // The contract it pins is unaffected either way: the exact token still matches,
+        // case-folded, because KStem leaves "quota" alone.
         repo.init();
         seedSubagentRunRow("radarr-monitor",
                 "IMPORT_FAILED: disk quota exceeded on volume1");
@@ -649,5 +650,64 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
 
         assertFalse(memory.MemoryReembedService.upToDate(),
                 "a rebuilt MEMORY index must retire the marker so the operator is prompted");
+    }
+
+    // ─── JCLAW-1052: the analyzer stems, so inflections match either way round ───
+
+    @Test
+    void aPluralQueryFindsAMemoryHoldingTheSingular() throws Exception {
+        // Query tokens are wrapped in a PrefixQuery, so the singular already reached the
+        // plural — but prefixes run one way only, and UAT had the operator asking the other
+        // way and getting nothing. KStem stems both sides to the same term.
+        repo.init();
+        var agentId = makeAgent("inflectAgent");
+        var memId = seedMemory(agentId, "The user's son goes by the nickname Lyuvez.");
+
+        var plural = repo.searchMemoryIds(String.valueOf(agentId), "nicknames", 10)
+                .stream().map(s -> s.id()).toList();
+        assertTrue(plural.contains(memId),
+                "a plural query must reach the memory holding the singular");
+
+        // The direction that already worked must keep working.
+        var singular = repo.searchMemoryIds(String.valueOf(agentId), "nickname", 10)
+                .stream().map(s -> s.id()).toList();
+        assertTrue(singular.contains(memId), "the singular must still match");
+    }
+
+    @Test
+    void stemmingDoesNotCollapseUnrelatedWords() throws Exception {
+        // Why KStem and not Porter (JCLAW-1052). Porter maps "evenings" to "even", which then
+        // prefix-expands into "event" and "eventually" — measured as 2 false hits on the live
+        // corpus. KStem keeps real words, so the query cannot reach the unrelated row.
+        repo.init();
+        var agentId = makeAgent("stemPrecisionAgent");
+        var evening = seedMemory(agentId, "The user swims at the lido on Wednesday evenings.");
+        var unrelated = seedMemory(agentId, "The team runs an event and eventually publishes notes.");
+
+        var hits = repo.searchMemoryIds(String.valueOf(agentId), "evenings", 10)
+                .stream().map(s -> s.id()).toList();
+        assertTrue(hits.contains(evening), "the evenings memory must match");
+        assertFalse(hits.contains(unrelated),
+                "'evenings' must not reach 'event'/'eventually' — that is the Porter collision");
+    }
+
+    @Test
+    void queryTimeAndIndexTimeUseTheSameAnalyzer() {
+        // A divergence here does not throw — query tokens simply stop matching indexed terms
+        // and every search quietly returns nothing. Pin the identity so it fails loudly.
+        assertSame(LuceneIndexer.ANALYZER, contentAnalyzerInUse(),
+                "query-time analyzer must BE the index-time analyzer, not a matching copy");
+    }
+
+    /** Reads the repository's private query-time analyzer, so the assertion above tests the
+     *  field the code actually uses rather than a restatement of it. */
+    private static Object contentAnalyzerInUse() {
+        try {
+            var f = DirectLuceneMessageSearchRepository.class.getDeclaredField("CONTENT_ANALYZER");
+            f.setAccessible(true);
+            return f.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("CONTENT_ANALYZER field not found — was it renamed?", e);
+        }
     }
 }

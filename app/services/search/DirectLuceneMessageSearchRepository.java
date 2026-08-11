@@ -7,7 +7,6 @@ import models.SubagentRun;
 import models.Task;
 import models.TaskRunMessage;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause;
@@ -20,6 +19,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.search.TermQuery;
 import play.db.jpa.JPA;
+import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
 
@@ -108,14 +108,29 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // Either way, the right move is to backfill from the JPA store
         // — slow on a huge transcript history, but JClaw at pre-v1 has
         // hundreds-to-low-thousands of rows.
+        // JCLAW-1052: an analyzer change re-tokenizes every document, and needsBackfill
+        // compares counts — which do not move. Without this the old index keeps answering
+        // with the previous tokenization, so the new query terms match nothing and search
+        // degrades silently instead of failing.
+        boolean analyzerChanged = !LuceneIndexer.ANALYZER_GENERATION
+                .equals(ConfigService.get(ANALYZER_GENERATION_KEY, null));
         for (var b : BACKFILLERS) {
-            if (!needsBackfill(b)) continue;
+            if (!analyzerChanged && !needsBackfill(b)) continue;
             backfill(b);
             if (b.scope() == LuceneIndexer.Scope.MEMORY) {
                 MemoryReembedService.invalidateBackfillMarker();
             }
         }
+        if (analyzerChanged) {
+            ConfigService.set(ANALYZER_GENERATION_KEY, LuceneIndexer.ANALYZER_GENERATION);
+            EventLogger.info("search", null, null,
+                    "Search index rebuilt for analyzer generation %s"
+                            .formatted(LuceneIndexer.ANALYZER_GENERATION));
+        }
     }
+
+    /** Records which analyzer the on-disk index was written with. */
+    private static final String ANALYZER_GENERATION_KEY = "search.lucene.analyzerGeneration";
 
     /**
      * Whether a scope's index has to be rebuilt from the database.
@@ -265,10 +280,9 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         return collectScored(sm, query, null, limit, true).stream().map(ScoredId::id).toList();
     }
 
-    /** Shared query-time analyzer (StandardAnalyzer is stateless + thread-safe):
-     *  the same tokenization used at index time, so query tokens line up with the
-     *  indexed terms (lowercased, stopwords dropped). */
-    private static final Analyzer CONTENT_ANALYZER = new StandardAnalyzer();
+    /** The index-time analyzer itself, not a matching copy (JCLAW-1052): query tokens have to
+     *  line up with indexed terms, and a divergence returns nothing rather than failing. */
+    private static final Analyzer CONTENT_ANALYZER = LuceneIndexer.ANALYZER;
 
     /** Max index terms a single prefix token expands to (scored). Bounds the work
      *  on a large corpus while keeping BM25 scoring for the recall relevance floor. */

@@ -1,6 +1,12 @@
 package services.search;
 
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.core.LowerCaseFilter;
+import org.apache.lucene.analysis.en.EnglishPossessiveFilter;
+import org.apache.lucene.analysis.en.KStemFilter;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnFloatVectorField;
@@ -117,6 +123,60 @@ public final class LuceneIndexer {
     /** Field names exposed in indexed Documents. */
     static final String ID_FIELD = "id";
     static final String CONTENT_FIELD = "content";
+
+    /**
+     * The one analyzer, shared by index and query time (JCLAW-1052).
+     *
+     * <p>Was {@link StandardAnalyzer}, which does not stem. Recall wraps each query token in a
+     * {@code PrefixQuery}, so "school" already reached "schooling" — but prefixes run one way
+     * only, and UAT found the operator asking the other way and getting nothing. KStem makes
+     * inflections match in both directions.
+     *
+     * <p><b>KStem, not Porter.</b> Both were measured over the live 90-memory corpus under the
+     * real PrefixQuery logic. Porter conflates more, and pays for it in tokens that are not
+     * words:
+     *
+     * <pre>
+     *   word         standard     porter       kstem
+     *   evenings     evenings     even         evenings
+     *   eventually   eventually   eventu       eventually
+     *   businesses   businesses   busi         business
+     *   Wednesday    wednesday    wednesdai    wednesday
+     * </pre>
+     *
+     * Porter's {@code evenings -> even} then prefix-expands into "event" and "eventually" —
+     * two false hits on that corpus for one query. KStem emits real words, has no such
+     * collision, and still fixes plurals in both directions ("nicknames" 0→2, "businesses"
+     * 0→2). This analyzer is shared by message, task, subagent-run and skills search as well
+     * as memory, so the wrong trade here degrades every scope.
+     *
+     * <p>What KStem deliberately does <em>not</em> do is bridge {@code schooling -> school}.
+     * That is derivational rather than inflectional — schooling is education, not a form of
+     * school — and Porter only joins them by accident of suffix-stripping. Derivation and
+     * synonymy belong to the semantic leg; JCLAW-1053 owns that case.
+     *
+     * <p>Hand-built rather than {@code EnglishAnalyzer} so the change is stemming and nothing
+     * else: {@code EnglishAnalyzer} also drops stopwords, which the previous no-arg
+     * {@code StandardAnalyzer} did not, and that would have been an untested second change.
+     *
+     * <p>Both call sites must use this instance. A divergence returns nothing rather than
+     * failing, because query tokens simply stop matching indexed terms.
+     */
+    public static final Analyzer ANALYZER = new Analyzer() {
+        @Override
+        protected TokenStreamComponents createComponents(String fieldName) {
+            var source = new StandardTokenizer();
+            TokenStream tokens = new EnglishPossessiveFilter(new LowerCaseFilter(source));
+            return new TokenStreamComponents(source, new KStemFilter(tokens));
+        }
+    };
+
+    /**
+     * Bumped whenever {@link #ANALYZER} changes. Stored in config; a mismatch at boot forces
+     * a full re-index, because documents tokenized by the previous analyzer do not match
+     * queries tokenized by the new one and the row-count check cannot see the difference.
+     */
+    static final String ANALYZER_GENERATION = "kstem-1";
     /** Exact-match filter field, set only on scopes that need per-owner
      *  filtering (currently {@link Scope#MEMORY}, keyed by agent id). */
     static final String AGENT_FIELD = "agent";
@@ -269,7 +329,7 @@ public final class LuceneIndexer {
         var dir = FSDirectory.open(indexDir);
         IndexWriter writer;
         try {
-            var iwc = new IndexWriterConfig(new StandardAnalyzer());
+            var iwc = new IndexWriterConfig(ANALYZER);
             iwc.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
             // IndexWriter takes ownership of dir on success and closes it
             // via its own close(); we only release dir if construction throws
