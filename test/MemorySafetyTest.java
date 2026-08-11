@@ -203,6 +203,71 @@ class MemorySafetyTest extends UnitTest {
         assertFalse(MemorySafety.assertsOnlyPresupposition("Forget my dentist's name.", ""));
     }
 
+    // ─── assistant-sourced substance (JCLAW-1056) ────────────────────────────
+
+    @Test
+    void refusesSubstanceTheAssistantSupplied() {
+        // Verbatim from the UAT that raised JCLAW-1056. The user turn names an accountant;
+        // every content token of the stored memory came from the recall output instead.
+        assertTrue(MemorySafety.assertsOnlyAssistantContent(
+                "What did I tell you about my accountant?",
+                "I don't have any memories stored about your accountant. The only recalled "
+                        + "memory is about your optometrist, Dr Kerans.",
+                "The user sees Dr Kerans as their optometrist."));
+        // The escalation the guard actually exists for: tool output, not just recall.
+        assertTrue(MemorySafety.assertsOnlyAssistantContent(
+                "Can you open that link for me?",
+                "The page says the recommended retention period is ninety days.",
+                "The recommended retention period is ninety days."));
+    }
+
+    @Test
+    void keepsAFactTheAssistantOnlyHelpedResolve() {
+        // The AC that stops this breaking the prompt's stated reason for supplying the
+        // assistant turn: "Arun" comes from the assistant, but "goes by Bo" is the user's,
+        // so the candidate is still partly grounded in what they said.
+        assertFalse(MemorySafety.assertsOnlyAssistantContent(
+                "He goes by Bo now.",
+                "Your son Arun? Noted.",
+                "The user's son Arun goes by Bo."));
+        // Ordinary turn: the user states it and the assistant merely echoes it back.
+        assertFalse(MemorySafety.assertsOnlyAssistantContent(
+                "My beagle Marlow eats grain-free food.",
+                "Noted - Marlow is on grain-free food.",
+                "The user's beagle Marlow eats grain-free food."));
+        assertFalse(MemorySafety.assertsOnlyAssistantContent(null, "x", "The user has a dentist."));
+        assertFalse(MemorySafety.assertsOnlyAssistantContent("x", "y", ""));
+    }
+
+    @Test
+    void leavesACandidateGroundedInNeitherTurnAlone() {
+        // Ungrounded-everywhere is a different defect (a hallucinated candidate) and is left
+        // to the other guards - this one refuses only what the assistant demonstrably supplied.
+        assertFalse(MemorySafety.assertsOnlyAssistantContent(
+                "What did I tell you about my accountant?",
+                "I have nothing stored about your accountant.",
+                "The user lives in Porto."));
+    }
+
+    @Test
+    void theTwoTurnAwareGuardsCoverEachOthersBlindSpot() {
+        // JCLAW-1056 is not a widening of JCLAW-1055, and the UAT turn shows why: the
+        // presupposition guard needs the candidate to touch the turn somewhere, and this
+        // candidate touches nothing in it.
+        var turn = "What did I tell you about my accountant?";
+        var assistant = "The only recalled memory is about your optometrist, Dr Kerans.";
+        var assistantSourced = "The user sees Dr Kerans as their optometrist.";
+        var presupposed = "The user has an accountant.";
+
+        assertTrue(MemorySafety.assertsOnlyAssistantContent(turn, assistant, assistantSourced));
+        assertFalse(MemorySafety.assertsOnlyPresupposition(turn, assistantSourced),
+                "the presupposition guard needs a token shared with the turn");
+
+        assertTrue(MemorySafety.assertsOnlyPresupposition(turn, presupposed));
+        assertFalse(MemorySafety.assertsOnlyAssistantContent(turn, assistant, presupposed),
+                "the accountant IS in the user turn, so this guard must not claim it");
+    }
+
     @Test
     void theTurnIsTheOnlyThingThatSeparatesTheTwo() {
         // Why this guard could not have been a fourth pattern list: the refused text and the

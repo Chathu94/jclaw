@@ -409,12 +409,26 @@ public final class MemoryAutoCapture {
         // that carries neither a removal verb nor a tool name because it is not a note about
         // the request at all. It is the request's presupposition asserted as fact, so the
         // guard has to read the candidate against the turn rather than on its own.
-        final List<Candidate> kept = noToolNotes.stream()
+        final List<Candidate> notPresupposed = noToolNotes.stream()
                 .filter(c -> !MemorySafety.assertsOnlyPresupposition(userMessage, c.text())).toList();
-        int presupposed = noToolNotes.size() - kept.size();
+        int presupposed = noToolNotes.size() - notPresupposed.size();
         if (presupposed > 0) {
             EventLogger.info(EVENT_CATEGORY, agentName, null,
                     "Dropped %d candidate memory(ies) the turn only presupposed".formatted(presupposed));
+        }
+
+        // JCLAW-1056: and the fourth shape — substance taken from the assistant turn, which
+        // the prompt bars outright and a live model did anyway. The filter above cannot see
+        // it: that one needs the candidate to touch the user turn somewhere, and this fires
+        // precisely when it touches nothing in it. Worth a guard beyond the phrasing churn it
+        // was found causing, because the assistant turn carries tool output.
+        final List<Candidate> kept = notPresupposed.stream()
+                .filter(c -> !MemorySafety.assertsOnlyAssistantContent(userMessage, assistantResponse, c.text()))
+                .toList();
+        int assistantSourced = notPresupposed.size() - kept.size();
+        if (assistantSourced > 0) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Dropped %d candidate memory(ies) sourced from the assistant turn".formatted(assistantSourced));
         }
 
         if (kept.isEmpty()) {

@@ -38,6 +38,10 @@ import java.util.regex.Pattern;
  *       presupposes its subject without stating it, and the extractor writes the
  *       presupposition down as a fact: "forget my dentist's name" produced "The
  *       user has a dentist." for an operator who never said they had one.
+ *   <li>{@link #assertsOnlyAssistantContent} (JCLAW-1056) — the substance came from
+ *       the assistant turn, which carries tool output: a question about an accountant
+ *       stored a fact about an optometrist, every token of it lifted from what recall
+ *       had just returned.
  * </ul>
  */
 public final class MemorySafety {
@@ -293,5 +297,36 @@ public final class MemorySafety {
         if (candidate.isEmpty()) return false;
         return Collections.disjoint(candidate, MemorySimilarity.contentTokens(asserted.toString()))
                 && !Collections.disjoint(candidate, MemorySimilarity.contentTokens(presupposed.toString()));
+    }
+
+    /**
+     * Whether a candidate memory's substance came from the assistant rather than the operator
+     * (JCLAW-1056).
+     *
+     * <p>The extraction prompt already bars this — only the user turn is a source — but a live
+     * model ignored it: asked "what did I tell you about my accountant", it stored "The user
+     * sees Dr Kerans as their optometrist", every content token lifted from the recall output
+     * the assistant had just surfaced. That matters beyond phrasing churn, because the
+     * assistant turn carries tool results: whatever a fetch returns can otherwise become a
+     * durable fact about the operator.
+     *
+     * <p>The prompt supplies the assistant turn on purpose, to resolve pronouns, so this
+     * cannot demand that every token trace back to the user — "The user's son Arun goes by Bo"
+     * legitimately takes <em>Arun</em> from the assistant. The two cases differ by degree
+     * rather than kind: a resolution is still partly grounded in what the user said ("goes by
+     * Bo"), while the defect is grounded in it not at all. So the refusal needs user-grounding
+     * to be empty and assistant-grounding not to be, which leaves resolution untouched.
+     *
+     * <p>Complements {@link #assertsOnlyPresupposition} at its blind spot rather than
+     * overlapping it: that guard requires the candidate to touch the turn somewhere, and this
+     * one fires precisely when it touches nothing in it.
+     */
+    public static boolean assertsOnlyAssistantContent(String userTurn, String assistantTurn, String text) {
+        if (userTurn == null || assistantTurn == null || text == null || text.isBlank()) return false;
+
+        Set<String> candidate = MemorySimilarity.contentTokens(text);
+        if (candidate.isEmpty()) return false;
+        return Collections.disjoint(candidate, MemorySimilarity.contentTokens(userTurn))
+                && !Collections.disjoint(candidate, MemorySimilarity.contentTokens(assistantTurn));
     }
 }
