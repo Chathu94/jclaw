@@ -67,7 +67,12 @@ public final class MemoryEvalGenerator {
     }
 
     /** A memory lifted out of its transaction, so the model calls hold no connection. */
-    private record Row(Long id, String text, String retrievalKey) {}
+    private record Row(Long id, String text, String retrievalKey, java.time.Instant createdAt) {}
+
+    private static List<Row> corpus(Agent agent) {
+        return Tx.run(() -> Memory.<Memory>find(ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
+                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey, m.createdAt)).toList());
+    }
 
     /**
      * How a coverage question's set of distinct facts is decided.
@@ -84,6 +89,11 @@ public final class MemoryEvalGenerator {
         public boolean semantic() {
             return "semantic".equals(by);
         }
+
+        /** JCLAW-943: {@code threshold} is then a span in days, not a similarity. */
+        public boolean temporal() {
+            return "temporal".equals(by);
+        }
     }
 
     /**
@@ -95,9 +105,7 @@ public final class MemoryEvalGenerator {
      */
     public static MemoryEvalSuite generate(Agent agent, String suiteId, int sampleSize,
                                            QuestionWriter writer) {
-        var rows = Tx.run(() -> Memory.<Memory>find(
-                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
+        var rows = corpus(agent);
         if (rows.isEmpty()) {
             return new MemoryEvalSuite(suiteId, "No memories to sample.", corpusFingerprint(rows), List.of());
         }
@@ -159,9 +167,7 @@ public final class MemoryEvalGenerator {
      */
     public static MemoryEvalSuite generateCoverage(Agent agent, String suiteId, int maxCases,
                                                    Clustering clustering, QuestionWriter writer) {
-        var rows = Tx.run(() -> Memory.<Memory>find(
-                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
+        var rows = corpus(agent);
         var cases = new ArrayList<MemoryEvalCase>();
         var used = new java.util.HashSet<Long>();
 
@@ -190,7 +196,8 @@ public final class MemoryEvalGenerator {
             }
             if (question.isBlank() || question.lines().count() > 1) continue;
 
-            cases.add(new MemoryEvalCase("cov-" + seed.id(), question, groups));
+            cases.add(new MemoryEvalCase("cov-" + seed.id(), question,
+                    MemoryEvalCase.SHAPE_COVERAGE, groups));
             cluster.forEach(r -> used.add(r.id()));
         }
         return new MemoryEvalSuite(suiteId,
@@ -244,9 +251,7 @@ public final class MemoryEvalGenerator {
      */
     public static MemoryEvalSuite generateBridge(Agent agent, String suiteId, int maxCases,
                                                  QuestionWriter writer) {
-        var rows = Tx.run(() -> Memory.<Memory>find(
-                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
+        var rows = corpus(agent);
         var docFreq = docFrequencies(rows);
 
         var cases = new ArrayList<MemoryEvalCase>();
@@ -288,7 +293,7 @@ public final class MemoryEvalGenerator {
             var question = bridgeQuestion(relation, relationTokens, target, docFreq, writer);
             if (question == null) continue;
             out.add(new MemoryEvalCase("bridge-" + target.id(), question,
-                    List.of(goldFor(target, rows))));
+                    MemoryEvalCase.SHAPE_BRIDGE, List.of(goldFor(target, rows))));
             usedTargets.add(target.id());
         }
         return out;
@@ -339,6 +344,167 @@ public final class MemoryEvalGenerator {
         return memory.JpaMemoryStore.entityNames(goldText).stream().anyMatch(question::contains);
     }
 
+    private static final String TEMPORAL_INSTRUCTIONS = """
+            You write evaluation questions for a memory-retrieval system. You are given \
+            several facts a user's assistant recorded during one stretch of time, and the \
+            dates that stretch covers.
+
+            Write the single question the user would ask to get that stretch back, phrased \
+            through an explicit time reference — a month, a season, a year, "back in", \
+            "around when". The time reference must be in the question. Do not quote the \
+            facts, do not enumerate them, and do not name a specific day.
+
+            Output only the question, on one line, with no preamble and no quotation marks.""";
+
+    /** Rendered into the temporal prompt so the model has a real span to phrase against. */
+    private static final java.time.format.DateTimeFormatter SPAN_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("d MMMM yyyy")
+                    .withZone(java.time.ZoneOffset.UTC);
+
+    /**
+     * Generate temporal cases: questions that reach a stretch of the corpus through an
+     * explicit time reference (JCLAW-943).
+     *
+     * <p>The shape the other three modes structurally cannot produce. Each of them writes a
+     * question from memory <em>text</em>, so time never enters the query unless a memory
+     * happened to mention it; here the span itself is the handle, and the gold is whatever
+     * was recorded inside it regardless of subject.
+     *
+     * <p>Consequently a temporal cluster is not a topic. Its members share only a period, so
+     * a lexical or semantic ranker has no reason to return them together, and a low score
+     * here is the expected starting point rather than a defect — that is what makes it a
+     * usable baseline for the epic's temporal stories.
+     */
+    public static MemoryEvalSuite generateTemporal(Agent agent, String suiteId, int maxCases,
+                                                   Clustering clustering, QuestionWriter writer) {
+        var rows = corpus(agent).stream().filter(r -> r.createdAt() != null).toList();
+        var cases = new ArrayList<MemoryEvalCase>();
+        var used = new java.util.HashSet<Long>();
+        for (var seed : rows) {
+            if (cases.size() >= maxCases) break;
+            if (used.contains(seed.id())) continue;
+            var cluster = temporalCluster(seed, rows, clustering.threshold());
+            var groups = distinctFacts(cluster);
+            if (groups.size() < clustering.minFacts() || groups.size() > clustering.maxFacts()) continue;
+
+            var last = cluster.stream().map(Row::createdAt).max(java.time.Instant::compareTo).orElse(seed.createdAt());
+            String question;
+            try {
+                question = writer.write(List.of(
+                        ChatMessage.system(TEMPORAL_INSTRUCTIONS),
+                        ChatMessage.user("DATES: %s to %s\nFACTS:\n%s".formatted(
+                                SPAN_FORMAT.format(seed.createdAt()), SPAN_FORMAT.format(last),
+                                cluster.stream().map(Row::text).reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b))))).strip();
+            } catch (Exception e) {
+                EventLogger.warn(EVENT_CATEGORY,
+                        "Temporal question generation failed near memory %d: %s".formatted(seed.id(), e.getMessage()));
+                continue;
+            }
+            if (question.isBlank() || question.lines().count() > 1) continue;
+
+            cases.add(new MemoryEvalCase("temp-" + seed.id(), question,
+                    MemoryEvalCase.SHAPE_TEMPORAL, groups));
+            cluster.forEach(r -> used.add(r.id()));
+        }
+        return new MemoryEvalSuite(suiteId,
+                "Temporal suite: %d spans of %.0f day(s) over %d memories of agent %s"
+                        .formatted(cases.size(), clustering.threshold(), rows.size(), agent.name),
+                corpusFingerprint(rows), cases);
+    }
+
+    private static final String MULTIHOP_INSTRUCTIONS = """
+            You write evaluation questions for a memory-retrieval system. You are given two \
+            groups of facts about a user. The groups are connected: something named in the \
+            FIRST group is what the SECOND group is about.
+
+            Write the single question that needs facts from BOTH groups to answer — one that \
+            cannot be answered from either group on its own. Refer to the connecting subject \
+            the way the FIRST group describes it, not by the name the SECOND group uses. Do \
+            not quote either group and do not enumerate the facts.
+
+            Output only the question, on one line, with no preamble and no quotation marks.""";
+
+    /**
+     * Generate multi-hop cases: two clusters chained through a shared entity, with the
+     * memories of both marked gold (JCLAW-943).
+     *
+     * <p>Distinct from {@code bridge}, which is one relation memory and one target memory.
+     * Here each end is a whole cluster, so answering needs facts from both sides rather than
+     * one hop to a single row — and both sides count toward coverage, which is what makes a
+     * partial traversal visible as a partial score instead of a pass.
+     *
+     * <p>Pairs on a rare shared content token, for the reason {@link #generateBridge}
+     * documents at length: {@code entityNames} is what retrieval-key generation seeds on, so
+     * pairing with it would select for links the mechanism already makes and report its own
+     * heuristic back as a score.
+     */
+    public static MemoryEvalSuite generateMultiHop(Agent agent, String suiteId, int maxCases,
+                                                   Clustering clustering, QuestionWriter writer) {
+        var rows = corpus(agent);
+        var docFreq = docFrequencies(rows);
+        var clusters = new ArrayList<List<Row>>();
+        var seen = new java.util.HashSet<Long>();
+        for (var seed : rows) {
+            if (seen.contains(seed.id())) continue;
+            var cluster = clusterAround(agent, seed, rows, clustering);
+            cluster.forEach(r -> seen.add(r.id()));
+            if (cluster.size() >= 2) clusters.add(cluster);
+        }
+
+        var cases = new ArrayList<MemoryEvalCase>();
+        var usedClusters = new java.util.HashSet<Integer>();
+        for (int i = 0; i < clusters.size() && cases.size() < maxCases; i++) {
+            if (usedClusters.contains(i)) continue;
+            for (int j = i + 1; j < clusters.size() && cases.size() < maxCases; j++) {
+                if (usedClusters.contains(j)) continue;
+                var link = sharedRareToken(clusters.get(i), clusters.get(j), docFreq);
+                if (link == null) continue;
+                var question = multiHopQuestion(clusters.get(i), clusters.get(j), writer);
+                if (question == null) continue;
+                var groups = new ArrayList<>(distinctFacts(clusters.get(i)));
+                groups.addAll(distinctFacts(clusters.get(j)));
+                cases.add(new MemoryEvalCase("hop-%d-%d".formatted(
+                        clusters.get(i).getFirst().id(), clusters.get(j).getFirst().id()),
+                        question, MemoryEvalCase.SHAPE_MULTIHOP, groups));
+                usedClusters.add(i);
+                usedClusters.add(j);
+                break;
+            }
+        }
+        return new MemoryEvalSuite(suiteId,
+                "Multi-hop suite: %d chained cluster pairs over %d memories of agent %s"
+                        .formatted(cases.size(), rows.size(), agent.name),
+                corpusFingerprint(rows), cases);
+    }
+
+    /** A content token both clusters carry that is rare enough corpus-wide to be an entity. */
+    private static String sharedRareToken(List<Row> a, List<Row> b, Map<String, Integer> docFreq) {
+        var aTokens = new java.util.HashSet<String>();
+        a.forEach(r -> aTokens.addAll(MemorySimilarity.contentTokens(r.text())));
+        var bTokens = new java.util.HashSet<String>();
+        b.forEach(r -> bTokens.addAll(MemorySimilarity.contentTokens(r.text())));
+        return aTokens.stream()
+                .filter(bTokens::contains)
+                .filter(t -> docFreq.getOrDefault(t, 0) <= RARE_TOKEN_MAX_DOCS)
+                .min(java.util.Comparator.comparingInt(t -> docFreq.getOrDefault(t, 0)))
+                .orElse(null);
+    }
+
+    private static String multiHopQuestion(List<Row> first, List<Row> second, QuestionWriter writer) {
+        String question;
+        try {
+            question = writer.write(List.of(
+                    ChatMessage.system(MULTIHOP_INSTRUCTIONS),
+                    ChatMessage.user("FIRST GROUP:\n%s\n\nSECOND GROUP:\n%s".formatted(
+                            first.stream().map(Row::text).reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b),
+                            second.stream().map(Row::text).reduce("", (a, b) -> a.isEmpty() ? b : a + "\n" + b))))).strip();
+        } catch (Exception e) {
+            EventLogger.warn(EVENT_CATEGORY, "Multi-hop question generation failed: " + e.getMessage());
+            return null;
+        }
+        return question.isBlank() || question.lines().count() > 1 ? null : question;
+    }
+
     /**
      * Distinct-fact counts for the clusters {@code threshold} would produce, without
      * writing any questions.
@@ -350,9 +516,7 @@ public final class MemoryEvalGenerator {
      * surviving cluster per sweep point.
      */
     public static List<Integer> clusterSizes(Agent agent, Clustering clustering) {
-        var rows = Tx.run(() -> Memory.<Memory>find(
-                        ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
-                .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
+        var rows = corpus(agent);
         var sizes = new ArrayList<Integer>();
         var used = new java.util.HashSet<Long>();
         for (var seed : rows) {
@@ -366,9 +530,31 @@ public final class MemoryEvalGenerator {
 
     /** Memories related to the seed, by whichever signal {@code clustering} names. */
     private static List<Row> clusterAround(Agent agent, Row seed, List<Row> all, Clustering clustering) {
+        if (clustering.temporal()) return temporalCluster(seed, all, clustering.threshold());
         return clustering.semantic()
                 ? semanticCluster(agent, seed, all, clustering.threshold())
                 : lexicalCluster(seed, all, clustering.threshold());
+    }
+
+    /**
+     * Memories written within {@code spanDays} of the seed (JCLAW-943).
+     *
+     * <p>Groups on {@code createdAt} — when the memory was written — which is the only time
+     * axis the store actually has. It is not when the fact became true, so a temporal case
+     * asks "what was I dealing with around then", not "what was true in March". Reading it
+     * as the latter would credit retrieval for a distinction the corpus cannot make.
+     */
+    private static List<Row> temporalCluster(Row seed, List<Row> all, double spanDays) {
+        var span = java.time.Duration.ofMinutes((long) (spanDays * 24 * 60));
+        var cluster = new ArrayList<Row>();
+        cluster.add(seed);
+        for (var other : all) {
+            if (other.id().equals(seed.id()) || other.createdAt() == null) continue;
+            if (java.time.Duration.between(seed.createdAt(), other.createdAt()).abs().compareTo(span) <= 0) {
+                cluster.add(other);
+            }
+        }
+        return cluster;
     }
 
     private static List<Row> lexicalCluster(Row seed, List<Row> all, double threshold) {

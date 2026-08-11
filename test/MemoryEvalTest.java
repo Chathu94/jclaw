@@ -182,4 +182,68 @@ class MemoryEvalTest extends UnitTest {
         assertThrows(IllegalArgumentException.class, () -> MemoryEvalPaths.suiteFile("Recall"));
         assertThrows(IllegalArgumentException.class, () -> MemoryEvalPaths.suiteFile("recall.json"));
     }
+
+    // --- case shapes (JCLAW-943) ---
+
+    private static MemoryEvalCase shaped(String id, String shape, long gold) {
+        return new MemoryEvalCase(id, "question for " + id, shape, List.of(List.of(gold)));
+    }
+
+    @Test
+    void anUnstampedCaseReadsAsSingle() {
+        // Suites written before shapes existed have no shape field, so gson leaves it null.
+        // Without the normalization they would group under a null shape and vanish from the
+        // breakdown rather than counting as what they are.
+        assertEquals(MemoryEvalCase.SHAPE_SINGLE, new MemoryEvalCase("a", "q", List.of()).shape());
+        assertEquals(MemoryEvalCase.SHAPE_SINGLE, new MemoryEvalCase("a", "q", null, List.of()).shape());
+        assertEquals(MemoryEvalCase.SHAPE_SINGLE, new MemoryEvalCase("a", "q", "  ", List.of()).shape());
+    }
+
+    @Test
+    void theBreakdownSplitsByShapeAndReconcilesWithTheAggregate() {
+        var s = suite(shaped("s1", MemoryEvalCase.SHAPE_SINGLE, 1L),
+                shaped("s2", MemoryEvalCase.SHAPE_SINGLE, 2L),
+                shaped("t1", MemoryEvalCase.SHAPE_TEMPORAL, 3L),
+                shaped("h1", MemoryEvalCase.SHAPE_MULTIHOP, 4L));
+        // singles both rank 1; temporal ranks 2; multihop misses entirely
+        var report = MemoryEvalScorer.score(s, List.of(
+                List.of(1L), List.of(2L), List.of(99L, 3L), List.of(98L)));
+
+        var byShape = report.byShape().stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        MemoryEvalScorer.ShapeReport::shape, r -> r));
+        assertEquals(3, byShape.size());
+        assertEquals(1.0, byShape.get(MemoryEvalCase.SHAPE_SINGLE).recallAt1(), 1e-9);
+        assertEquals(0.0, byShape.get(MemoryEvalCase.SHAPE_TEMPORAL).recallAt1(), 1e-9);
+        assertEquals(1.0, byShape.get(MemoryEvalCase.SHAPE_TEMPORAL).recallAt5(), 1e-9);
+        assertEquals(1, byShape.get(MemoryEvalCase.SHAPE_MULTIHOP).missed());
+
+        // The whole point of the breakdown: 0.5 aggregate recall@1 hides that one shape is
+        // perfect and another is zero.
+        assertEquals(0.5, report.recallAt1(), 1e-9);
+        int casesAcrossShapes = report.byShape().stream()
+                .mapToInt(MemoryEvalScorer.ShapeReport::cases).sum();
+        assertEquals(report.cases(), casesAcrossShapes, "every case must appear in exactly one shape");
+        assertEquals(report.missed().size(), report.byShape().stream()
+                .mapToInt(MemoryEvalScorer.ShapeReport::missed).sum());
+    }
+
+    @Test
+    void aShapedSuiteRefusesComparisonWithAnUnshapedBaseline() {
+        // AC4. Same ids, same queries, same golds - only the shape differs, and that is
+        // enough to make the two suites measure different things.
+        var before = suite(shaped("c1", MemoryEvalCase.SHAPE_SINGLE, 1L));
+        var after = suite(shaped("c1", MemoryEvalCase.SHAPE_TEMPORAL, 1L));
+        assertNotEquals(before.fingerprint(), after.fingerprint());
+    }
+
+    @Test
+    void aSuiteOfOnlySingleCasesKeepsItsOldFingerprint() {
+        // The other half of AC4, and the reason shape is folded in conditionally: nothing
+        // about a pre-existing single-fact suite moved, so an existing baseline must stay
+        // valid rather than being invalidated by a field that carries no information for it.
+        var stamped = suite(shaped("c1", MemoryEvalCase.SHAPE_SINGLE, 1L));
+        var unstamped = suite(new MemoryEvalCase("c1", "question for c1", List.of(List.of(1L))));
+        assertEquals(unstamped.fingerprint(), stamped.fingerprint());
+    }
 }

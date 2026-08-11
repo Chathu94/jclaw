@@ -307,9 +307,14 @@ public class ApiMemoryController extends Controller {
         // Semantic by default: lexical gold groups share their signal with any ranker
         // that penalises token overlap, which decides the comparison in advance.
         // See MemoryEvalGenerator#generateCoverage.
+        // Temporal reads clusterThreshold as a span in DAYS, not a cosine, so it needs its
+        // own default — 0.62 days is a 15-hour window and would return an empty suite that
+        // looked like a corpus problem (JCLAW-943).
+        boolean temporal = "temporal".equals(mode);
+        var clusterBy = JsonArgs.optString(body, "clusterBy", temporal ? "temporal" : "semantic");
         var clustering = new MemoryEvalGenerator.Clustering(
-                JsonArgs.optString(body, "clusterBy", "semantic"),
-                JsonArgs.optDouble(body, "clusterThreshold", 0.62),
+                clusterBy,
+                JsonArgs.optDouble(body, "clusterThreshold", temporal ? 7.0 : 0.62),
                 JsonArgs.optInt(body, "minFacts", 3),
                 JsonArgs.optInt(body, "maxFacts", 8));
         if (JsonArgs.optBool(body, "dryRun")) {
@@ -327,9 +332,15 @@ public class ApiMemoryController extends Controller {
         // question scores three paraphrases exactly as it scores three different facts.
         // "bridge" asks through a relation stored in a different memory than the answer,
         // which "single" cannot express: it writes each question from the gold text alone.
+        // "temporal" reaches a stretch of the corpus through a time reference, and
+        // "multihop" chains two clusters through a shared entity so both count toward
+        // coverage (JCLAW-943). Neither is reachable from the three above, which all write
+        // their question from memory text and so can only ever ask about subject matter.
         var suite = switch (mode) {
             case "coverage" -> MemoryEvalGenerator.generateCoverage(agent, suiteId, sampleSize, clustering, writer);
             case "bridge" -> MemoryEvalGenerator.generateBridge(agent, suiteId, sampleSize, writer);
+            case "temporal" -> MemoryEvalGenerator.generateTemporal(agent, suiteId, sampleSize, clustering, writer);
+            case "multihop" -> MemoryEvalGenerator.generateMultiHop(agent, suiteId, sampleSize, clustering, writer);
             default -> MemoryEvalGenerator.generate(agent, suiteId, sampleSize, writer);
         };
         try {
