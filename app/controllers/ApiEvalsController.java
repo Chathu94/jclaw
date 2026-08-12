@@ -41,6 +41,17 @@ public class ApiEvalsController extends Controller {
     private static final String SUITE_DIR = "evals/suites";
 
     /**
+     * Untracked suites, for content that cannot be committed — a benchmark-derived suite
+     * would republish the dataset through the public mirror (JCLAW-942).
+     *
+     * <p>A subdirectory of {@link MemoryEvalPaths#LOCAL_DIR} rather than the directory
+     * itself: that one already holds generated MEMORY-eval suites, whose
+     * {@code corpusFingerprint} key this loader rejects outright. Two suite formats in one
+     * directory means whichever loader runs second fails on the other's files.
+     */
+    private static final String LOCAL_SUITE_DIR = MemoryEvalPaths.LOCAL_DIR + "/suites";
+
+    /**
      * Upper bound on the fan-out an operator can request. The ceiling exists so a
      * sweep cannot be turned into a load test against a shared provider by a typo
      * in the request body.
@@ -166,7 +177,7 @@ public class ApiEvalsController extends Controller {
      * capture records its content fingerprint, so the caller can always tell exactly
      * which content ran without naming a version up front.
      *
-     * <p>{@code local} selects {@link MemoryEvalPaths#LOCAL_DIR} instead of the tracked
+     * <p>{@code local} selects {@link #LOCAL_SUITE_DIR} instead of the tracked
      * suites (JCLAW-942). A suite derived from a licensed benchmark cannot live in
      * {@code evals/suites}: that directory is tracked and this repository is mirrored
      * publicly, so committing one would republish the dataset. A boolean rather than a
@@ -174,7 +185,7 @@ public class ApiEvalsController extends Controller {
      * reason to accept a string that would then need traversal defences.
      */
     private static EvalSuite resolveSuite(String suiteId, boolean local) {
-        var dir = local ? MemoryEvalPaths.LOCAL_DIR : SUITE_DIR;
+        var dir = local ? LOCAL_SUITE_DIR : SUITE_DIR;
         List<EvalSuite> suites;
         try {
             suites = EvalDatasetLoader.loadAll(Path.of(dir));
