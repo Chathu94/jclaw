@@ -1205,11 +1205,19 @@ public final class MemoryAutoCapture {
     // ─── Consolidation prompt (JCLAW-525, Mem0 UPDATE / Zep invalidation) ─────
 
     static final String CONSOLIDATION_INSTRUCTIONS = """
-            You maintain an agent's long-term memory. You are given NEW memories (just captured) and EXISTING memories (already stored), each numbered from 0. Identify which EXISTING memories each NEW memory supersedes: same subject, where the NEW text updates, contradicts, or restates the EXISTING information. For example, "The user lives in Porto" supersedes "The user lives in Berlin", and a duplicate phrased differently supersedes the older phrasing.
+            You maintain an agent's long-term memory. You are given NEW memories (just captured) and EXISTING memories (already stored), each numbered from 0. Identify which EXISTING memories each NEW memory supersedes.
 
-            Pair only memories that are genuinely about the same subject; related-but-different facts must NOT be paired. Never judge which side is more recent — the NEW entries are always the newer ones.
+            A supersession replaces one fact with a newer version of THAT SAME FACT. The test is whether both texts answer the same question about the same thing, so that keeping both would leave the store contradictory or redundant. "The user lives in Porto" supersedes "The user lives in Berlin" — both answer "where does the user live". A duplicate phrased differently supersedes the older phrasing, and a correction supersedes the value it corrects.
+
+            Two facts that merely mention the same person, place, project, tool or number are NOT a supersession, however strong the wording overlap. "The user has two sons, Mateo (18) and Rafa (12)" is not superseded by "The user is shopping for a telescope for 12-year-old Rafa": one answers who the user's children are and the other what they are shopping for, and retiring the first would lose Mateo entirely. Two printers, two hosts, two trips, two books and two events of the same kind are each separate facts.
+
+            Most pairs you are shown overlap in wording without being the same fact. Pairing nothing is a correct and common answer. If you cannot name the single question both texts answer, do not pair them.
+
+            For each supersession give "question": the one question both texts answer, in five words or fewer.
+
+            Never judge which side is more recent — the NEW entries are always the newer ones.
 
             Output ONLY a JSON object — no prose, no code fences — with exactly this shape, and an empty array when nothing is superseded:
-            {"supersessions":[{"new":0,"old":[2]}]}
+            {"supersessions":[{"new":0,"old":[2],"question":"where does the user live"}]}
             """;
 }

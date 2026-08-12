@@ -68,6 +68,22 @@ class MemoryConsolidationTest extends UnitTest {
                         "```json\n{\"supersessions\":[{\"new\":1,\"old\":[0,2]}]}\n```", 2, 3));
     }
 
+    /**
+     * JCLAW-942: the judge prompt now asks for the question both texts answer, so live
+     * output carries a field the shipped parser never saw. Pinned because the parser is
+     * all-or-nothing — a rejected object is a silently skipped supersession, not an error.
+     */
+    @Test
+    void aSupersessionCarryingTheJudgesReasonStillParses() {
+        var withReason = "{\"supersessions\":[{\"new\":0,\"old\":[1],"
+                + "\"question\":\"where does the user live\"}]}";
+
+        var parsed = MemoryAutoCapture.parseSupersessions(withReason, 1, 2);
+
+        assertEquals(1, parsed.size(), "the extra field must not reject the object");
+        assertEquals(List.of(1), parsed.get(0));
+    }
+
     @Test
     void outOfRangeAndDuplicateIndicesAreDropped() {
         // new=5 out of range → entry ignored; old 7 out of range and the
