@@ -5,10 +5,12 @@ import memory.MemoryAutoCapture;
 import models.Agent;
 import play.mvc.Before;
 import play.mvc.Controller;
+import services.Tx;
 import services.evals.EvalCapture;
 import services.evals.EvalDatasetLoader;
 import services.evals.EvalRunner;
 import services.evals.EvalSuite;
+import services.evals.MemoryEvalPaths;
 import utils.ApiResponses;
 
 import java.nio.file.Path;
@@ -83,7 +85,8 @@ public class ApiEvalsController extends Controller {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
         }
 
-        var suite = resolveSuite(suiteId);
+        var suite = resolveSuite(suiteId, body != null && body.has("local")
+                && body.get("local").getAsBoolean());
         int concurrency = Math.clamp(readInt(body, "concurrency", EvalRunner.DEFAULT_CONCURRENCY),
                 1, MAX_CONCURRENCY);
 
@@ -116,11 +119,22 @@ public class ApiEvalsController extends Controller {
      * <p>Same loopback + {@code X-Loadtest-Auth} gate as the rest of this controller. It
      * spends a model call per pair and writes to an agent's long-term memory, which is
      * exactly the pair of properties that gate exists for.
+     *
+     * <p><b>{@code @NoTransaction} is load-bearing.</b> Play wraps a request in a JPA
+     * transaction and {@link Tx#run} joins an existing one rather than opening its own, so
+     * without this every pair's writes would accumulate in a single request transaction
+     * held open across every LLM round-trip in the batch — the exact invariant JCLAW-525,
+     * JCLAW-807 and JCLAW-960 restructured the capture pipeline to preserve, and a pooled
+     * connection pinned for minutes. Measured before the annotation: 50 pairs captured
+     * according to the event log while the table showed none, because nothing had
+     * committed yet. The cost is that the counts below need their own transaction — a bare
+     * finder on a {@code @NoTransaction} path throws "No active EntityManager".
      */
+    @play.db.jpa.NoTransaction
     public static void memoryIngest() {
         var body = JsonBodyReader.readJsonBody();
         var agentName = JsonBodyReader.requiredOr400(body, "agent");
-        var agent = Agent.findByName(agentName);
+        var agent = Tx.run(() -> Agent.findByName(agentName));
         if (agent == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
         }
@@ -131,7 +145,7 @@ public class ApiEvalsController extends Controller {
         var pairs = body.getAsJsonArray("pairs");
         int limit = Math.clamp(readInt(body, "limit", pairs.size()), 0, MAX_INGEST_PAIRS);
 
-        long before = models.Memory.count("agent.id = ?1", agent.id);
+        long before = Tx.run(() -> models.Memory.count("agent.id = ?1", agent.id));
         long t0 = System.currentTimeMillis();
         int captured = 0;
         int n = Math.min(limit, pairs.size());
@@ -142,7 +156,7 @@ public class ApiEvalsController extends Controller {
             captured += MemoryAutoCapture.captureSync(agent, user, assistant).captured();
         }
         long elapsed = System.currentTimeMillis() - t0;
-        long after = models.Memory.count("agent.id = ?1", agent.id);
+        long after = Tx.run(() -> models.Memory.count("agent.id = ?1", agent.id));
         renderJSON(GSON.toJson(new IngestResult(agent.name, n, captured, (int) (after - before),
                 elapsed, n == 0 ? 0 : elapsed / n)));
     }
@@ -151,16 +165,24 @@ public class ApiEvalsController extends Controller {
      * Load the dataset and pick one suite by id. There is one file per suite, and the
      * capture records its content fingerprint, so the caller can always tell exactly
      * which content ran without naming a version up front.
+     *
+     * <p>{@code local} selects {@link MemoryEvalPaths#LOCAL_DIR} instead of the tracked
+     * suites (JCLAW-942). A suite derived from a licensed benchmark cannot live in
+     * {@code evals/suites}: that directory is tracked and this repository is mirrored
+     * publicly, so committing one would republish the dataset. A boolean rather than a
+     * caller-supplied path — the two legal directories are both known here, so there is no
+     * reason to accept a string that would then need traversal defences.
      */
-    private static EvalSuite resolveSuite(String suiteId) {
+    private static EvalSuite resolveSuite(String suiteId, boolean local) {
+        var dir = local ? MemoryEvalPaths.LOCAL_DIR : SUITE_DIR;
         List<EvalSuite> suites;
         try {
-            suites = EvalDatasetLoader.loadAll(Path.of(SUITE_DIR));
+            suites = EvalDatasetLoader.loadAll(Path.of(dir));
         } catch (RuntimeException e) {
             // Also the path a production distribution takes: evals/ is a developer
             // artifact and does not ship, so say that rather than 500 on a missing dir.
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "Cannot read the eval dataset at %s: %s".formatted(SUITE_DIR, e.getMessage()));
+                    "Cannot read the eval dataset at %s: %s".formatted(dir, e.getMessage()));
             return null;  // unreachable: error() throws
         }
         var match = suites.stream()
@@ -169,7 +191,7 @@ public class ApiEvalsController extends Controller {
                 .orElse(null);
         if (match == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
-                    "No suite '%s' in %s".formatted(suiteId, SUITE_DIR));
+                    "No suite '%s' in %s".formatted(suiteId, dir));
         }
         return match;
     }
