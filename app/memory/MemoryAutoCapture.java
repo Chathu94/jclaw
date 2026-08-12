@@ -18,15 +18,18 @@ import services.Tx;
 import utils.CircuitBreaker;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.regex.Pattern;
 
 /**
  * Memory auto-capture (JCLAW-39). After a conversation turn completes, an
@@ -123,8 +126,12 @@ public final class MemoryAutoCapture {
      * shortlist — active memories whose token-Jaccard overlap with a survivor
      * sits in the moderate band below the dup threshold, i.e. plausibly the
      * same subject with changed content.
+     *
+     * <p>{@code overflow} counts candidates the {@code maxPerTurn} cut never examined. It is
+     * reported because it is the one loss in this pipeline with no other trace: a duplicate
+     * is logged where it is dropped, but a candidate past the cut simply never appears.
      */
-    public record ConsolidationPlan(List<Candidate> survivors, List<Existing> shortlist) {}
+    public record ConsolidationPlan(List<Candidate> survivors, List<Existing> shortlist, int overflow) {}
 
     public record CaptureResult(int captured, int skipped, String skipReason) {
         static CaptureResult skipped(String reason) {
@@ -473,8 +480,23 @@ public final class MemoryAutoCapture {
                     "Dropped %d candidate memory(ies) sourced from the assistant turn".formatted(assistantSourced));
         }
 
-        if (kept.isEmpty()) {
-            return logged(agentName, CaptureResult.skipped("no_candidates"));
+        // JCLAW-942: the maxPerTurn cut in plan() keeps the first survivors in list order, so
+        // that order has to mean something. The extractor scores every candidate for
+        // importance and nothing read it: a turn stating six durable facts stored whichever
+        // five the model happened to emit first. Measured on a live 751-turn agent, the cap
+        // bound on 79 turns and discarded leftovers on 56. Sorted here rather than in plan()
+        // because semanticDuplicateIndices returns indices into this list. Stable, so equal
+        // importance keeps emission order.
+        final List<Candidate> ranked = kept.stream()
+                .sorted(Comparator.comparingDouble(Candidate::importance).reversed())
+                .toList();
+
+        if (ranked.isEmpty()) {
+            // Two different failures, and conflating them hid which one was happening: the
+            // extractor finding nothing durable is the ordinary case, every candidate being
+            // refused by the filters above is the one worth investigating.
+            return logged(agentName,
+                    CaptureResult.skipped(deduped.isEmpty() ? "no_candidates" : "all_filtered"));
         }
 
         int maxPerTurn = ConfigService.getInt("memory.autocapture.maxPerTurn", 5);
@@ -507,8 +529,13 @@ public final class MemoryAutoCapture {
             return logged(agentName, CaptureResult.skipped("capture_in_flight"));
         }
         try {
-            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, kept);
-            var plan = Tx.run(() -> plan(agentKey, kept, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
+            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, ranked);
+            var plan = Tx.run(() -> plan(agentKey, ranked, maxPerTurn, dupThreshold, dedupScan, semanticDupes));
+            if (plan.overflow() > 0) {
+                EventLogger.info(EVENT_CATEGORY, agentName, null,
+                        ("Turn yielded more than the %d-memory per-turn cap — %d lower-importance "
+                                + "candidate(s) not stored").formatted(maxPerTurn, plan.overflow()));
+            }
             var supersessions = judgeSupersessions(agentName, plan, consolidator, breaker);
             // Persist the survivor rows inside the apply Tx (capturing their ids), then
             // generate + write their embeddings AFTER it commits — the embedding HTTP
@@ -525,7 +552,7 @@ public final class MemoryAutoCapture {
                                 .formatted(storedIds.size(), embedded));
             }
             return logged(agentName, new CaptureResult(storedIds.size(),
-                    kept.size() - storedIds.size(), null));
+                    ranked.size() - storedIds.size(), null));
         } finally {
             lock.unlock();
         }
@@ -618,8 +645,12 @@ public final class MemoryAutoCapture {
         var survivorTokens = new ArrayList<MemorySimilarity.Tokens>();
         var shortlist = new ArrayList<Existing>();
         var shortlisted = new HashSet<Long>();
+        int overflow = 0;
         for (int idx = 0; idx < candidates.size(); idx++) {
-            if (survivors.size() >= maxPerTurn) break;
+            if (survivors.size() >= maxPerTurn) {
+                overflow = candidates.size() - idx;
+                break;
+            }
             if (semanticDupes.contains(idx)) continue;
             var c = candidates.get(idx);
             var toks = MemorySimilarity.Tokens.of(c.text());
@@ -638,7 +669,7 @@ public final class MemoryAutoCapture {
                 }
             }
         }
-        return new ConsolidationPlan(survivors, shortlist);
+        return new ConsolidationPlan(survivors, shortlist, overflow);
     }
 
     private static boolean hasDuplicate(MemorySimilarity.Tokens toks,
@@ -720,6 +751,14 @@ public final class MemoryAutoCapture {
                             ("Kept memory %d instead of superseding it with %d — no shared subject: "
                                     + "\"%s\" vs \"%s\"")
                                     .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
+                    continue;
+                }
+                if (!preservesValues(ex.text(), c.text())) {
+                    EventLogger.info(EVENT_CATEGORY, agentName, null,
+                            ("Kept memory %d instead of superseding it with %d — the newer text pins "
+                                    + "no %s: \"%s\" vs \"%s\"")
+                                    .formatted(ex.id(), newId, lostValueKinds(ex.text(), c.text()),
+                                            snippet(c.text()), snippet(ex.text())));
                     continue;
                 }
                 Memory old = Memory.findById(ex.id());
@@ -822,6 +861,76 @@ public final class MemoryAutoCapture {
         shared.retainAll(MemorySimilarity.contentTokens(replacement));
         return shared.stream().anyMatch(t ->
                 !VALUE_MARKERS.contains(t) && !t.chars().allMatch(Character::isDigit));
+    }
+
+    private static final String MONTHS =
+            "january|february|march|april|may|june|july|august|september|october|november|december"
+                    + "|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec";
+
+    /** A value-bearing shape and the kind of value it pins. */
+    private record ValueShape(Pattern pattern, String kind) {}
+
+    /**
+     * Ordered most specific first. {@link #valueKinds} strips each shape's matches before
+     * trying the next, so "7:00 pm" is read as a clock and not additionally as the bare
+     * numbers 7 and 0 — without that, any text holding a time would also count as carrying
+     * a quantity and the guard would wave through a replacement that dropped one.
+     */
+    private static final List<ValueShape> VALUE_SHAPES = List.of(
+            new ValueShape(Pattern.compile(
+                    "\\b\\d{1,2}:\\d{2}\\s*(?:am|pm)?|\\b\\d{1,2}\\s*(?:am|pm)\\b"), "clock"),
+            new ValueShape(Pattern.compile(
+                    "\\b\\d+\\s*-?\\s*(?:second|minute|hour|day|week|month|year|decade)s?\\b"), "duration"),
+            new ValueShape(Pattern.compile(
+                    "\\b(?:" + MONTHS + ")\\b\\s*\\d{0,4}(?:st|nd|rd|th)?"
+                            + "|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:" + MONTHS + ")\\b"), "date"),
+            new ValueShape(Pattern.compile(
+                    "\\b\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}\\b|\\b\\d{1,2}[-/]\\d{1,2}(?:[-/]\\d{2,4})?\\b"), "date"),
+            new ValueShape(Pattern.compile("\\b(?:19|20)\\d{2}\\b"), "year"),
+            new ValueShape(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), "quantity"));
+
+    /** Which kinds of value a text pins down. */
+    private static Set<String> valueKinds(String text) {
+        var remaining = text.toLowerCase(Locale.ROOT);
+        var kinds = new HashSet<String>();
+        for (var shape : VALUE_SHAPES) {
+            var m = shape.pattern().matcher(remaining);
+            if (!m.find()) continue;
+            kinds.add(shape.kind());
+            remaining = m.replaceAll(" ");
+        }
+        return kinds;
+    }
+
+    /**
+     * Whether {@code replacement} still pins every kind of value {@code existing} did
+     * (JCLAW-942).
+     *
+     * <p>Neither guard above can see this. {@link #atLeastAsInformative} counts tokens
+     * without asking which, and {@link #sharesSubject} deliberately ignores numbers when
+     * looking for a shared subject — so a replacement can be long enough and about the same
+     * thing while dropping the one detail that made the old row worth keeping. Measured over
+     * a 302-turn LongMemEval ingest: of 104 supersessions, 16 retired a memory carrying a
+     * date, time, duration or quantity and 15 of those dropped it. "on page 250 of 'The
+     * Nightingale'" was retired by "currently reading 'Sapiens'"; "a daily tidying routine
+     * for 3 weeks" by "has made a significant positive difference".
+     *
+     * <p>Compares kinds rather than values, because a correction refills the slot it
+     * empties — "flight is at 08:00" → "at 11:30 from Gate 4" keeps a clock and must still
+     * pass, and that pair is the worked example in {@link #SUPERSEDE_MIN_CONTENT_RATIO}'s
+     * note. Only a kind vanishing outright is destruction. It follows that two distinct
+     * events of the same shape are still not separated — "caught 7 bass on 7/10" may retire
+     * "caught 9 bass on 7/22" — which stays a judge problem, as 08454ef4 recorded.
+     */
+    private static boolean preservesValues(String existing, String replacement) {
+        return valueKinds(replacement).containsAll(valueKinds(existing));
+    }
+
+    /** The kinds in the event log line, so an operator sees what the refusal protected. */
+    private static String lostValueKinds(String existing, String replacement) {
+        var lost = valueKinds(existing);
+        lost.removeAll(valueKinds(replacement));
+        return String.join("/", lost);
     }
 
     private static String snippet(String text) {

@@ -105,6 +105,38 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertEquals("fact", stored.getFirst().category());
     }
 
+    /**
+     * JCLAW-942: the per-turn cap used to keep whichever candidates the extractor emitted
+     * first, so a turn stating more facts than the cap allows lost them by position rather
+     * than by worth. Emission order here is worst-first, so the pre-fix behaviour keeps the
+     * coffee machine and discards the build cluster.
+     */
+    @Test
+    void thePerTurnCapKeepsTheMostImportantCandidatesNotTheFirstEmitted() {
+        MemoryAutoCapture.Extractor extractor = msgs -> """
+                {"memories":[
+                 {"text":"The coffee machine takes pods","category":"fact","importance":0.1},
+                 {"text":"The office wifi is on channel 11","category":"fact","importance":0.3},
+                 {"text":"The fire drill is quarterly","category":"fact","importance":0.4},
+                 {"text":"The payroll job runs on Fridays","category":"fact","importance":0.6},
+                 {"text":"The CI system is Buildkite","category":"fact","importance":0.8},
+                 {"text":"The staging cluster runs nightly builds","category":"fact","importance":0.9}]}""";
+
+        var result = MemoryAutoCapture.capture(agentId("agent-rank"), "agent-rank",
+                "Brain dump: the coffee machine takes pods, the office wifi is on channel 11, "
+                        + "the fire drill is quarterly, the payroll job runs on Fridays, our CI "
+                        + "system is Buildkite, and the staging cluster runs nightly builds.",
+                "Noted.", extractor, freshBreaker());
+
+        assertEquals(5, result.captured(), "the cap stores five of the six candidates");
+        var texts = MemoryStoreFactory.get().list(agentId("agent-rank")).stream()
+                .map(memory.MemoryStore.MemoryEntry::text).toList();
+        assertTrue(texts.stream().anyMatch(t -> t.contains("staging cluster")),
+                "the highest-importance candidate was emitted last and must survive the cut");
+        assertTrue(texts.stream().noneMatch(t -> t.contains("coffee")),
+                "the lowest-importance candidate was emitted first and must be the one dropped");
+    }
+
     @Test
     void captureRoutesAnIdentityFactToTheAlwaysLoadedTier() {
         // JCLAW-529: the whole point of the change. On a real corpus these facts scored

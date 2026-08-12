@@ -299,6 +299,57 @@ class MemoryConsolidationTest extends UnitTest {
                 "both facts must remain recallable");
     }
 
+    /**
+     * JCLAW-942: the pair clears both earlier guards — it is long enough for
+     * {@code atLeastAsInformative} and plainly about the same routine for
+     * {@code sharesSubject} — and still destroys the only thing that made the old row
+     * answer "how long have I kept it up". Measured over a 302-turn LongMemEval ingest:
+     * of 104 supersessions, 16 retired a memory holding a value and 15 dropped it.
+     */
+    @Test
+    void aReplacementThatPinsNoDurationCannotSupersedeOneThatDid() {
+        var agent = agentId("value-destroyed");
+        var store = MemoryStoreFactory.get();
+        var routineId = Long.valueOf(store.store(agent,
+                "The user has maintained a daily tidying routine for 3 weeks and feels proud "
+                        + "of this accomplishment.", "fact", 0.7));
+
+        MemoryAutoCapture.Extractor extractor = msgs -> extractorJson(
+                "The user's daily tidying routine has made a significant positive difference "
+                        + "in their apartment.");
+        MemoryAutoCapture.Consolidator consolidator = msgs -> SUPERSEDE_JSON;
+        MemoryAutoCapture.capture(agent, "value-destroyed",
+                "My daily tidying routine has really changed how the apartment feels.",
+                "That's great to hear.", extractor, consolidator, freshBreaker());
+
+        assertNull(Memory.<Memory>findById(routineId).supersededAt,
+                "the replacement pins no duration, so '3 weeks' would be lost with nothing "
+                        + "to recover it from");
+        assertEquals(2, Memory.findByAgent(agent).size(), "both must remain recallable");
+    }
+
+    /**
+     * The complement, and the reason the guard compares kinds rather than values: an update
+     * refills the slot it empties, so a changed clock time must still supersede.
+     */
+    @Test
+    void aCorrectionThatRefillsTheValueStillSupersedes() {
+        var agent = agentId("value-refilled");
+        var store = MemoryStoreFactory.get();
+        var flightId = Long.valueOf(store.store(agent,
+                "The user's flight to Lisbon is at 08:00", "fact", 0.7));
+
+        MemoryAutoCapture.Extractor extractor = msgs -> extractorJson(
+                "The user's flight to Lisbon is at 11:30 from Gate 4");
+        MemoryAutoCapture.Consolidator consolidator = msgs -> SUPERSEDE_JSON;
+        MemoryAutoCapture.capture(agent, "value-refilled",
+                "My Lisbon flight got moved to 11:30, leaving from Gate 4.", "Noted.",
+                extractor, consolidator, freshBreaker());
+
+        assertNotNull(Memory.<Memory>findById(flightId).supersededAt,
+                "a corrected time is still a clock time — the value guard must not block an update");
+    }
+
     @Test
     void aCorrectionStillSupersedesWhenTheSubjectSurvives() {
         // The guard must not block updates, which are the reason supersession exists: a
