@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Agent-callable long-term memory: recall, store, forget (JCLAW-919).
@@ -441,7 +442,16 @@ public class MemoryTool implements ToolRegistry.Tool {
         if (query.isBlank()) return "Error: `query` is required for forget.";
 
         var matches = sameFact(agentId, query);
+        var matchedIds = matches.stream().map(m -> m.id).collect(Collectors.toSet());
+        var related = relatedByMeaning(agentId, query, matchedIds);
+
         if (matches.isEmpty()) {
+            if (!related.isEmpty()) {
+                var sb = new StringBuilder(("Nothing stored matches \"%s\" closely enough to forget "
+                        + "outright, but these look related. Say which to remove:%n").formatted(query));
+                for (var m : related) sb.append("- ").append(snippet(m.text)).append('\n');
+                return sb.toString();
+            }
             var near = nearestMiss(agentId, query);
             return near == null
                     ? "Nothing stored matches \"%s\" — nothing to forget.".formatted(query)
@@ -470,23 +480,49 @@ public class MemoryTool implements ToolRegistry.Tool {
 
         var sb = new StringBuilder("Forgot %d memory(ies):\n".formatted(removed.size()));
         for (var r : removed) sb.append("- ").append(r).append('\n');
+        if (!related.isEmpty()) {
+            sb.append("\nRelated but NOT removed — say so to remove any of these:\n");
+            for (var m : related) sb.append("- ").append(snippet(m.text)).append('\n');
+        }
         return sb.toString();
     }
 
     // ─── shared matching ─────────────────────────────────────────────────────
 
     /**
-     * Keyless form, for the forget matcher, on forget's own lexical floors.
-     *
-     * <p>What the operator types to remove a memory is a description rather than a stored
-     * statement, so there is no key to embed with it — unlike the store path, where the
-     * same tool call supplies one. The asymmetry against keyed stored vectors is therefore
-     * inherent here rather than an oversight, and it costs recall on the semantic leg only.
+     * Keyless form, for the forget matcher, on forget's own lexical floors. Lexical only:
+     * what a semantic match finds is offered for confirmation by {@link #relatedByMeaning}
+     * rather than deleted.
      */
     private static List<Memory> sameFact(String agentId, String text) {
         return matching(agentId, text, null,
                 ConfigService.getDouble("memory.forget.match.threshold", FORGET_JACCARD),
                 ConfigService.getDouble("memory.forget.match.containmentThreshold", FORGET_CONTAINMENT));
+    }
+
+    /**
+     * Stored memories a forget query is <em>about</em>, beyond the ones it matches outright
+     * (JCLAW-942). Never deleted without a second instruction — see {@link #forget}.
+     *
+     * <p>Cosine measures topical relatedness, and forget needs identity of fact. Measured on
+     * the live corpus at the 0.35 floor: "what movies I like" reaches the genre memory at
+     * 0.409 and "the user does not like Indian cinema" at 0.387; "my views on colonialism"
+     * reaches three beliefs and also a plan to write an article about them. Those are worth
+     * surfacing and wrong to delete, and no floor separates the two classes because they
+     * interleave — the article sits above one of the beliefs.
+     */
+    private static List<Memory> relatedByMeaning(String agentId, String text, Set<Long> already) {
+        var ids = semanticNeighbours(agentId, text, null);
+        if (ids.isEmpty()) return List.of();
+        return Tx.run(() -> {
+            var out = new ArrayList<Memory>();
+            for (var id : ids) {
+                if (already.contains(id)) continue;
+                Memory m = Memory.findById(id);
+                if (m != null && m.supersededAt == null) out.add(m);
+            }
+            return List.copyOf(out);
+        });
     }
 
     /**
@@ -514,7 +550,11 @@ public class MemoryTool implements ToolRegistry.Tool {
      */
     private static List<Memory> matching(String agentId, String text, String retrievalKey,
             double jaccard, double containment) {
-        var ids = semanticNeighbours(agentId, text, retrievalKey);
+        // Keyless callers (forget) take the lexical leg only: a semantic hit is topical, and
+        // deleting on topic removes neighbouring facts the operator did not name.
+        var ids = (retrievalKey == null || retrievalKey.isBlank())
+                ? List.<Long>of()
+                : semanticNeighbours(agentId, text, retrievalKey);
         return Tx.run(() -> {
             var byId = new LinkedHashMap<Long, Memory>();
             for (var id : ids) {
@@ -564,11 +604,36 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
      *  must not make memory unusable — fail open to the lexical tier, as capture does. */
+    /**
+     * Forget's semantic floor, on the query-embedding scale (JCLAW-942).
+     *
+     * <p>Not the dedup cosine, and the difference is not a preference. Stored vectors carry
+     * the statement plus its retrieval key; forget's input is a description with no key, so
+     * comparing them bare put the leg on a scale where an identical memory averages 0.869
+     * against a 0.90 floor — it could not fire on an exact duplicate, let alone the
+     * paraphrases it exists to catch. Embedding the description as a query fixes the
+     * comparison and moves the scale, so the floor had to be re-swept rather than carried
+     * over.
+     *
+     * <p>Swept over the live 118-memory corpus with snowflake-arctic-embed: verbatim memory
+     * text scores 0.533-0.595, a paraphrase of a real memory 0.366-0.467 (correct target
+     * every time, including between two adjacent movie memories), and a query about nothing
+     * stored 0.221-0.302. 0.35 sits in the empty band between the last two. Small sample —
+     * eleven probes — so this is a knob, not a constant.
+     */
+    private static final double FORGET_COSINE = 0.35;
+
     private static List<Long> semanticNeighbours(String agentId, String text, String retrievalKey) {
-        double cosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
+        var store = MemoryStoreFactory.get();
         try {
-            return MemoryStoreFactory.get()
-                    .semanticNeighbours(agentId, text, retrievalKey, FORGET_LIMIT, cosine);
+            // No key means the caller holds a description rather than a stored statement,
+            // which is a query and has to be embedded as one.
+            if (retrievalKey == null || retrievalKey.isBlank()) {
+                return store.semanticMatchesForQuery(agentId, text, FORGET_LIMIT,
+                        ConfigService.getDouble("memory.forget.match.cosineThreshold", FORGET_COSINE));
+            }
+            return store.semanticNeighbours(agentId, text, retrievalKey, FORGET_LIMIT,
+                    ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90));
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY, "Semantic memory match failed, using lexical only: %s"
                     .formatted(e.getMessage()));

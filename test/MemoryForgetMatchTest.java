@@ -115,6 +115,66 @@ class MemoryForgetMatchTest extends UnitTest {
         assertEquals(1, remaining().size(), "a near miss must not delete anything");
     }
 
+    /**
+     * JCLAW-942: a semantic hit is topical, not the same fact. Measured on the live corpus,
+     * "what movies I like" reaches the genre memory at 0.409 cosine and "the user does not
+     * like Indian cinema" at 0.387, and "my views on colonialism" reaches three beliefs plus
+     * a plan to write an article about them. Surfacing those is useful; deleting them
+     * removes facts the operator never named, and no floor separates the two classes because
+     * they interleave.
+     */
+    @Test
+    void aSemanticOnlyMatchIsOfferedForConfirmationAndNotDeleted() {
+        seed("The user's preferred movie genres are Action, Sci-Fi and Thriller.");
+        seed("The user does not like Indian cinema.");
+        var real = MemoryStoreFactory.get();
+        var ids = real.list(String.valueOf(agent.id)).stream().map(m -> Long.valueOf(m.id())).toList();
+        // Stand in for a vector backend: the real one is disabled in tests, and without a
+        // semantic leg this case cannot arise at all.
+        MemoryStoreFactory.setForTest(new SemanticStub(real, ids));
+
+        var out = forget("what movies I like");
+
+        assertEquals(2, remaining().size(), "a topical match must not delete: " + out);
+        assertTrue(out.contains("NOT removed") || out.contains("look related"),
+                "the related memories were not offered: " + out);
+        assertTrue(out.contains("Indian cinema"), "the related memory was not named: " + out);
+    }
+
+    /** Delegates everything except the query-format semantic leg, which returns the seeded rows. */
+    private record SemanticStub(memory.MemoryStore delegate, java.util.List<Long> ids)
+            implements memory.MemoryStore {
+        @Override
+        public java.util.List<Long> semanticMatchesForQuery(String a, String q, int l, double c) {
+            return ids;
+        }
+
+        @Override
+        public String store(String a, String t, String c, double i) {
+            return delegate.store(a, t, c, i);
+        }
+
+        @Override
+        public java.util.List<MemoryEntry> search(String a, String q, int l) {
+            return delegate.search(a, q, l);
+        }
+
+        @Override
+        public void delete(String id) {
+            delegate.delete(id);
+        }
+
+        @Override
+        public java.util.List<MemoryEntry> list(String a) {
+            return delegate.list(a);
+        }
+
+        @Override
+        public int deleteAll(String a) {
+            return delegate.deleteAll(a);
+        }
+    }
+
     @Test
     void aOneWordQueryCannotDeleteALongMemory() {
         // containment is |intersection| / min(|a|,|b|), so a single word scores 1.0 against

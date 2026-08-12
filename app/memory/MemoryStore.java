@@ -139,6 +139,37 @@ public interface MemoryStore {
         return List.of();
     }
 
+    /**
+     * Memories within {@code minCosine} of {@code query}, embedded as a <em>query</em> —
+     * prefix included, no retrieval key — rather than as a statement (JCLAW-942).
+     *
+     * <p>{@link #semanticNeighbours} is the wrong tool for a caller holding a description
+     * instead of a statement. It embeds bare and symmetric, which is right for comparing a
+     * capture candidate against stored rows, and wrong against the same rows when the input
+     * is what an operator typed: measured on this corpus, an identical memory scores a mean
+     * 0.869 bare-against-keyed, so a caller on the 0.90 dedup threshold never matches
+     * anything at all.
+     */
+    default List<Long> semanticMatchesForQuery(String agentId, String query, int limit, double minCosine) {
+        return List.of();
+    }
+
+    /**
+     * The best cosine any stored memory reaches for {@code query}, embedded the way the
+     * recall path embeds a query — prefix included. {@code NaN} when the vector leg cannot
+     * run at all (disabled, no provider, empty index), which is not a failure.
+     *
+     * <p>Diagnostic only. Exists because the recall floor is compared against a scale that
+     * belongs to the embedding model, so a floor swept for one model silently rejects every
+     * vector hit under another and recall degrades to keyword-only with no error. Nothing
+     * else on this interface can observe that: {@link #search} returns the keyword leg's
+     * results either way, and {@link #semanticNeighbours} embeds bare, so it cannot see a
+     * misconfigured query prefix.
+     */
+    default double bestQueryCosine(String agentId, String query) {
+        return Double.NaN;
+    }
+
     void delete(String id);
 
     List<MemoryEntry> list(String agentId);

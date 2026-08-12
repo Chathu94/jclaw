@@ -576,6 +576,41 @@ public class JpaMemoryStore implements MemoryStore {
      * threshold means no block, rather than dropping whichever individual memories fall
      * below it.
      */
+    /** {@inheritDoc} */
+    @Override
+    public List<Long> semanticMatchesForQuery(String agentId, String query, int limit, double minCosine) {
+        if (!vectorEnabled || query == null || query.isBlank()) return List.of();
+        Long pk = pkOrNull(agentId);
+        if (pk == null) return List.of();
+        var embedding = generateQueryEmbedding(query);
+        if (embedding == null) return List.of();
+        try {
+            return isPostgres
+                    ? pgSemanticNeighbours(pk, embedding, limit, minCosine)
+                    : luceneSemanticNeighbours(agentId, embedding, limit, minCosine);
+        } catch (Exception e) {
+            EventLogger.warn(EVENT_CATEGORY_MEMORY,
+                    "Semantic query match failed, falling back to lexical only: %s".formatted(e.getMessage()));
+            return List.of();
+        }
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public double bestQueryCosine(String agentId, String query) {
+        // Lucene-backed only: the Postgres leg scores through pgvector and this probe would
+        // read an index that path never populates.
+        if (!vectorEnabled || isPostgres || query == null || query.isBlank()) return Double.NaN;
+        var embedding = generateQueryEmbedding(query);
+        if (embedding == null) return Double.NaN;
+        try {
+            var hits = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, 1);
+            return hits.isEmpty() ? Double.NaN : 2 * hits.getFirst().score() - 1;
+        } catch (IOException e) {
+            return Double.NaN;
+        }
+    }
+
     private static boolean vectorLegAboveFloor(double bestCosine) {
         double floor = ConfigService.getDouble(KEY_RECALL_MIN_COSINE, DEFAULT_RECALL_MIN_COSINE);
         // A NaN floor fails every comparison, silently dropping the whole vector leg (JCLAW-970).
