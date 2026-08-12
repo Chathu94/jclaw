@@ -267,4 +267,53 @@ class MemoryConsolidationTest extends UnitTest {
         assertEquals(1, result.captured());
         assertEquals(2, Memory.findByAgent(agent).size(), "no consolidator → append-only");
     }
+
+    // ─── JCLAW-942: a supersession must be about the same thing ──────────────
+
+    /**
+     * Both texts verbatim from a 302-turn LongMemEval ingest, where the judge paired them
+     * and a correct memory was retired by an unrelated one. They share only "7"/"pm", and
+     * {@link MemoryAutoCapture} previously checked content <em>volume</em> only, so the
+     * replacement cleared the bar on length while concerning a different subject entirely.
+     */
+    @Test
+    void anUnrelatedMemoryCannotSupersedeOneThatMerelySharesATime() {
+        var agent = agentId("no-shared-subject");
+        var store = MemoryStoreFactory.get();
+        var gymId = Long.valueOf(store.store(agent,
+                "The user has gym sessions at 7:00 pm on Mondays, Wednesdays, and Fridays",
+                "fact", 0.7));
+
+        MemoryAutoCapture.Extractor extractor = msgs -> extractorJson(
+                "The user stops work emails and messages by 7 pm to separate work and personal life");
+        MemoryAutoCapture.Consolidator consolidator = msgs -> SUPERSEDE_JSON;
+        MemoryAutoCapture.capture(agent, "no-shared-subject",
+                "I stop checking work email by 7pm so I can switch off.",
+                "That's a healthy boundary.", extractor, consolidator, freshBreaker());
+
+        Memory gym = Memory.findById(gymId);
+        assertNull(gym.supersededAt,
+                "a memory about gym times was retired by one about work email - the two share "
+                        + "only a clock time, which is not a shared subject");
+        assertEquals(2, Memory.findByAgent(agent).size(),
+                "both facts must remain recallable");
+    }
+
+    @Test
+    void aCorrectionStillSupersedesWhenTheSubjectSurvives() {
+        // The guard must not block updates, which are the reason supersession exists: a
+        // correction keeps its subject and changes its value, so one shared noun is enough.
+        var agent = agentId("subject-survives");
+        var store = MemoryStoreFactory.get();
+        var berlinId = Long.valueOf(store.store(agent, BERLIN, "fact", 0.7));
+
+        MemoryAutoCapture.Extractor extractor = msgs -> PORTO_JSON;
+        MemoryAutoCapture.Consolidator consolidator = msgs -> SUPERSEDE_JSON;
+        MemoryAutoCapture.capture(agent, "subject-survives",
+                "I moved from Berlin to Porto last month", "Noted.", extractor, consolidator,
+                freshBreaker());
+
+        assertNotNull(Memory.<Memory>findById(berlinId).supersededAt,
+                "the shared-subject guard must not block a genuine correction");
+    }
 }

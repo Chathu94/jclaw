@@ -715,6 +715,13 @@ public final class MemoryAutoCapture {
                                     .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
                     continue;
                 }
+                if (!sharesSubject(ex.text(), c.text())) {
+                    EventLogger.info(EVENT_CATEGORY, agentName, null,
+                            ("Kept memory %d instead of superseding it with %d — no shared subject: "
+                                    + "\"%s\" vs \"%s\"")
+                                    .formatted(ex.id(), newId, snippet(c.text()), snippet(ex.text())));
+                    continue;
+                }
                 Memory old = Memory.findById(ex.id());
                 if (old == null || old.supersededAt != null) continue;
                 old.supersede(newId);
@@ -781,6 +788,40 @@ public final class MemoryAutoCapture {
         if (older == 0) return true;
         int newer = MemorySimilarity.contentTokens(replacement).size();
         return newer >= SUPERSEDE_MIN_CONTENT_RATIO * older;
+    }
+
+    /**
+     * Whether the two texts are about the same thing at all, by shared non-numeric content
+     * (JCLAW-942).
+     *
+     * <p>{@link #atLeastAsInformative} asks only how <em>much</em> content the replacement
+     * has, never whether it concerns the same subject, so any sufficiently long memory could
+     * retire any other the judge happened to pair. Measured over a 302-turn LongMemEval
+     * ingest: of 104 supersessions, 11% shared no non-numeric token with what they retired —
+     * "Emma taught the user how to make a Negroni" replaced by "the user is interested in
+     * infusing spirits with lavender", and a memory about gym sessions at 7:00 pm retired by
+     * one about stopping work email at 7 pm. The prompt already forbids pairing
+     * related-but-different facts; the judge does it anyway.
+     *
+     * <p>Numbers and clock markers are excluded from the evidence precisely because they are
+     * what those false pairs shared. A shared time is not a shared subject, and "pm" carries
+     * no more subject information than the "7" it qualifies — excluding the digits alone
+     * left the gym/work-email pair still sharing {@code pm} and still passing.
+     *
+     * <p>Deliberately weak — one shared noun is enough. A correction keeps its subject while
+     * changing its value ("lives in Porto" → "lives in Lisbon"), so anything stricter starts
+     * refusing the updates supersession exists to apply. This blocks only pairs with no
+     * lexical claim to being about the same thing, and the cost of a false refusal is a
+     * redundant row that both remain visible and recallable.
+     */
+    /** Tokens that only ever qualify a number, so sharing one is not sharing a subject. */
+    private static final Set<String> VALUE_MARKERS = Set.of("am", "pm");
+
+    private static boolean sharesSubject(String existing, String replacement) {
+        var shared = MemorySimilarity.contentTokens(existing);
+        shared.retainAll(MemorySimilarity.contentTokens(replacement));
+        return shared.stream().anyMatch(t ->
+                !VALUE_MARKERS.contains(t) && !t.chars().allMatch(Character::isDigit));
     }
 
     private static String snippet(String text) {
@@ -1028,6 +1069,8 @@ public final class MemoryAutoCapture {
             A request or a question takes its subject for granted rather than stating it. "Forget my dentist's name" does not tell you the user has a dentist, and "what did I say about my accountant" does not tell you they have one. Extract what the user claims, never what their wording assumes.
 
             Write each memory as one concise, self-contained sentence in the third person ("The user ...", "The project ..."), resolving pronouns so it stands alone out of context. Preserve exact identifiers (names, paths, IDs, URLs) verbatim.
+
+            Preserve every date, time, duration and quantity the turn gives, in the memory that carries the fact they belong to. Write "The user has been keeping a daily tidying routine since 2 September" rather than "The user has a daily tidying routine", and "The user attended the Seattle International Film Festival in June 2021 and watched 8 films" rather than "The user attended the Seattle International Film Festival and watched 8 films". "Concise" never means dropping the when or the how-many: a fact stripped of them cannot answer the question it was stored to answer, and the capture timestamp records when you wrote the memory, not when the thing happened.
 
             One fact per memory. If the turn states two things, emit two memories — "Kheshav's nickname is Lyuvez and Aaditya's nickname is Dudez" is two facts, not one. State the fact directly: write "The user's daughter Priya is allergic to peanuts", not "The user said that Priya is allergic to peanuts".
 
