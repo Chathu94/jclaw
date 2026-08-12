@@ -85,11 +85,14 @@ public final class ContextWindowManager {
     public static final String SAFETY_MULTIPLIER_KEY = "jtokkit.safetyMultiplier.unmatched";
     public static final String SAFETY_MULTIPLIER_PREFIX = "jtokkit.safetyMultiplier.";
     public static final double DEFAULT_SAFETY_MULTIPLIER = 1.4;
-    /** Clamp range so a misbehaving calibration can't starve the conversation entirely. */
+    /**
+     * Clamp range so a misbehaving calibration can't starve the conversation entirely.
+     */
     public static final double MIN_SAFETY_MULTIPLIER = 1.0;
     public static final double MAX_SAFETY_MULTIPLIER = 2.5;
 
-    private ContextWindowManager() {}
+    private ContextWindowManager() {
+    }
 
     /**
      * Return the prompt-token estimate adjusted for known tokenizer-mismatch
@@ -101,7 +104,7 @@ public final class ContextWindowManager {
      * per-model safety multiplier — see {@link #resolveSafetyMultiplier}.
      */
     public static int adjustedPromptTokens(String providerName, String modelId,
-                                            TokenUsageEstimator.ChatRequestTokens estimate) {
+                                           TokenUsageEstimator.ChatRequestTokens estimate) {
         if (estimate.modelMatched()) return estimate.promptTokens();
         return (int) Math.ceil(estimate.promptTokens() * resolveSafetyMultiplier(providerName, modelId));
     }
@@ -122,7 +125,7 @@ public final class ContextWindowManager {
      * produced by {@link #adjustedPromptTokens}.
      */
     public static int adjustedMessageTokens(int rawTokens, boolean modelMatched,
-                                             String providerName, String modelId) {
+                                            String providerName, String modelId) {
         if (modelMatched) return rawTokens;
         return (int) Math.ceil(rawTokens * resolveSafetyMultiplier(providerName, modelId));
     }
@@ -165,8 +168,7 @@ public final class ContextWindowManager {
         if (raw == null || raw.isBlank()) return null;
         try {
             return Math.clamp(Double.parseDouble(raw), MIN_SAFETY_MULTIPLIER, MAX_SAFETY_MULTIPLIER);
-        }
-        catch (NumberFormatException _) {
+        } catch (NumberFormatException _) {
             return null;
         }
     }
@@ -192,7 +194,7 @@ public final class ContextWindowManager {
      * the provider apply its own default.
      */
     static Integer effectiveMaxTokens(Agent agent, Conversation conv, LlmProvider provider,
-                                       List<ChatMessage> messages, List<ToolDef> tools) {
+                                      List<ChatMessage> messages, List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.maxTokens() <= 0) return null;
 
@@ -241,7 +243,7 @@ public final class ContextWindowManager {
     }
 
     static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv,
-                                                  LlmProvider provider, List<ToolDef> tools) {
+                                                 LlmProvider provider, List<ToolDef> tools) {
         var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
 
@@ -311,17 +313,28 @@ public final class ContextWindowManager {
     static final String TOOL_TRUNCATE_KEEP_TAIL_CHARS_KEY = "chat.truncateToolResultsKeepTailChars";
     static final String TOOL_TRUNCATE_PRESERVE_RECENT_KEY = "chat.truncateToolResultsPreserveRecent";
 
-    /** Below this content length, truncating wouldn't save enough to be worth it. */
+    /**
+     * Below this content length, truncating wouldn't save enough to be worth it.
+     */
     static final int DEFAULT_TOOL_TRUNCATE_MIN_CHARS = 5000;
-    /** Bytes kept from the start of an oversized tool result. */
+    /**
+     * Bytes kept from the start of an oversized tool result.
+     */
     static final int DEFAULT_TOOL_TRUNCATE_KEEP_HEAD_CHARS = 500;
-    /** Bytes kept from the end of an oversized tool result. */
+    /**
+     * Bytes kept from the end of an oversized tool result.
+     */
     static final int DEFAULT_TOOL_TRUNCATE_KEEP_TAIL_CHARS = 500;
-    /** Don't touch tool results in the last N messages — recent results are most relevant. */
+    /**
+     * Don't touch tool results in the last N messages — recent results are most relevant.
+     */
     static final int DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT = 4;
 
-    /** Outcome of a truncation pass: the rebuilt messages list and the running adjusted estimate. */
-    private record TruncationOutcome(List<ChatMessage> messages, int adjustedEstimate) {}
+    /**
+     * Outcome of a truncation pass: the rebuilt messages list and the running adjusted estimate.
+     */
+    private record TruncationOutcome(List<ChatMessage> messages, int adjustedEstimate) {
+    }
 
     /**
      * Head/tail-truncate the largest tool-result messages until the prompt
@@ -342,7 +355,8 @@ public final class ContextWindowManager {
      * {@link #DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT} messages regardless of
      * size — recency wins over size for the model's immediate context.
      */
-    private record Candidate(int index, int contentLength) {}
+    private record Candidate(int index, int contentLength) {
+    }
 
     private static TruncationOutcome truncateOversizedToolResults(
             List<ChatMessage> messages, String providerName, String modelId, boolean modelMatched,
@@ -384,7 +398,9 @@ public final class ContextWindowManager {
         return new TruncationOutcome(working, runningEstimate);
     }
 
-    /** Find tool-result messages eligible for head/tail truncation. */
+    /**
+     * Find tool-result messages eligible for head/tail truncation.
+     */
     private static List<Candidate> collectCandidates(List<ChatMessage> messages, int minChars, int preserveRecent) {
         int cutoff = Math.max(0, messages.size() - preserveRecent);
         var candidates = new ArrayList<Candidate>();
@@ -399,8 +415,11 @@ public final class ContextWindowManager {
         return candidates;
     }
 
-    /** Outcome of a per-message truncation attempt. */
-    private record TruncationSavings(int adjustedDelta, int charsElided) {}
+    /**
+     * Outcome of a per-message truncation attempt.
+     */
+    private record TruncationSavings(int adjustedDelta, int charsElided) {
+    }
 
     /**
      * Apply head/tail truncation to one candidate message in {@code working}.
@@ -410,8 +429,8 @@ public final class ContextWindowManager {
      * caller's running totals need.
      */
     private static TruncationSavings attemptTruncate(List<ChatMessage> working, Candidate cand,
-                                                       String modelId, boolean modelMatched, String providerName,
-                                                       int keepHead, int keepTail) {
+                                                     String modelId, boolean modelMatched, String providerName,
+                                                     int keepHead, int keepTail) {
         var original = working.get(cand.index());
         var originalText = (String) original.content();
         var truncated = truncateToolResultContent(originalText, keepHead, keepTail);
@@ -504,14 +523,16 @@ public final class ContextWindowManager {
         if (!(content instanceof List<?> parts)) return 0;
         int chars = 0;
         for (var part : parts) {
-            if (part instanceof Map<?,?> m && m.get("text") instanceof String t) {
+            if (part instanceof Map<?, ?> m && m.get("text") instanceof String t) {
                 chars += t.length();
             }
         }
         return chars;
     }
 
-    /** Tool call names + arguments also consume input tokens. */
+    /**
+     * Tool call names + arguments also consume input tokens.
+     */
     private static int toolCallChars(List<LlmTypes.ToolCall> toolCalls) {
         if (toolCalls == null) return 0;
         int chars = 0;

@@ -6,11 +6,7 @@ import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ToolDef;
 import llm.TokenUsageEstimator;
 import models.Agent;
-import services.ConfigService;
-import services.ConversationService;
-import services.EventLogger;
-import services.SessionCompactor;
-import services.Tx;
+import services.*;
 
 import java.util.List;
 import java.util.Set;
@@ -40,16 +36,18 @@ import java.util.Set;
  */
 public final class CompactionGate {
 
-    private CompactionGate() {}
+    private CompactionGate() {
+    }
 
-    private record CompactionDecision(ModelInfo modelInfo, String modelId, String channelType) {}
+    private record CompactionDecision(ModelInfo modelInfo, String modelId, String channelType) {
+    }
 
     /**
      * If {@code current} exceeds the compaction budget for the
      * effective model, run {@link SessionCompactor#compact} and
      * return a freshly rebuilt message list (with the new summary
      * injected into the system prompt and the older turns dropped).
-     * Otherwise returns {@code current} unchanged (JCLAW-38).
+     * Otherwise, returns {@code current} unchanged (JCLAW-38).
      *
      * <p>Called from both {@link AgentRunner#run} and the streaming
      * loop after the initial prep Tx closes, because the

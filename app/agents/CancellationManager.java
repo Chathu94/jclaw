@@ -44,7 +44,8 @@ public final class CancellationManager {
 
     static final String STREAM_CANCELLED_MSG = "Stream cancelled by client disconnect";
 
-    private CancellationManager() {}
+    private CancellationManager() {
+    }
 
     /**
      * Check whether the streaming client has disconnected. Logs the
@@ -56,7 +57,7 @@ public final class CancellationManager {
      * path are safe.
      */
     static boolean checkCancelled(AtomicBoolean isCancelled, Agent agent, String channelType,
-                                   AgentRunner.StreamingCallbacks cb) {
+                                  AgentRunner.StreamingCallbacks cb) {
         if (isCancelled.get()) {
             EventLogger.info("llm", agent.name, channelType, STREAM_CANCELLED_MSG);
             if (cb != null && cb.onCancel() != null) cb.onCancel().run();
@@ -72,9 +73,9 @@ public final class CancellationManager {
      * logged via {@link #checkCancelled}).
      */
     static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,
-                                             AtomicBoolean isCancelled,
-                                             Agent agent, String channelType,
-                                             AgentRunner.StreamingCallbacks cb)
+                                            AtomicBoolean isCancelled,
+                                            Agent agent, String channelType,
+                                            AgentRunner.StreamingCallbacks cb)
             throws InterruptedException {
         while (!accumulator.awaitCompletion(5000)) {
             if (checkCancelled(isCancelled, agent, channelType, cb)) return false;
@@ -98,15 +99,15 @@ public final class CancellationManager {
      * non-empty and the user sees what happened.
      *
      * <p>The fallback is also pushed via
-     * {@link AgentRunner.StreamingCallbacks#onToken} for symmetry with
+     * {@link AgentRunner.StreamingCallbacks#onToken()} for symmetry with
      * {@code handleToolCallsStreaming}'s empty-retry diagnostic. If the
      * SSE channel is already dead the underlying {@code sse.send} call
      * is a no-op (SseStream catches the write exception and auto-closes);
      * on Telegram the sink's {@code update} is similarly tolerant.
      */
     static String cancelledReturn(String priorContent, List<String> collectedImages,
-                                   String channelType, AgentRunner.StreamingCallbacks cb,
-                                   Agent agent, int round) {
+                                  String channelType, AgentRunner.StreamingCallbacks cb,
+                                  Agent agent, int round) {
         if (priorContent != null && !priorContent.isBlank()) {
             return priorContent;
         }

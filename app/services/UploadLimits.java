@@ -32,7 +32,7 @@ public final class UploadLimits {
     public static final int DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024;
 
     /** Hard ceiling on {@link #maxFiles()} — operators can lower the per-message
-     *  file count, but never raise it above this. Keeping the cap centralised
+     *  file count, but never raise it above this. Keeping the cap centralized
      *  here means the Settings slider, the server-side check, and any future
      *  callers all agree on the same upper bound. */
     public static final int ABSOLUTE_MAX_FILES = 5;
@@ -56,8 +56,7 @@ public final class UploadLimits {
     public static int maxFiles() {
         int configured = ConfigService.getInt(KEY_MAX_FILES, DEFAULT_MAX_FILES);
         if (configured < 1) return 1;
-        if (configured > ABSOLUTE_MAX_FILES) return ABSOLUTE_MAX_FILES;
-        return configured;
+        return Math.min(configured, ABSOLUTE_MAX_FILES);
     }
 
     /** Human-friendly name for error messages — "image", "audio", or "file". */

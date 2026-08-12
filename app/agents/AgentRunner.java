@@ -8,14 +8,7 @@ import memory.MemoryAutoCapture;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
-import services.AttachmentService;
-import services.ConfigService;
-import services.ConversationQueue;
-import services.ConversationService;
-import services.EventLogger;
-import services.SubagentRegistry;
-import services.TaskRunRegistry;
-import services.Tx;
+import services.*;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
@@ -123,21 +116,22 @@ public class AgentRunner {
      *                             emit a structured view
      */
     public record ToolCallEvent(
-        String id,
-        String name,
-        String icon,
-        String arguments,
-        String resultText,
-        String resultStructuredJson,
-        // JCLAW-228/562: JSON array of tool-produced attachments (generate_image's image,
-        // diarize_audio's voice clips) so the live SSE tool_call frame can render them inline;
-        // null for every ordinary tool call.
-        String generatedAttachmentsJson,
-        // uuids of this call's persisted generated attachments. The web transport renders them
-        // from generatedAttachmentsJson above; external channels (Telegram) that deliver out-of-
-        // band resolve the persisted files by uuid and upload them. Empty for ordinary calls.
-        List<String> generatedAttachmentUuids
-    ) {}
+            String id,
+            String name,
+            String icon,
+            String arguments,
+            String resultText,
+            String resultStructuredJson,
+            // JCLAW-228/562: JSON array of tool-produced attachments (generate_image's image,
+            // diarize_audio's voice clips) so the live SSE tool_call frame can render them inline;
+            // null for every ordinary tool call.
+            String generatedAttachmentsJson,
+            // uuids of this call's persisted generated attachments. The web transport renders them
+            // from generatedAttachmentsJson above; external channels (Telegram) that deliver out-of-
+            // band resolve the persisted files by uuid and upload them. Empty for ordinary calls.
+            List<String> generatedAttachmentUuids
+    ) {
+    }
 
     /**
      * Callbacks for streaming mode. Groups the event handlers that
@@ -169,15 +163,16 @@ public class AgentRunner {
      *                    no-op.
      */
     public record StreamingCallbacks(
-        Consumer<Conversation> onInit,
-        Consumer<String> onToken,
-        Consumer<String> onReasoning,
-        Consumer<String> onStatus,
-        Consumer<ToolCallEvent> onToolCall,
-        Consumer<String> onComplete,
-        Consumer<Exception> onError,
-        Runnable onCancel
-    ) {}
+            Consumer<Conversation> onInit,
+            Consumer<String> onToken,
+            Consumer<String> onReasoning,
+            Consumer<String> onStatus,
+            Consumer<ToolCallEvent> onToolCall,
+            Consumer<String> onComplete,
+            Consumer<Exception> onError,
+            Runnable onCancel
+    ) {
+    }
 
     /**
      * JCLAW-291: cooperative-cancellation checkpoint for subagent runs. If
@@ -236,7 +231,7 @@ public class AgentRunner {
      * H2-corruption post-mortem.
      */
     public static void checkTaskRunCancel(Long taskRunId) {
-        if (taskRunId != null && TaskRunRegistry.isCancelled(taskRunId)) {
+        if (TaskRunRegistry.isCancelled(taskRunId)) {
             throw new RunCancelledException(taskRunId, "Task");
         }
     }
@@ -250,7 +245,7 @@ public class AgentRunner {
      * @param conversation the conversation to run inside
      * @param userMessage  the user's input text
      * @return the run outcome carrying the final assistant content and the
-     *         (possibly-new) conversation reference
+     * (possibly-new) conversation reference
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage) {
         return run(agent, conversation, userMessage, null);
@@ -273,7 +268,7 @@ public class AgentRunner {
      * @return the run outcome
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
-                                 List<AttachmentService.Input> attachments) {
+                                List<AttachmentService.Input> attachments) {
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent);
         if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
@@ -313,7 +308,7 @@ public class AgentRunner {
      * @return the run outcome
      */
     static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
-                                        boolean skipUserAppend) {
+                                       boolean skipUserAppend) {
         return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend);
     }
 
@@ -341,7 +336,7 @@ public class AgentRunner {
      * @param conversation the parent conversation carrying the yielded
      *                     subagent_announce row
      * @return the run outcome, or a queued-canned-response result when the
-     *         conversation queue is currently owned by another turn
+     * conversation queue is currently owned by another turn
      */
     public static RunResult runYieldResume(Agent agent, Conversation conversation) {
         // Empty user message because the actual input — the child's reply —
@@ -357,7 +352,7 @@ public class AgentRunner {
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                              List<AttachmentService.Input> attachments) {
+                                             List<AttachmentService.Input> attachments) {
         return runAfterAcquire(agent, conversation, userMessage, attachments, false);
     }
 
@@ -411,11 +406,11 @@ public class AgentRunner {
      *                   tests that want to round-trip via the chat schema,
      *                   {@link TaskRunSink} for production task fires
      * @return outcome carrying the final assistant content and the
-     *         truncated flag (true when the model hit
-     *         {@code finish_reason=length} on the final turn)
+     * truncated flag (true when the model hit
+     * {@code finish_reason=length} on the final turn)
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
-                                                             AgentExecutionSink sink) {
+                                                            AgentExecutionSink sink) {
         Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
         Objects.requireNonNull(userPrompt, "userPrompt");
         Objects.requireNonNull(sink, "sink");
@@ -434,7 +429,8 @@ public class AgentRunner {
         // into one short Tx that commits well before the long-running LLM
         // call below, preserving the "no Tx during LLM" design while
         // letting the assembler / tool-registry stay tx-agnostic.
-        record Prelude(SystemPromptAssembler.AssembledPrompt assembled, List<ToolDef> tools) {}
+        record Prelude(SystemPromptAssembler.AssembledPrompt assembled, List<ToolDef> tools) {
+        }
         var prelude = Tx.run(() -> new Prelude(
                 SystemPromptAssembler.assemble(agent, userPrompt, null, null),
                 ToolRegistry.getToolDefsForAgent(agent)));
@@ -478,8 +474,8 @@ public class AgentRunner {
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                              List<AttachmentService.Input> attachments,
-                                              boolean skipUserAppend) {
+                                             List<AttachmentService.Input> attachments,
+                                             boolean skipUserAppend) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
         // through this sink. ConversationSink keeps existing chat
@@ -517,8 +513,7 @@ public class AgentRunner {
                     skipUserAppend, conversationId, sink, trace);
 
             if (preparedOpt.isEmpty()) {
-                var error = NO_LLM_PROVIDER_ERROR;
-                return new RunResult(error,
+                return new RunResult(NO_LLM_PROVIDER_ERROR,
                         Tx.run(() -> ConversationService.findById(conversationId)));
             }
             var prepared = preparedOpt.get();
@@ -556,7 +551,7 @@ public class AgentRunner {
             // logs + skips internally rather than inserting a row with a
             // null FK.
             Tx.run(() ->
-                sink.appendAssistantMessage(response, null, null, null, truncated));
+                    sink.appendAssistantMessage(response, null, null, null, truncated));
 
             EventLogger.info("llm", agent.name, conversation.channelType,
                     "Response generated (%d chars%s)".formatted(response.length(),
@@ -655,7 +650,6 @@ public class AgentRunner {
     // --- Internal ---
 
 
-
     /**
      * Shared webhook message handler: resolve agent route, find/create conversation,
      * run the agent synchronously, and send the response via the provided sender.
@@ -668,8 +662,8 @@ public class AgentRunner {
      * @param sendNoRoute  callback when no agent is routed (receives peerId); may be null to silently drop
      */
     public static void processWebhookMessage(String channelType, String peerId, String text,
-                                              BiConsumer<String, String> sendResponse,
-                                              Consumer<String> sendNoRoute) {
+                                             BiConsumer<String, String> sendResponse,
+                                             Consumer<String> sendNoRoute) {
         ChannelInboundDispatcher.processWebhookMessage(channelType, peerId, text, sendResponse, sendNoRoute);
     }
 
@@ -688,7 +682,7 @@ public class AgentRunner {
      *                     {@code peerId} and response text)
      */
     public static void processInboundForAgent(Agent agent, String channelType, String peerId,
-                                               String text, BiConsumer<String, String> sendResponse) {
+                                              String text, BiConsumer<String, String> sendResponse) {
         ChannelInboundDispatcher.processInboundForAgent(agent, channelType, peerId, text, sendResponse);
     }
 
@@ -706,14 +700,14 @@ public class AgentRunner {
      * which either performs one final HTML edit or falls back to the
      * chunked planner path for oversize / media-rich responses.
      *
-     * @param agent        the bound agent
-     * @param channelType  channel identifier
-     * @param peerId       channel-specific peer id
-     * @param text         inbound message text
-     * @param sinkFactory  factory that returns a streaming sink for the
-     *                     given message id; called inside the streaming
-     *                     virtual thread once the persisted message id is
-     *                     known
+     * @param agent       the bound agent
+     * @param channelType channel identifier
+     * @param peerId      channel-specific peer id
+     * @param text        inbound message text
+     * @param sinkFactory factory that returns a streaming sink for the
+     *                    given message id; called inside the streaming
+     *                    virtual thread once the persisted message id is
+     *                    known
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
@@ -789,7 +783,7 @@ public class AgentRunner {
      * @return the composite conversation peer key
      */
     public static String telegramConversationPeerId(String ownerKey, String chatType, String chatId,
-                                             Integer messageThreadId) {
+                                                    Integer messageThreadId) {
         return TelegramMessageAddressing.telegramConversationPeerId(ownerKey, chatType, chatId, messageThreadId);
     }
 
@@ -805,7 +799,7 @@ public class AgentRunner {
      * @return the (possibly attributed) message text
      */
     public static String telegramSenderAttributed(String text, String chatType,
-                                            String fromDisplayName, String fromId) {
+                                                  String fromDisplayName, String fromId) {
         return TelegramMessageAddressing.telegramSenderAttributed(text, chatType, fromDisplayName, fromId);
     }
 

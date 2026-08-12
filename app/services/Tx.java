@@ -7,7 +7,7 @@ import play.libs.F;
  * Transaction helper for running JPA operations from any thread context.
  * If already inside a JPA transaction (request thread, @OnApplicationStart job),
  * runs the block directly to avoid orphaning the existing EntityManager.
- * Otherwise delegates to JPA.withTransaction to create a new one.
+ * Otherwise, delegates to JPA.withTransaction to create a new one.
  */
 public class Tx {
 

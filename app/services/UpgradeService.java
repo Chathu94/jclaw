@@ -57,7 +57,7 @@ public final class UpgradeService {
      */
     private static final Duration CHECK_TTL = Duration.ofHours(1);
 
-    /** Test seam: when non-null, {@link #requestUpgrade()} hands the plan here instead of spawning it. */
+    /** Test seam: when non-null, {@link #requestUpgrade(String)} hands the plan here instead of spawning it. */
     public static Consumer<Plan> spawnerForTest;
 
     /** Test seam: when non-null, {@link #latestVersion(boolean)} returns this instead of calling GitHub. */
