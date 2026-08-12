@@ -11,16 +11,16 @@ class MemoryIdentityClassTest extends UnitTest {
 
     @Test
     void matchesKinshipFacts() {
-        assertTrue(MemoryIdentityClass.isIdentity("The user's son Kheshav was born on Feb 7, 2008."));
-        assertTrue(MemoryIdentityClass.isIdentity("The user's wife is named Renu."));
-        assertTrue(MemoryIdentityClass.isIdentity("The user has two sons named Aaditya and Kheshav."));
+        assertTrue(MemoryIdentityClass.isIdentity("The user's son Mateo was born on Mar 4, 2009."));
+        assertTrue(MemoryIdentityClass.isIdentity("The user's wife is named Alina."));
+        assertTrue(MemoryIdentityClass.isIdentity("The user has two sons named Rafa and Mateo."));
         assertTrue(MemoryIdentityClass.isIdentity("The user's daughters go by Mimi and Taz."));
     }
 
     @Test
     void matchesSelfAndAttachmentFacts() {
-        assertTrue(MemoryIdentityClass.isIdentity("The user's name is Tarun."));
-        assertTrue(MemoryIdentityClass.isIdentity("The user lives in Kuala Lumpur."));
+        assertTrue(MemoryIdentityClass.isIdentity("The user's name is Sam."));
+        assertTrue(MemoryIdentityClass.isIdentity("The user lives in Santa Rosa."));
         assertTrue(MemoryIdentityClass.isIdentity("The user works at Abundent."));
         assertTrue(MemoryIdentityClass.isIdentity("The user's timezone is Asia/Kuala_Lumpur."));
     }
@@ -39,7 +39,7 @@ class MemoryIdentityClassTest extends UnitTest {
         // class until capture writes the relation into it, which is the point of the
         // propositional extraction change — the two fixes are coupled.
         assertFalse(MemoryIdentityClass.isIdentity(
-                "The user said that Kheshav's nickname is Lyuvez and Aaditya's nickname is Dudez."));
+                "The user said that Mateo's nickname is Ziggy and Rafa's nickname is Bolt."));
     }
 
     @Test
@@ -48,6 +48,6 @@ class MemoryIdentityClassTest extends UnitTest {
         assertFalse(MemoryIdentityClass.isIdentity("   "));
         // EXTRACTION_INSTRUCTIONS mandates the third person; anything else does not qualify,
         // which for a capped always-loaded tier is the safe direction to be wrong in.
-        assertFalse(MemoryIdentityClass.isIdentity("My son Arun goes by Bo."));
+        assertFalse(MemoryIdentityClass.isIdentity("My son Theo goes by Bo."));
     }
 }

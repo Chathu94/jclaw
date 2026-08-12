@@ -172,7 +172,7 @@ public class DiarizeAudioTool implements ToolRegistry.Tool {
                         ARG_SPEAKER_NAMES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "Optional: who is in the recording, when the user has said so — "
-                                        + "free text like 'the interviewer is Priya; the deep voice "
+                                        + "free text like 'the interviewer is Nadia; the deep voice "
                                         + "is Marcus'. The transcript labels turns with these names."),
                         ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,

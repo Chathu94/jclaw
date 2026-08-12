@@ -393,7 +393,7 @@ public class MemoryTool implements ToolRegistry.Tool {
         } else if (raw.isJsonPrimitive()) {
             // A model asked for an array of strings routinely sends one string that merely
             // looks like an array, and a malformed one: UAT saw
-            // "[\"Who is your daughter's class teacher?\" \"What is Priya's teacher name?\"]"
+            // "[\"Who is your daughter's class teacher?\" \"What is Nadia's teacher name?\"]"
             // — no comma between the elements, so no JSON parser recovers it either. Refusing
             // it stored a keyless memory and the feature silently did nothing, which is the
             // failure mode JCLAW-927 already recorded for the extractor's category field.

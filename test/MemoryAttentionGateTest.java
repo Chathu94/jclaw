@@ -22,7 +22,7 @@ class MemoryAttentionGateTest extends UnitTest {
     @Test
     void proceedsOnSubstantiveTurn() {
         assertTrue(MemoryAttentionGate.evaluate("I prefer dark mode in all my editors").proceed());
-        assertTrue(MemoryAttentionGate.evaluate("My name is Tarun and I work at Abundent").proceed());
+        assertTrue(MemoryAttentionGate.evaluate("My name is Sam and I work at Northwind").proceed());
     }
 
     @Test

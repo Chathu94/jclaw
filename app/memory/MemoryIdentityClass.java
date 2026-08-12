@@ -38,7 +38,7 @@ public final class MemoryIdentityClass {
             + "|mother|father|parents|brother|brothers|sister|sisters|employer|company|manager";
 
     private static final List<Pattern> IDENTITY = List.of(
-            // "The user's son Kheshav ...", "The user's wife is named Renu."
+            // "The user's son Mateo ...", "The user's wife is named Alina."
             Pattern.compile("\\bthe user's (" + RELATIONS + ")\\b"),
             // "The user has two sons named ...", "The user has a daughter called ..."
             Pattern.compile("\\bthe user has (a|an|one|two|three|four|\\d+) (" + RELATIONS + ")\\b"),

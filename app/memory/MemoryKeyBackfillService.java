@@ -31,9 +31,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * </ol>
  *
  * <p><b>Neighbour context is what makes the keys worth generating.</b> Asked to write
- * questions for "Kheshav's nickname is Lyuvez" alone, a model can only produce questions
- * naming Kheshav — which is the vocabulary that already worked. Shown the sibling memory
- * that says Kheshav is the user's son, it can write "what do my kids go by?", and that is
+ * questions for "Mateo's nickname is Ziggy" alone, a model can only produce questions
+ * naming Mateo — which is the vocabulary that already worked. Shown the sibling memory
+ * that says Mateo is the user's son, it can write "what do my kids go by?", and that is
  * the question the corpus could not previously answer. Neighbours are found by shared
  * entity name.
  *
@@ -172,7 +172,7 @@ public final class MemoryKeyBackfillService {
 
     /*
      * No deterministic guard rejects a key for describing a neighbour instead of its own
-     * memory, though the failure is real: "The user's name is Tarun." came back keyed "what
+     * memory, though the failure is real: "The user's name is Sam." came back keyed "what
      * does my business do / what is abundent", which a neighbouring memory answers.
      *
      * A token-overlap guard was written for it and then measured against the corpus, where it

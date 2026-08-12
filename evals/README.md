@@ -547,13 +547,13 @@ family, home, employer — land there rather than here.
 concatenated with the statement for both the vector and the keyword leg, never rendered
 into a prompt. Retrieval otherwise matches a question against a statement, and those are
 further apart than the statement is from unrelated memories: on this corpus "the user's
-son Kheshav has the nickname Lyuvez" scored 0.588 against "what do I call my children?"
+son Mateo has the nickname Ziggy" scored 0.588 against "what do I call my children?"
 while "the user's name is Tarun" scored 0.656. Keying it turns the comparison into
 question-to-question, which the same model scores at 0.830.
 
 Keys are combined with the statement rather than replacing it, from a measurement worth
 repeating before anyone "simplifies" it: keys alone win on relation-phrased questions but
-**lose to an unrelated memory** on a direct one ("what's Kheshav's nickname?" 0.715
+**lose to an unrelated memory** on a direct one ("what's Mateo's nickname?" 0.715
 against the distractor's 0.763). The concatenation beat the distractor on every query
 tried, and beating the distractor is what decides ranking.
 

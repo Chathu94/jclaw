@@ -1181,11 +1181,11 @@ public final class MemoryAutoCapture {
 
             Preserve every date, time, duration and quantity the turn gives, in the memory that carries the fact they belong to. Write "The user has been keeping a daily tidying routine since 2 September" rather than "The user has a daily tidying routine", and "The user attended the Seattle International Film Festival in June 2021 and watched 8 films" rather than "The user attended the Seattle International Film Festival and watched 8 films". "Concise" never means dropping the when or the how-many: a fact stripped of them cannot answer the question it was stored to answer, and the capture timestamp records when you wrote the memory, not when the thing happened.
 
-            One fact per memory. If the turn states two things, emit two memories — "Kheshav's nickname is Lyuvez and Aaditya's nickname is Dudez" is two facts, not one. State the fact directly: write "The user's daughter Priya is allergic to peanuts", not "The user said that Priya is allergic to peanuts".
+            One fact per memory. If the turn states two things, emit two memories — "Mateo's nickname is Ziggy and Rafa's nickname is Bolt" is two facts, not one. State the fact directly: write "The user's daughter Nadia is allergic to peanuts", not "The user said that Nadia is allergic to peanuts".
 
-            Splitting must not lose anything. A durable fact often arrives inside a passing remark: "my son Arun turns 12 next week" tells you the user has a son named Arun, which is worth keeping even though the birthday itself is transient. Extract the durable part rather than discarding the sentence.
+            Splitting must not lose anything. A durable fact often arrives inside a passing remark: "my son Theo turns 12 next week" tells you the user has a son named Theo, which is worth keeping even though the birthday itself is transient. Extract the durable part rather than discarding the sentence.
 
-            When the user's turn says how they are related to a person or thing, keep that relationship in the sentence: "The user's son Arun goes by Bo", not "Arun goes by Bo". Only when the turn actually says it — never guess a relationship it did not state.
+            When the user's turn says how they are related to a person or thing, keep that relationship in the sentence: "The user's son Theo goes by Bo", not "Theo goes by Bo". Only when the turn actually says it — never guess a relationship it did not state.
 
             Also give each memory "questions": two or three short questions, phrased the way this user would later ask them, that this memory answers. Ask through the relationship where there is one ("what do my kids go by?") rather than by name, because that is how the question will arrive. These are used to find the memory later and are never shown to anyone.
 

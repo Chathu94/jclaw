@@ -662,7 +662,7 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         // way and getting nothing. KStem stems both sides to the same term.
         repo.init();
         var agentId = makeAgent("inflectAgent");
-        var memId = seedMemory(agentId, "The user's son goes by the nickname Lyuvez.");
+        var memId = seedMemory(agentId, "The user's son goes by the nickname Ziggy.");
 
         var plural = repo.searchMemoryIds(String.valueOf(agentId), "nicknames", 10)
                 .stream().map(s -> s.id()).toList();

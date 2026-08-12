@@ -23,12 +23,12 @@ class MemorySimilarityTest extends UnitTest {
 
     @Test
     void identicalTextIsDuplicate() {
-        assertTrue(dup("The user's name is Tarun.", "The user's name is Tarun."));
+        assertTrue(dup("The user's name is Sam.", "The user's name is Sam."));
     }
 
     @Test
     void unrelatedFactsAreNotDuplicates() {
-        assertFalse(dup("The user's name is Tarun.",
+        assertFalse(dup("The user's name is Sam.",
                 "The prod database runs PostgreSQL 17 behind pgbouncer."));
     }
 
@@ -44,8 +44,8 @@ class MemorySimilarityTest extends UnitTest {
     @Test
     void restatementWithAddedDetailIsDuplicate() {
         // Jaccard 0.50: same fact, one side carries a fuller address.
-        assertTrue(dup("The user lives in Capsquare Residences.",
-                "The user lives at Capsquare Residences, Kuala Lumpur, Malaysia."));
+        assertTrue(dup("The user lives in Marlow Court.",
+                "The user lives at Marlow Court, Santa Rosa, Portugal."));
     }
 
     /**

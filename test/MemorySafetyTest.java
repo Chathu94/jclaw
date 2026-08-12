@@ -73,7 +73,7 @@ class MemorySafetyTest extends UnitTest {
     @Test
     void injectionScanPassesOrdinaryFacts() {
         assertFalse(MemorySafety.looksLikeInjection("The user lives in Porto, Portugal"));
-        assertFalse(MemorySafety.looksLikeInjection("The user is now based in Kuala Lumpur"));   // "is now", not "you are now"
+        assertFalse(MemorySafety.looksLikeInjection("The user is now based in Santa Rosa"));   // "is now", not "you are now"
         assertFalse(MemorySafety.looksLikeInjection("The user prefers curl over wget for API testing"));
         assertFalse(MemorySafety.looksLikeInjection("The user ignores most marketing emails"));
         assertFalse(MemorySafety.looksLikeInjection("Ordinary café naïve résumé — accented unicode is fine"));
@@ -224,12 +224,12 @@ class MemorySafetyTest extends UnitTest {
     @Test
     void keepsAFactTheAssistantOnlyHelpedResolve() {
         // The AC that stops this breaking the prompt's stated reason for supplying the
-        // assistant turn: "Arun" comes from the assistant, but "goes by Bo" is the user's,
+        // assistant turn: "Theo" comes from the assistant, but "goes by Bo" is the user's,
         // so the candidate is still partly grounded in what they said.
         assertFalse(MemorySafety.assertsOnlyAssistantContent(
                 "He goes by Bo now.",
-                "Your son Arun? Noted.",
-                "The user's son Arun goes by Bo."));
+                "Your son Theo? Noted.",
+                "The user's son Theo goes by Bo."));
         // Ordinary turn: the user states it and the assistant merely echoes it back.
         assertFalse(MemorySafety.assertsOnlyAssistantContent(
                 "My beagle Marlow eats grain-free food.",
