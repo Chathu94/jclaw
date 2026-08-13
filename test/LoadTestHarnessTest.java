@@ -140,16 +140,19 @@ class LoadTestHarnessTest extends UnitTest {
         // 200 tokens at 100k/sec is 2ms of generation — two frames of 100 tokens.
         LoadTestHarness.setScenario(new LoadTestHarness.Scenario(0, 100_000, 200));
 
-        long t0 = System.nanoTime();
         var body = streamBody(port);
-        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
 
+        // The frame count IS the property: one token per frame cannot produce two frames for
+        // 200 tokens, so this proves the ceiling is gone without timing anything. A companion
+        // wall-clock bound used to sit here and was the only machine-dependent line in the
+        // class — it failed at 160ms against a 150ms bound on a loaded host while the frame
+        // count was still exactly 2. It could not be repaired by loosening either: the
+        // regression it guarded cost >=200ms and the healthy path is ~2ms of scheduled time,
+        // so any robust bound stops catching the regression. Cadence is covered separately by
+        // theDeliveredRateMatchesTheRequestedRate.
         assertEquals(2, contentFrames(body), "expected 2 batched frames, body: " + body);
         assertTrue(body.contains("\"completion_tokens\":200"), "token accounting must survive batching");
         assertTrue(body.contains("Hello") && body.contains("tok199"), "every token must still be emitted");
-        // One token per frame would have forced >=200ms here. Generous bound: the point is
-        // the ceiling is gone, not the exact figure.
-        assertTrue(elapsedMs < 150, "expected well under the old 1ms/token floor, got " + elapsedMs + "ms");
     }
 
     /**
