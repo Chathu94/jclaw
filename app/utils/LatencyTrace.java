@@ -25,6 +25,8 @@ public final class LatencyTrace {
     public static final String PROLOGUE_PROMPT_BUILT = "prologue_prompt_built";
     public static final String PROLOGUE_PROMPT_ASSEMBLED = "prologue_prompt_assembled";
     public static final String PROLOGUE_DONE = "prologue_done";
+    /** First output of any kind — content, reasoning, or a tool-call delta. See {@link #recordStreamSegments}. */
+    public static final String FIRST_SIGNAL = "first_signal";
     public static final String FIRST_TOKEN = "first_token";
     public static final String STREAM_BODY_END = "stream_body_end";
     public static final String PERSIST_DONE = "persist_done";
@@ -38,7 +40,12 @@ public final class LatencyTrace {
     private final long acceptedAtNs;
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
     private final AtomicLong toolExecMs = new AtomicLong();
+    private final ConcurrentHashMap<String, AtomicLong> toolExecByName = new ConcurrentHashMap<>();
+    private final AtomicLong persistMs = new AtomicLong();
+    private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
+    private final AtomicLong memoryRecallPromptMs = new AtomicLong();
+    private final AtomicLong memoryRecallToolMs = new AtomicLong();
     private final AtomicInteger memoryRecallCount = new AtomicInteger();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
     private final AtomicInteger llmCallCount = new AtomicInteger();
@@ -148,12 +155,49 @@ public final class LatencyTrace {
         if (trace == null) return;
         trace.memoryRecallMs.addAndGet(elapsedMs);
         trace.memoryRecallCount.incrementAndGet();
+        // Which recall this is, without threading a phase through SystemPromptAssembler.recall —
+        // both callers share it, and the prologue mark already separates them: assembly runs
+        // before PROLOGUE_DONE, the memory tool only ever runs after.
+        if (trace.marks.containsKey(PROLOGUE_DONE)) trace.memoryRecallToolMs.addAndGet(elapsedMs);
+        else trace.memoryRecallPromptMs.addAndGet(elapsedMs);
     }
 
     /** Record the wall-clock cost of a single tool-execution round. */
     public void addToolRound(long elapsedMs) {
+        addToolRound(elapsedMs, null);
+    }
+
+    /**
+     * Record one tool round against the turn, attributed to {@code toolName}.
+     *
+     * <p>The aggregate alone could not name the tool that spent the time — measured p50
+     * 3.9 s against a 47 s max on one window, with no way to tell which of ~40 tools
+     * produced the tail. Per-name samples are bounded by the tool registry, so the
+     * segment cardinality stays fixed rather than growing with traffic.
+     */
+    public void addToolRound(long elapsedMs, @Nullable String toolName) {
         toolExecMs.addAndGet(elapsedMs);
         toolRoundCount.incrementAndGet();
+        if (toolName != null && !toolName.isBlank()) {
+            toolExecByName.computeIfAbsent(toolName, _ -> new AtomicLong()).addAndGet(elapsedMs);
+        }
+    }
+
+    /**
+     * Record the DB write that persists the assistant message.
+     *
+     * <p>Recorded through the trace rather than straight to {@link LatencyStats} so
+     * {@code terminal_tail} can subtract it: the write happens between
+     * {@code STREAM_BODY_END} and {@code TERMINAL_SENT}, so reporting both as measured
+     * would count the same milliseconds twice for anyone summing the segments.
+     */
+    public void recordPersist(long elapsedMs) {
+        persistMs.addAndGet(elapsedMs);
+    }
+
+    /** Note that the model emitted reasoning before any content token. */
+    public void noteReasoning() {
+        reasoningSeen.set(true);
     }
 
     /**
@@ -289,6 +333,12 @@ public final class LatencyTrace {
         if (calls > 0) {
             emit("memory_recall", memoryRecallMs.get());
             emit("memory_recall_count", calls);
+            // Prompt-assembly recall is on every turn's critical path; a memory-tool recall is
+            // one the model chose to make. Summing them hid which of the two a slow turn paid.
+            long prompt = memoryRecallPromptMs.get();
+            long tool = memoryRecallToolMs.get();
+            if (prompt > 0) emit("memory_recall_prompt", prompt);
+            if (tool > 0) emit("memory_recall_tool", tool);
         }
     }
 
@@ -336,18 +386,15 @@ public final class LatencyTrace {
     /**
      * Stream-phase segments: ttft, stream_body, persist, terminal_tail.
      *
-     * <p>{@code persist} is no longer derived here — it's recorded directly by AgentRunner
-     * because it now runs AFTER the terminal SSE frame (off the user-visible path),
-     * and trace.end() fires as soon as the terminal SSE write returns. The legacy
-     * PERSIST_DONE constant is retained so older callers / tests that still set it
-     * can produce a persist sample via this path.
+     * <p>{@code persist} is the assistant-message write, timed by the streaming runner and
+     * handed here through {@link #recordPersist}. It runs BEFORE the terminal SSE frame, so
+     * it falls inside the stream_body_end → terminal_sent window. The legacy PERSIST_DONE
+     * constant is retained for tests that still set it.
      *
-     * <p>{@code terminal_tail} measures the gap between stream_body_end and the terminal
-     * SSE frame being written to the response — that is, the wall time for the
-     * final usage-logging callbacks, onStatus + onComplete dispatch, and the
-     * terminal writeChunk itself. This is part of {@code total} (pre-refactor it was
-     * hidden behind the DB persist); surfacing it lets us confirm the post-stream
-     * emit path stays cheap.
+     * <p>{@code terminal_tail} is that window <em>net of</em> persist — the final
+     * usage-logging callbacks, onStatus + onComplete dispatch, and the terminal writeChunk.
+     * Subtracting matters: reporting both as measured would bill the same milliseconds
+     * twice to anyone summing the post-stream phase.
      */
     private void recordStreamSegments(long prologueDone) {
         Long firstToken = marks.get(FIRST_TOKEN);
@@ -355,19 +402,44 @@ public final class LatencyTrace {
             emit("ttft", nsToMs(firstToken - prologueDone));
         }
 
+        // ttft marks the first *content* token, because that is what the reader sees. On a
+        // turn that reasons or calls a tool first it therefore spans work that is not
+        // prefill at all — measured 2034 ms on a tool turn whose tool ran for 18 ms, against
+        // ~1315 ms for a plain turn on the same agent. Left as-is so its history stays
+        // comparable; ttft_first_signal is the prefill-only companion, and the gap between
+        // them is attributed below.
+        Long firstSignal = marks.get(FIRST_SIGNAL);
+        if (firstSignal != null) {
+            emit("ttft_first_signal", nsToMs(firstSignal - prologueDone));
+        }
+        if (firstSignal != null && firstToken != null && firstToken > firstSignal) {
+            // One name per turn, never both: they measure the same span and emitting each
+            // would double-count it. Tools win when a turn did both, being the larger cost.
+            long gapMs = nsToMs(firstToken - firstSignal);
+            if (toolRoundCount.get() > 0) emit("tool_gap", gapMs);
+            else if (reasoningSeen.get()) emit("think_time", gapMs);
+        }
+
         Long streamBodyEnd = marks.get(STREAM_BODY_END);
         if (firstToken != null && streamBodyEnd != null) {
             emit("stream_body", nsToMs(streamBodyEnd - firstToken));
         }
 
+        // Accumulator first; the PERSIST_DONE mark is the legacy path some tests still set.
+        long persisted = persistMs.get();
         Long persistDone = marks.get(PERSIST_DONE);
-        if (streamBodyEnd != null && persistDone != null) {
-            emit("persist", nsToMs(persistDone - streamBodyEnd));
+        if (persisted > 0) {
+            emit("persist", persisted);
+        } else if (streamBodyEnd != null && persistDone != null) {
+            persisted = nsToMs(persistDone - streamBodyEnd);
+            emit("persist", persisted);
         }
 
         Long terminalSent = marks.get(TERMINAL_SENT);
         if (streamBodyEnd != null && terminalSent != null) {
-            emit("terminal_tail", nsToMs(terminalSent - streamBodyEnd));
+            // Net of the persist write that runs inside this span, so persist and
+            // terminal_tail partition the post-stream phase instead of overlapping.
+            emit("terminal_tail", Math.max(0L, nsToMs(terminalSent - streamBodyEnd) - persisted));
         }
     }
 
@@ -375,6 +447,9 @@ public final class LatencyTrace {
         if (toolRoundCount.get() > 0) {
             emit("tool_exec", toolExecMs.get());
             emit("tool_round_count", toolRoundCount.get());
+            // Per-tool samples sit beside the aggregate, not under it — summing them with
+            // tool_exec counts the same rounds twice.
+            toolExecByName.forEach((name, ms) -> emit("tool_exec:" + name, ms.get()));
         }
     }
 

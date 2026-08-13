@@ -14,7 +14,6 @@ import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
-import utils.LatencyStats;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
@@ -153,11 +152,21 @@ final class StreamingAgentRunner {
                     if (firstTokenSeen.compareAndSet(false, true)) {
                         trace.mark(LatencyTrace.FIRST_TOKEN);
                     }
+                    trace.mark(LatencyTrace.FIRST_SIGNAL);
                     cb.onToken().accept(token);
                 },
-                cb.onReasoning(),
+                reasoning -> {
+                    // Reasoning and tool-call deltas are output too, so they stop the
+                    // prefill clock even though the reader sees nothing yet.
+                    trace.mark(LatencyTrace.FIRST_SIGNAL);
+                    trace.noteReasoning();
+                    cb.onReasoning().accept(reasoning);
+                },
                 cb.onStatus(),
-                cb.onToolCall(),
+                toolCall -> {
+                    trace.mark(LatencyTrace.FIRST_SIGNAL);
+                    cb.onToolCall().accept(toolCall);
+                },
                 content -> {
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onComplete().accept(content); }
@@ -528,8 +537,7 @@ final class StreamingAgentRunner {
         long persistStartNs = System.nanoTime();
         Tx.run(() ->
             sink.appendAssistantMessage(finalContent, null, usageJson, finalReasoning, finalTruncated));
-        LatencyStats.record(channelType, "persist",
-                (System.nanoTime() - persistStartNs) / 1_000_000L, AgentRunner.agentIdOf(agent));
+        trace.recordPersist((System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
     }
 
@@ -553,8 +561,7 @@ final class StreamingAgentRunner {
         var finalContent = truncMsg;
         long truncPersistStartNs = System.nanoTime();
         Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
-        LatencyStats.record(channelType, "persist",
-                (System.nanoTime() - truncPersistStartNs) / 1_000_000L, AgentRunner.agentIdOf(agent));
+        trace.recordPersist((System.nanoTime() - truncPersistStartNs) / 1_000_000L);
         cb.onComplete().accept(finalContent);
     }
 }
