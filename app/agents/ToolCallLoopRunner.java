@@ -483,12 +483,7 @@ public final class ToolCallLoopRunner {
         ParallelToolExecutor.executeToolsParallel(toolCalls, ctx.agent(), ctx.conversationId(), currentMessages,
                 ctx.cb().onStatus(), ctx.cb().onToolCall(), ctx.collectedImages(), ctx.isCancelled(), ctx.sink(),
                 offeredToolNames(ctx.tools()));
-        // Attribute the round only when one tool ran. A parallel round's wall clock is the
-        // slowest tool, not the sum, so naming any one of them would overstate it — those
-        // land in a shared bucket instead, and tool_round_count still counts them.
-        var roundNames = toolCalls.stream().map(tc -> tc.function().name()).distinct().toList();
-        ctx.trace().addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L,
-                roundNames.size() == 1 ? roundNames.getFirst() : "_parallel");
+        ctx.trace().addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
 

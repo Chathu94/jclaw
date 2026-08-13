@@ -40,14 +40,10 @@ public final class LatencyTrace {
     private final long acceptedAtNs;
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
     private final AtomicLong toolExecMs = new AtomicLong();
-    private final ConcurrentHashMap<String, AtomicLong> toolExecByName = new ConcurrentHashMap<>();
     private final AtomicLong persistMs = new AtomicLong();
     private final AtomicLong queryEmbedMs = new AtomicLong();
-    private final AtomicLong embedHttpMs = new AtomicLong();
     private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
-    private final AtomicLong memoryRecallPromptMs = new AtomicLong();
-    private final AtomicLong memoryRecallToolMs = new AtomicLong();
     private final AtomicInteger memoryRecallCount = new AtomicInteger();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
     private final AtomicInteger llmCallCount = new AtomicInteger();
@@ -157,11 +153,6 @@ public final class LatencyTrace {
         if (trace == null) return;
         trace.memoryRecallMs.addAndGet(elapsedMs);
         trace.memoryRecallCount.incrementAndGet();
-        // Which recall this is, without threading a phase through SystemPromptAssembler.recall —
-        // both callers share it, and the prologue mark already separates them: assembly runs
-        // before PROLOGUE_DONE, the memory tool only ever runs after.
-        if (trace.marks.containsKey(PROLOGUE_DONE)) trace.memoryRecallToolMs.addAndGet(elapsedMs);
-        else trace.memoryRecallPromptMs.addAndGet(elapsedMs);
     }
 
     /**
@@ -180,47 +171,11 @@ public final class LatencyTrace {
         trace.queryEmbedMs.addAndGet(elapsedMs);
     }
 
-    /**
-     * Record the provider round trip inside a query embedding — the HTTP call and its
-     * response parse, with none of the store plumbing around it.
-     *
-     * <p>Splits {@code prologue_embed_query} so the store's own work — the query prefix and
-     * its config read, the embedding cache, resolving the provider — is separable from the
-     * call. Measured over five turns the store side is 0 ms, so the segment is the round trip
-     * and nothing else.
-     *
-     * <p>That round trip is the model's time, not ours. It looked like ours at first: 61-73 ms
-     * per turn against a 25-31 ms curl. JFR settles it — the {@code jdk.SocketRead} against
-     * the embedding host is itself ~54 ms, and comparing the chat path against the recall
-     * endpoint <em>inside one recording window</em> puts them level (p50 54.2 vs 55.4 ms).
-     * The apparent gap was a quiet machine versus a busy one, not a code path. Recorded on
-     * the calling thread, so it no-ops outside a turn.
-     */
-    public static void recordEmbedHttp(long elapsedMs) {
-        var trace = CURRENT.get();
-        if (trace == null) return;
-        trace.embedHttpMs.addAndGet(elapsedMs);
-    }
 
     /** Record the wall-clock cost of a single tool-execution round. */
     public void addToolRound(long elapsedMs) {
-        addToolRound(elapsedMs, null);
-    }
-
-    /**
-     * Record one tool round against the turn, attributed to {@code toolName}.
-     *
-     * <p>The aggregate alone could not name the tool that spent the time — measured p50
-     * 3.9 s against a 47 s max on one window, with no way to tell which of ~40 tools
-     * produced the tail. Per-name samples are bounded by the tool registry, so the
-     * segment cardinality stays fixed rather than growing with traffic.
-     */
-    public void addToolRound(long elapsedMs, @Nullable String toolName) {
         toolExecMs.addAndGet(elapsedMs);
         toolRoundCount.incrementAndGet();
-        if (toolName != null && !toolName.isBlank()) {
-            toolExecByName.computeIfAbsent(toolName, _ -> new AtomicLong()).addAndGet(elapsedMs);
-        }
     }
 
     /**
@@ -373,12 +328,6 @@ public final class LatencyTrace {
         if (calls > 0) {
             emit("memory_recall", memoryRecallMs.get());
             emit("memory_recall_count", calls);
-            // Prompt-assembly recall is on every turn's critical path; a memory-tool recall is
-            // one the model chose to make. Summing them hid which of the two a slow turn paid.
-            long prompt = memoryRecallPromptMs.get();
-            long tool = memoryRecallToolMs.get();
-            if (prompt > 0) emit("memory_recall_prompt", prompt);
-            if (tool > 0) emit("memory_recall_tool", tool);
         }
     }
 
@@ -422,8 +371,6 @@ public final class LatencyTrace {
         // to the chain — same rule as the pair above.
         long embed = queryEmbedMs.get();
         if (embed > 0) emit("prologue_embed_query", embed);
-        long embedHttp = embedHttpMs.get();
-        if (embedHttp > 0) emit("prologue_embed_http", embedHttp);
         if (promptAssembled != null) {
             emit("prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
@@ -493,9 +440,6 @@ public final class LatencyTrace {
         if (toolRoundCount.get() > 0) {
             emit("tool_exec", toolExecMs.get());
             emit("tool_round_count", toolRoundCount.get());
-            // Per-tool samples sit beside the aggregate, not under it — summing them with
-            // tool_exec counts the same rounds twice.
-            toolExecByName.forEach((name, ms) -> emit("tool_exec:" + name, ms.get()));
         }
     }
 
