@@ -1087,11 +1087,6 @@ public final class LoadTestRunner {
     }
 
     /**
-     * Delete conversations, messages, and event-log entries created by
-     * load-test runs. Called explicitly via {@code DELETE /api/metrics/loadtest/data}
-     * so the operator can inspect results before clearing them.
-     */
-    /**
      * Keep harness traffic out of the Chat Performance dashboard (JCLAW-942). That panel
      * reads persisted samples to describe how the operator's own agents behave, and a load
      * test is not that: one c=100 run wrote 60,436 rows against 146 from real chat, so the
@@ -1111,6 +1106,11 @@ public final class LoadTestRunner {
         LatencyMetricRecorder.excludeAgents(ids);
     }
 
+    /**
+     * Delete conversations, messages, and event-log entries created by
+     * load-test runs. Called explicitly via {@code DELETE /api/metrics/loadtest/data}
+     * so the operator can inspect results before clearing them.
+     */
     public static void cleanupConversations() {
         try {
             JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {

@@ -602,8 +602,6 @@ public class MemoryTool implements ToolRegistry.Tool {
         });
     }
 
-    /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
-     *  must not make memory unusable — fail open to the lexical tier, as capture does. */
     /**
      * Forget's semantic floor, on the query-embedding scale (JCLAW-942).
      *
@@ -623,6 +621,8 @@ public class MemoryTool implements ToolRegistry.Tool {
      */
     private static final double FORGET_COSINE = 0.35;
 
+    /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
+     *  must not make memory unusable — fail open to the lexical tier, as capture does. */
     private static List<Long> semanticNeighbours(String agentId, String text, String retrievalKey) {
         var store = MemoryStoreFactory.get();
         try {

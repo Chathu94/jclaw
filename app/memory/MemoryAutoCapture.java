@@ -848,6 +848,9 @@ public final class MemoryAutoCapture {
         return newer >= SUPERSEDE_MIN_CONTENT_RATIO * older;
     }
 
+    /** Tokens that only ever qualify a number, so sharing one is not sharing a subject. */
+    private static final Set<String> VALUE_MARKERS = Set.of("am", "pm");
+
     /**
      * Whether the two texts are about the same thing at all, by shared non-numeric content
      * (JCLAW-942).
@@ -872,9 +875,6 @@ public final class MemoryAutoCapture {
      * lexical claim to being about the same thing, and the cost of a false refusal is a
      * redundant row that both remain visible and recallable.
      */
-    /** Tokens that only ever qualify a number, so sharing one is not sharing a subject. */
-    private static final Set<String> VALUE_MARKERS = Set.of("am", "pm");
-
     private static boolean sharesSubject(String existing, String replacement) {
         var shared = MemorySimilarity.contentTokens(existing);
         shared.retainAll(MemorySimilarity.contentTokens(replacement));
@@ -898,8 +898,10 @@ public final class MemoryAutoCapture {
     private static final List<ValueShape> VALUE_SHAPES = List.of(
             new ValueShape(Pattern.compile(
                     "\\b\\d{1,2}:\\d{2}\\s*(?:am|pm)?|\\b\\d{1,2}\\s*(?:am|pm)\\b"), "clock"),
+            // Possessive throughout: the two \s around the optional hyphen are an overlapping
+            // pair, so trailing spaces backtrack polynomially on conversation text (JCLAW-1048).
             new ValueShape(Pattern.compile(
-                    "\\b\\d+\\s*-?\\s*(?:second|minute|hour|day|week|month|year|decade)s?\\b"), "duration"),
+                    "\\b\\d++\\s*+-?+\\s*+(?:second|minute|hour|day|week|month|year|decade)s?+\\b"), "duration"),
             new ValueShape(Pattern.compile(
                     "\\b(?:" + MONTHS + ")\\b\\s*\\d{0,4}(?:st|nd|rd|th)?"
                             + "|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:" + MONTHS + ")\\b"), "date"),

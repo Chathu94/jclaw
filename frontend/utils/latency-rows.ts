@@ -132,7 +132,7 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
  * rather than the raw key. Sentence case, not title case, to match the maps.
  */
 export function humanizeSegment(key: string): string {
-  const words = key.replace(/_/g, ' ').trim()
+  const words = key.replaceAll('_', ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
 

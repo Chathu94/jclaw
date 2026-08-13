@@ -148,6 +148,7 @@ public class ApiEvalsController extends Controller {
         var agent = Tx.run(() -> Agent.findByName(agentName));
         if (agent == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
+            throw ApiResponses.unreachable();
         }
         if (body == null || !body.has("pairs") || !body.get("pairs").isJsonArray()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "pairs must be a JSON array");
