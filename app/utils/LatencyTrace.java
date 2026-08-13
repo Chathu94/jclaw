@@ -184,11 +184,17 @@ public final class LatencyTrace {
      * Record the provider round trip inside a query embedding — the HTTP call and its
      * response parse, with none of the store plumbing around it.
      *
-     * <p>Splits {@code prologue_embed_query}, which was measuring 61-73 ms against an Ollama
-     * that serves the same request in 25-31 ms by any route. The difference is ours, and
-     * this says which side of the provider call it sits on: the store's own work (the query
-     * prefix, its config read, the embedding cache, resolving the provider) or the call
-     * itself. Recorded on the calling thread, so it no-ops outside a turn.
+     * <p>Splits {@code prologue_embed_query} so the store's own work — the query prefix and
+     * its config read, the embedding cache, resolving the provider — is separable from the
+     * call. Measured over five turns the store side is 0 ms, so the segment is the round trip
+     * and nothing else.
+     *
+     * <p>That round trip is the model's time, not ours. It looked like ours at first: 61-73 ms
+     * per turn against a 25-31 ms curl. JFR settles it — the {@code jdk.SocketRead} against
+     * the embedding host is itself ~54 ms, and comparing the chat path against the recall
+     * endpoint <em>inside one recording window</em> puts them level (p50 54.2 vs 55.4 ms).
+     * The apparent gap was a quiet machine versus a busy one, not a code path. Recorded on
+     * the calling thread, so it no-ops outside a turn.
      */
     public static void recordEmbedHttp(long elapsedMs) {
         var trace = CURRENT.get();
