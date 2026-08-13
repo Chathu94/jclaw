@@ -2677,6 +2677,12 @@ do_start_prod() {
     #     doesn't apply. To force a fixed heap (the previous default),
     #     set JCLAW_JVM_HEAP=2g — that pins -Xms == -Xmx == 2g. To split
     #     them independently, use JCLAW_JVM_XMS / JCLAW_JVM_XMX.
+    #   - SoftMaxHeapSize 1g: ZGC's soft target, which ergonomics pin to -Xmx
+    #     when -Xmx is explicit — leaving no cushion, so the collector only
+    #     reacts near the ceiling and the heap ran to 92% under a c=50 x 20-turn
+    #     loadtest. A 1g target against the ~280 MB live set held peak used to
+    #     46% and peak RSS to 1.76 GB (from 2.5 GB) with zero allocation
+    #     stalls, costing +75% GC cycles. Raise it alongside JCLAW_JVM_XMX.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
@@ -2715,6 +2721,7 @@ do_start_prod() {
         "-Xms${xms}"
         "-Xmx${xmx}"
         "-XX:+UseZGC"
+        "-XX:SoftMaxHeapSize=1g"
         "-XX:+HeapDumpOnOutOfMemoryError"
         "-XX:HeapDumpPath=$SCRIPT_DIR/logs/heap-oom.hprof"
         "-XX:+ExitOnOutOfMemoryError"
