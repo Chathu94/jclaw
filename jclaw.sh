@@ -142,6 +142,12 @@ Environment:
                           Example: JCLAW_JVM_HEAP=4g ${INVOKE} start
   JCLAW_JVM_XMS           Override -Xms only (default: 512m).
   JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
+  JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g) — the size ZGC
+                          collects toward, exceeding it only up to -Xmx to
+                          avoid allocation stalls. Not derived from the heap,
+                          so raise it when you raise -Xmx or ZGC keeps
+                          targeting 1g. Must stay above the live set.
+                          Example: JCLAW_JVM_HEAP=8g JCLAW_JVM_SOFTMAX=4g ${INVOKE} start
   JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
                           Last-wins for value flags (e.g. MaxDirectMemorySize),
                           so this lets you override most hardcoded settings.
@@ -264,6 +270,12 @@ Environment:
                           Example: JCLAW_JVM_HEAP=4g ${INVOKE} start
   JCLAW_JVM_XMS           Override -Xms only (default: 512m).
   JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
+  JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g) — the size ZGC
+                          collects toward, exceeding it only up to -Xmx to
+                          avoid allocation stalls. Not derived from the heap,
+                          so raise it when you raise -Xmx or ZGC keeps
+                          targeting 1g. Must stay above the live set.
+                          Example: JCLAW_JVM_HEAP=8g JCLAW_JVM_SOFTMAX=4g ${INVOKE} start
   JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
                           Last-wins for value flags (e.g. MaxDirectMemorySize),
                           so this lets you override most hardcoded settings.
@@ -538,6 +550,8 @@ Environment:
                           same value. Default is asymmetric (Xms 512m, Xmx 2g).
   JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently
                           (defaults: 512m / 2g).
+  JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g). Not derived from
+                          the heap — raise it when you raise -Xmx.
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins for value
                           flags, e.g. -XX:MaxDirectMemorySize=512m).
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
@@ -568,6 +582,8 @@ Environment:
                           same value. Default is asymmetric (Xms 512m, Xmx 2g).
   JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently
                           (defaults: 512m / 2g).
+  JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g). Not derived from
+                          the heap — raise it when you raise -Xmx.
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins).
 
 Examples:
@@ -622,7 +638,8 @@ Options:
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
 Environment:
-  JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_OPTS — see 'start --help'.
+  JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_SOFTMAX,
+  JCLAW_JVM_OPTS — see 'start --help'.
 
 Examples:
   ${INVOKE} restart
@@ -639,7 +656,8 @@ Options:
   --backend-port <port>   Backend HTTP port (default: 9000)
 
 Environment:
-  JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_OPTS — see 'start --help'.
+  JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_SOFTMAX,
+  JCLAW_JVM_OPTS — see 'start --help'.
 
 Example:
   ${INVOKE} restart
@@ -2682,7 +2700,8 @@ do_start_prod() {
     #     reacts near the ceiling and the heap ran to 92% under a c=50 x 20-turn
     #     loadtest. A 1g target against the ~280 MB live set held peak used to
     #     46% and peak RSS to 1.76 GB (from 2.5 GB) with zero allocation
-    #     stalls, costing +75% GC cycles. Raise it alongside JCLAW_JVM_XMX.
+    #     stalls, costing +75% GC cycles. Raising the heap does not raise this —
+    #     set JCLAW_JVM_SOFTMAX too, or ZGC keeps targeting 1g.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
@@ -2717,11 +2736,15 @@ do_start_prod() {
     local heap="${JCLAW_JVM_HEAP:-}"
     local xms="${JCLAW_JVM_XMS:-${heap:-512m}}"
     local xmx="${JCLAW_JVM_XMX:-${heap:-2g}}"
+    # Deliberately not derived from xmx: the soft target has to sit above the
+    # live set, which scales with workload rather than with the ceiling, so a
+    # fixed fraction of a raised -Xmx would be a guess. Raise it explicitly.
+    local softmax="${JCLAW_JVM_SOFTMAX:-1g}"
     local jvm_opts=(
         "-Xms${xms}"
         "-Xmx${xmx}"
         "-XX:+UseZGC"
-        "-XX:SoftMaxHeapSize=1g"
+        "-XX:SoftMaxHeapSize=${softmax}"
         "-XX:+HeapDumpOnOutOfMemoryError"
         "-XX:HeapDumpPath=$SCRIPT_DIR/logs/heap-oom.hprof"
         "-XX:+ExitOnOutOfMemoryError"
@@ -2771,9 +2794,9 @@ do_start_prod() {
 
     echo "==> Starting Play backend on port $BACKEND_PORT ($mode_label)..."
     if [[ "$xms" == "$xmx" ]]; then
-        echo "    JVM: ${xms} heap (fixed), ZGC, GC log → logs/gc.log"
+        echo "    JVM: ${xms} heap (fixed), ZGC softmax ${softmax}, GC log → logs/gc.log"
     else
-        echo "    JVM: -Xms${xms} -Xmx${xmx}, ZGC, GC log → logs/gc.log"
+        echo "    JVM: -Xms${xms} -Xmx${xmx}, ZGC softmax ${softmax}, GC log → logs/gc.log"
     fi
     [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
