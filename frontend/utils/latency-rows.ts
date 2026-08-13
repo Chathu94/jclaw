@@ -123,8 +123,13 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   ttft_first_signal: 'TTFT',
   ttft: 'Time to first text',
   stream_body: 'Stream body',
-  tool_gap: 'Tool round gap',
-  think_time: 'Reasoning time',
+  // Named so the arithmetic reads off the table: Time to first text = TTFT plus
+  // whichever of these the turn emitted. Each covers the same span — from the
+  // model's first output to the first text a reader sees — so a turn emits one or
+  // neither, never both. "Reasoning time" and "Tool round gap" said neither what
+  // the span was nor that it ended at the text.
+  tool_gap: 'Tool rounds before text',
+  think_time: 'Reasoning before text',
   tool_exec: 'Tool execution',
   persist: 'Persist',
   total: 'Total',
