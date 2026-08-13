@@ -17,6 +17,9 @@ import utils.LatencyTrace;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * JCLAW-678: prologue preparation and media-capability orchestration for both
@@ -87,9 +90,7 @@ final class AgentPromptPreparer {
                                         AgentExecutionSink sink, LatencyTrace trace) {
         // JCLAW-960: BEFORE the Tx. Everything below runs in one transaction by design, so
         // recall's embedding round-trip would otherwise hold a pooled connection across it.
-        long embedStartNs = System.nanoTime();
-        var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
-        utils.LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
+        var queryEmbedding = startQueryEmbed(userMessage);
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             // JCLAW-273: skipUserAppend=true comes from runYieldResume — the
@@ -206,9 +207,7 @@ final class AgentPromptPreparer {
     static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
                                                    String channelType, String userMessage) {
         // JCLAW-960: BEFORE the Tx — see the sibling call in buildPrologue.
-        long embedStartNs = System.nanoTime();
-        var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
-        utils.LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
+        var queryEmbedding = startQueryEmbed(userMessage);
         return Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);
@@ -265,4 +264,48 @@ final class AgentPromptPreparer {
         // rewrites, so nothing downstream rebuilds the list and drops it.
         return CurrentTimeInjector.inject(finalMessages);
     }
+
+    /**
+     * Start the query embedding on its own virtual thread and hand back a handle that
+     * assembly resolves only when it reaches recall.
+     *
+     * <p>The embed is a provider round trip — 32-41 ms measured on a novel message, ~5 ms
+     * once the store's cache has that text — and it used to run to completion before
+     * assembly began, so every turn paid it in full. Nothing above the memories section
+     * needs the vector, so running it alongside the workspace files, skills, tool catalog
+     * and MCP manifest costs the turn only whatever is left when recall asks.
+     *
+     * <p>Fails open: a thrown embed completes as {@code null}, which is the documented
+     * "let the store embed inline" contract, so recall degrades rather than the turn.
+     * Safe off-thread — {@code embedQuery} is an HTTP call behind a cache and touches no
+     * JPA, which is also why it already ran outside the caller's transaction.
+     */
+    private static Supplier<float[]> startQueryEmbed(String userMessage) {
+        var store = MemoryStoreFactory.get();
+        var embedMs = new AtomicLong();
+        var future = new CompletableFuture<float[]>();
+        long startNs = System.nanoTime();
+        Thread.ofVirtual().name("embed-query").start(() -> {
+            float[] vector = null;
+            try {
+                vector = store.embedQuery(userMessage);
+            } catch (Exception e) {
+                EventLogger.warn("memory", "Query embedding failed, recall will embed inline: %s"
+                        .formatted(e.getMessage()));
+            } finally {
+                embedMs.set((System.nanoTime() - startNs) / 1_000_000L);
+                future.complete(vector);
+            }
+        });
+        return () -> {
+            long waitStartNs = System.nanoTime();
+            var vector = future.join();
+            // Recorded on the assembling thread, which carries the turn binding — the
+            // embedding thread deliberately does not.
+            utils.LatencyTrace.recordQueryEmbed(embedMs.get());
+            utils.LatencyTrace.recordQueryEmbedWait((System.nanoTime() - waitStartNs) / 1_000_000L);
+            return vector;
+        };
+    }
+
 }
