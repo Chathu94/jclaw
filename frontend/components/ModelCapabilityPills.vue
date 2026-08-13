@@ -77,7 +77,7 @@ const pills = computed<PillDef[]>(() => {
       supported: !!m.supportsThinking,
       enabled: thinkingLocked || !!props.thinkingMode,
       onCls: thinkingLocked
-        ? 'text-emerald-300 border-emerald-500/60 bg-emerald-500/15'
+        ? 'text-emerald-700 dark:text-emerald-300 border-emerald-500/60 bg-emerald-500/15'
         : 'text-emerald-700 dark:text-emerald-400 border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10',
       interactive: !thinkingLocked,
       locked: thinkingLocked,
@@ -108,7 +108,7 @@ const pills = computed<PillDef[]>(() => {
       icon: Video,
       supported: !!m.supportsVideo,
       enabled: true,
-      onCls: 'text-purple-400 border-purple-400/40 bg-purple-400/5',
+      onCls: 'text-purple-700 dark:text-purple-400 border-purple-400/40 bg-purple-400/5',
       interactive: false,
       locked: false,
     },

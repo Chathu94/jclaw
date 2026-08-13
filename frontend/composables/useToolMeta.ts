@@ -61,39 +61,39 @@ const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string, iconBg: str
     iconColor: 'text-neutral-600 dark:text-neutral-300',
   },
   Files: {
-    categoryColor: 'text-amber-400 bg-amber-500/15',
+    categoryColor: 'text-amber-700 dark:text-amber-400 bg-amber-500/15',
     iconBg: 'bg-amber-500/15',
-    iconColor: 'text-amber-400',
+    iconColor: 'text-amber-700 dark:text-amber-400',
   },
   Web: {
-    categoryColor: 'text-blue-400 bg-blue-500/15',
+    categoryColor: 'text-blue-700 dark:text-blue-400 bg-blue-500/15',
     iconBg: 'bg-blue-500/15',
-    iconColor: 'text-blue-400',
+    iconColor: 'text-blue-700 dark:text-blue-400',
   },
   Utilities: {
-    categoryColor: 'text-emerald-400 bg-emerald-500/15',
+    categoryColor: 'text-emerald-700 dark:text-emerald-400 bg-emerald-500/15',
     iconBg: 'bg-emerald-500/15',
-    iconColor: 'text-emerald-400',
+    iconColor: 'text-emerald-700 dark:text-emerald-400',
   },
   // JCLAW-33: MCP tools live in a violet palette to distinguish "external
   // connection" from native categories. Each MCP-server-discovered tool is
   // wrapped by McpToolAdapter (backend) which reports category="MCP".
   MCP: {
-    categoryColor: 'text-violet-400 bg-violet-500/15',
+    categoryColor: 'text-violet-700 dark:text-violet-400 bg-violet-500/15',
     iconBg: 'bg-violet-500/15',
-    iconColor: 'text-violet-400',
+    iconColor: 'text-violet-700 dark:text-violet-400',
   },
 }
 
 const PILL_CLASSES: Record<ToolCategory, string> = {
-  // Mirror the CATEGORY_STYLES change for System: tinted-/10 background +
-  // theme-aware text so the chip stays legible against both a white and a
-  // near-black canvas.
+  // Every entry needs both halves: the -400 shades are tuned for the near-black
+  // canvas and fall to 1.55-2.29:1 over the /10 tint on white, so a light-mode
+  // foreground is not optional here.
   System: 'bg-neutral-500/10 border-neutral-500/25 text-neutral-600 dark:text-neutral-400',
-  Files: 'bg-amber-500/10 border-amber-500/25 text-amber-400',
-  Web: 'bg-blue-500/10 border-blue-500/25 text-blue-400',
-  Utilities: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
-  MCP: 'bg-violet-500/10 border-violet-500/25 text-violet-400',
+  Files: 'bg-amber-500/10 border-amber-500/25 text-amber-700 dark:text-amber-400',
+  Web: 'bg-blue-500/10 border-blue-500/25 text-blue-700 dark:text-blue-400',
+  Utilities: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-400',
+  MCP: 'bg-violet-500/10 border-violet-500/25 text-violet-700 dark:text-violet-400',
 }
 
 export const TOOL_CATEGORIES = ['System', 'Files', 'Web', 'Utilities', 'MCP'] as const

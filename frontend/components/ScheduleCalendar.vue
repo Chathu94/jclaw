@@ -320,7 +320,7 @@ function fmtRunTime(run: RecentRunView): string {
           type="button"
           class="px-2.5 py-1 text-xs capitalize transition-colors"
           :class="calGranularity === g
-            ? 'bg-emerald-600/20 text-emerald-300'
+            ? 'bg-emerald-600/20 text-emerald-700 dark:text-emerald-300'
             : 'text-fg-muted hover:text-fg-strong'"
           :aria-pressed="calGranularity === g"
           @click="calGranularity = g"
@@ -511,7 +511,7 @@ function fmtRunTime(run: RecentRunView): string {
             <span class="w-1.5 h-1.5 rounded-full border border-emerald-400 bg-surface-elevated shrink-0" />
             <span class="flex-1 border-t border-dashed border-emerald-400/50" />
             <span
-              class="text-[10px] text-emerald-300/90 font-mono truncate max-w-[70%]"
+              class="text-[10px] text-emerald-700/90 dark:text-emerald-300/90 font-mono truncate max-w-[70%]"
               :class="fm.fire.taskPaused ? 'line-through' : ''"
               :title="`${fm.fire.taskName} · ${fm.fire.fireAt.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}${fm.fire.taskPaused ? ' · paused' : ''}`"
             >{{ fm.fire.taskName }}</span>

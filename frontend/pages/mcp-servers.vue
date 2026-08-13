@@ -429,7 +429,7 @@ function removeHeaderRow(i: number) {
                 >
                 <button
                   type="button"
-                  class="text-fg-muted hover:text-red-400 p-1"
+                  class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 p-1"
                   aria-label="Remove env var"
                   @click="removeEnvRow(i)"
                 >
@@ -492,7 +492,7 @@ function removeHeaderRow(i: number) {
                 >
                 <button
                   type="button"
-                  class="text-fg-muted hover:text-red-400 p-1"
+                  class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 p-1"
                   aria-label="Remove header"
                   @click="removeHeaderRow(i)"
                 >
@@ -651,7 +651,7 @@ function removeHeaderRow(i: number) {
                   </button>
                   <button
                     type="button"
-                    class="text-fg-muted hover:text-red-400 transition-colors"
+                    class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                     :title="`Delete ${server.name}`"
                     :aria-label="`Delete ${server.name}`"
                     @click="deleteServer(server)"
@@ -834,7 +834,7 @@ function removeHeaderRow(i: number) {
                           >
                           <button
                             type="button"
-                            class="text-fg-muted hover:text-red-400 p-1"
+                            class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 p-1"
                             aria-label="Remove env var"
                             @click="removeEnvRow(i)"
                           >
@@ -896,7 +896,7 @@ function removeHeaderRow(i: number) {
                           >
                           <button
                             type="button"
-                            class="text-fg-muted hover:text-red-400 p-1"
+                            class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 p-1"
                             aria-label="Remove header"
                             @click="removeHeaderRow(i)"
                           >

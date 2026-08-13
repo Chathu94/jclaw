@@ -835,7 +835,7 @@ function zoneForTaskRender(task: Task): string | undefined {
           </button>
           <button
             :disabled="!tasks?.length"
-            class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
+            class="p-2 border border-input text-fg-muted hover:text-red-700 dark:hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
             title="Delete tasks"
             @click="enterSelectMode"
           >
@@ -1138,7 +1138,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-if="!selectMode && isRecurring(task) && isLive(task) && !task.paused && !task.runningRunId"
                     type="button"
-                    class="p-1 text-fg-muted hover:text-emerald-400 transition-colors"
+                    class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                     :title="`Run “${task.name}” now — fires immediately, next scheduled run unchanged`"
                     :aria-label="`Run ${task.name} now`"
                     @click.stop="runNowTask(task.id)"
@@ -1157,7 +1157,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-else-if="!selectMode && isRecurring(task) && task.runningRunId"
                     type="button"
-                    class="p-1 text-red-700 dark:text-red-400 hover:text-red-300 transition-colors"
+                    class="p-1 text-red-700 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors"
                     :title="`Cancel the running fire of “${task.name}” — stops at the next safe point; schedule unchanged`"
                     :aria-label="`Cancel the running fire of ${task.name}`"
                     @click.stop="task.runningRunId && cancelRunningRun(task.runningRunId)"
@@ -1185,7 +1185,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-else-if="!selectMode && isRecurring(task) && isLive(task) && task.paused"
                     type="button"
-                    class="p-1 text-emerald-700 dark:text-emerald-400 hover:text-emerald-300 transition-colors"
+                    class="p-1 text-emerald-700 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors"
                     :title="`Resume schedule for “${task.name}”`"
                     :aria-label="`Resume ${task.name}`"
                     @click.stop="resumeTask(task.id)"
@@ -1199,7 +1199,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-else-if="!selectMode && !isRecurring(task) && task.status === 'PENDING'"
                     type="button"
-                    class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                    class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                     :title="`Cancel “${task.name}” — it won't fire`"
                     :aria-label="`Cancel ${task.name}`"
                     @click.stop="cancelTask(task.id)"
@@ -1213,7 +1213,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-if="!selectMode && task.status === 'CANCELLED'"
                     type="button"
-                    class="p-1 text-fg-muted hover:text-emerald-400 transition-colors"
+                    class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                     :title="isRecurring(task)
                       ? `Re-enable “${task.name}” — resume at its next scheduled fire`
                       : `Re-enable “${task.name}” — re-arm its scheduled fire`"
@@ -1242,7 +1242,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                   <button
                     v-if="!selectMode"
                     type="button"
-                    class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                    class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                     :title="`Permanently delete “${task.name}” and its run history`"
                     :aria-label="`Delete ${task.name}`"
                     @click.stop="deleteTask(task)"
@@ -1437,7 +1437,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                             <button
                               type="button"
                               :aria-label="`Remove step ${i + 1}`"
-                              class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-400"
+                              class="w-6 h-6 inline-flex items-center justify-center text-fg-muted hover:text-red-700 dark:hover:text-red-400"
                               @click="removeStep(i)"
                             >
                               <XMarkIcon
@@ -1689,7 +1689,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                           </p>
                           <p
                             v-else-if="run.status === 'RUNNING' && run.latestTurnPreview"
-                            class="text-blue-300/80 mt-0.5 whitespace-pre-wrap break-words line-clamp-2 italic"
+                            class="text-blue-700/80 dark:text-blue-300/80 mt-0.5 whitespace-pre-wrap break-words line-clamp-2 italic"
                           >
                             {{ run.latestTurnPreview }}
                           </p>

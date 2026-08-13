@@ -345,14 +345,14 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
     <div
       v-if="scopeNotice"
       data-testid="scope-notice"
-      class="mb-4 flex items-start gap-2 px-3 py-2 bg-amber-500/10 border border-amber-600/40 text-xs text-amber-300"
+      class="mb-4 flex items-start gap-2 px-3 py-2 bg-amber-500/10 border border-amber-600/40 text-xs text-amber-700 dark:text-amber-300"
     >
       <span aria-hidden="true">⚠</span>
       <span class="flex-1">{{ scopeNotice }}</span>
       <button
         type="button"
         aria-label="Dismiss warning"
-        class="text-amber-300/70 hover:text-amber-200 bg-transparent border-0 cursor-pointer"
+        class="text-amber-700/70 dark:text-amber-300/70 hover:text-amber-200 bg-transparent border-0 cursor-pointer"
         @click="scopeNotice = ''"
       >
         ×
@@ -453,7 +453,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ b.effectiveRequestUrl }}</code>
               <button
                 type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
                 :aria-label="copied === b.effectiveRequestUrl ? 'Copied' : 'Copy request URL'"
                 @click="copyText(b.effectiveRequestUrl)"
               >
@@ -474,7 +474,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ `${b.effectiveRequestUrl}/interactive` }}</code>
               <button
                 type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
                 :aria-label="copied === `${b.effectiveRequestUrl}/interactive` ? 'Copied' : 'Copy interactivity URL'"
                 @click="copyText(`${b.effectiveRequestUrl}/interactive`)"
               >
@@ -519,7 +519,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
             type="button"
             title="Delete binding"
             aria-label="Delete binding"
-            class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+            class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
             @click="remove(b)"
           >
             <TrashIcon
@@ -575,7 +575,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               href="https://api.slack.com/apps"
               target="_blank"
               rel="noopener noreferrer"
-              class="text-fg-strong underline hover:text-emerald-400"
+              class="text-fg-strong underline hover:text-emerald-700 dark:hover:text-emerald-400"
             >api.slack.com/apps</a>
             (From scratch) in your workspace.
           </li>
@@ -629,7 +629,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ v }}</code>
               <button
                 type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
                 :aria-label="copied === v ? 'Copied' : `Copy ${v}`"
                 @click="copyText(v)"
               >
@@ -656,7 +656,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ v }}</code>
               <button
                 type="button"
-                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
                 :aria-label="copied === v ? 'Copied' : `Copy ${v}`"
                 @click="copyText(v)"
               >
@@ -850,7 +850,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
                 <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ fullRequestUrl }}</code>
                 <button
                   type="button"
-                  class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                  class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
                   :aria-label="copied === fullRequestUrl ? 'Copied' : 'Copy request URL'"
                   @click="copyText(fullRequestUrl)"
                 >
@@ -871,7 +871,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
                 <code class="font-mono break-all text-emerald-700 dark:text-emerald-400">{{ fullInteractiveUrl }}</code>
                 <button
                   type="button"
-                  class="shrink-0 text-fg-muted transition-colors hover:text-emerald-400"
+                  class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
                   :aria-label="copied === fullInteractiveUrl ? 'Copied' : 'Copy interactivity URL'"
                   @click="copyText(fullInteractiveUrl)"
                 >

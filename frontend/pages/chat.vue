@@ -1084,7 +1084,7 @@ function exportConversation() {
                   class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                   :class="[
                     thinkingLock.locked
-                      ? 'bg-emerald-700/30 text-emerald-300 cursor-not-allowed'
+                      ? 'bg-emerald-700/30 text-emerald-700 dark:text-emerald-300 cursor-not-allowed'
                       : (thinkingActive
                         ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
                         : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'),
@@ -1153,7 +1153,7 @@ function exportConversation() {
                 -->
                 <span
                   v-if="videoSupported"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-purple-500/15 text-purple-400 cursor-default"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-purple-500/15 text-purple-700 dark:text-purple-400 cursor-default"
                   title="This model accepts video natively. Other models route to the dedicated video model, then to frames or a captioned summary."
                 >
                   <FilmIcon
@@ -1210,7 +1210,7 @@ function exportConversation() {
                   type="submit"
                   :disabled="!input.trim() && !attachedFiles.length"
                   class="p-1.5 transition-colors
-                         enabled:text-emerald-400 enabled:hover:text-emerald-300
+                         enabled:text-emerald-700 dark:enabled:text-emerald-400 enabled:hover:text-emerald-700 dark:enabled:hover:text-emerald-300
                          disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed"
                   title="Send"
                 >

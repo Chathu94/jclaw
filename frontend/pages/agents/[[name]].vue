@@ -1557,7 +1557,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <button
               type="button"
               :disabled="deletingId === agent.id"
-              class="p-1.5 shrink-0 text-fg-muted hover:text-red-400 disabled:opacity-40 transition-colors"
+              class="p-1.5 shrink-0 text-fg-muted hover:text-red-700 dark:hover:text-red-400 disabled:opacity-40 transition-colors"
               :title="`Delete ${agent.name}`"
               @click="deleteAgent(agent)"
             >
@@ -2933,7 +2933,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-[10px] text-fg-muted uppercase tracking-wide">
                 ≈ tokens
               </div>
-              <div class="text-sm font-mono text-amber-300">
+              <div class="text-sm font-mono text-amber-700 dark:text-amber-300">
                 {{ formatTokens(promptBreakdownData.totalTokenEstimate) }}
               </div>
               <div class="text-[10px] text-fg-muted">
@@ -3087,7 +3087,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     <td class="py-1 px-2 text-right text-fg-muted">
                       {{ formatChars(s.chars) }}
                     </td>
-                    <td class="py-1 px-2 text-right text-amber-300/80">
+                    <td class="py-1 px-2 text-right text-amber-700/80 dark:text-amber-300/80">
                       {{ formatTokens(s.tokens) }}
                     </td>
                     <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
@@ -3111,7 +3111,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
                       {{ formatChars(sk.chars) }}
                     </td>
-                    <td class="py-0.5 px-2 text-right text-amber-300/60 text-[11px]">
+                    <td class="py-0.5 px-2 text-right text-amber-700/60 dark:text-amber-300/60 text-[11px]">
                       {{ formatTokens(sk.tokens) }}
                     </td>
                     <td class="py-0.5 pl-2 text-right text-[11px]" />
@@ -3126,7 +3126,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                     <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
                       {{ formatChars(skillsMatchingGap.chars) }}
                     </td>
-                    <td class="py-0.5 px-2 text-right text-amber-300/60 text-[11px]">
+                    <td class="py-0.5 px-2 text-right text-amber-700/60 dark:text-amber-300/60 text-[11px]">
                       {{ formatTokens(skillsMatchingGap.tokens) }}
                     </td>
                     <td class="py-0.5 pl-2 text-right text-[11px]" />
@@ -3139,7 +3139,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <td class="py-1 px-2 text-right text-fg-primary font-semibold">
                     {{ formatChars(sectionsAggregate.chars) }}
                   </td>
-                  <td class="py-1 px-2 text-right text-amber-300 font-semibold">
+                  <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300 font-semibold">
                     {{ formatTokens(sectionsAggregate.tokens) }}
                   </td>
                   <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
@@ -3229,7 +3229,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <td class="py-1 px-2 text-right text-fg-muted">
                     {{ formatChars(t.chars) }}
                   </td>
-                  <td class="py-1 px-2 text-right text-amber-300/80">
+                  <td class="py-1 px-2 text-right text-amber-700/80 dark:text-amber-300/80">
                     {{ formatTokens(t.tokens) }}
                   </td>
                   <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
@@ -3243,7 +3243,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <td class="py-1 px-2 text-right text-fg-primary font-semibold">
                     {{ formatChars(toolSchemasAggregate.chars) }}
                   </td>
-                  <td class="py-1 px-2 text-right text-amber-300 font-semibold">
+                  <td class="py-1 px-2 text-right text-amber-700 dark:text-amber-300 font-semibold">
                     {{ formatTokens(toolSchemasAggregate.tokens) }}
                   </td>
                   <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">

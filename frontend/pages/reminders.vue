@@ -274,7 +274,7 @@ const statusColors: Record<string, string> = {
           <button
             :disabled="!reminders?.length"
             type="button"
-            class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
+            class="p-2 border border-input text-fg-muted hover:text-red-700 dark:hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
             title="Delete reminders"
             aria-label="Delete reminders"
             @click="enterSelectMode"
@@ -520,7 +520,7 @@ const statusColors: Record<string, string> = {
               <td class="px-4 py-2.5 whitespace-nowrap text-right">
                 <button
                   type="button"
-                  class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                  class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                   title="Delete reminder"
                   :aria-label="`Delete ${r.name}`"
                   @click="deleteOne(r)"

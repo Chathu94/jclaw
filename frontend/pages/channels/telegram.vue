@@ -430,7 +430,7 @@ async function testBinding(binding: TelegramBindingSummary) {
             type="button"
             title="Delete binding"
             aria-label="Delete binding"
-            class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+            class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
             @click="remove(b)"
           >
             <TrashIcon
@@ -499,7 +499,7 @@ async function testBinding(binding: TelegramBindingSummary) {
               href="https://t.me/BotFather"
               target="_blank"
               rel="noopener noreferrer"
-              class="text-fg-strong underline hover:text-emerald-400"
+              class="text-fg-strong underline hover:text-emerald-700 dark:hover:text-emerald-400"
             >@BotFather</a>.
           </li>
           <li>
@@ -521,7 +521,7 @@ async function testBinding(binding: TelegramBindingSummary) {
               href="https://t.me/userinfobot"
               target="_blank"
               rel="noopener noreferrer"
-              class="text-fg-strong underline hover:text-emerald-400"
+              class="text-fg-strong underline hover:text-emerald-700 dark:hover:text-emerald-400"
             >@userinfobot</a>;
             it replies with your numeric Telegram user id. Paste that into
             <code class="font-mono px-1 bg-muted text-fg-strong">telegramUserId</code>.

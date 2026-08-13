@@ -972,7 +972,7 @@ const groupedProviders = computed(() => {
             <span class="flex-1 text-sm text-fg-primary">{{ getProviderModels(name).length }} model{{ getProviderModels(name).length !== 1 ? 's' : '' }}</span>
             <button
               :disabled="discoveryLoading && discoveryProvider === name"
-              class="p-1 text-fg-muted hover:text-blue-400 disabled:animate-spin transition-colors"
+              class="p-1 text-fg-muted hover:text-blue-700 dark:hover:text-blue-400 disabled:animate-spin transition-colors"
               title="Discover models from provider"
               @click="startDiscovery(name)"
             >
@@ -1201,7 +1201,7 @@ const groupedProviders = computed(() => {
                       />
                     </button>
                     <button
-                      class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                      class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                       title="Delete model"
                       @click="deleteModel(name, idx)"
                     >
@@ -1237,7 +1237,7 @@ const groupedProviders = computed(() => {
                       >thinking</span>
                       <span
                         v-else-if="model.alwaysThinks"
-                        class="ml-2 inline-flex items-center gap-0.5 text-[10px] text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
+                        class="ml-2 inline-flex items-center gap-0.5 text-[10px] text-emerald-700 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
                         title="Pure reasoning model — thinking is always on"
                       >thinking<LockClosedIcon
                         class="w-2 h-2"
@@ -1253,7 +1253,7 @@ const groupedProviders = computed(() => {
                       >audio</span>
                       <span
                         v-if="model.supportsVideo"
-                        class="ml-2 text-[10px] text-purple-400 border border-purple-400/30 px-1"
+                        class="ml-2 text-[10px] text-purple-700 dark:text-purple-400 border border-purple-400/30 px-1"
                       >video</span>
                     </div>
                   </div>
@@ -1720,7 +1720,7 @@ const groupedProviders = computed(() => {
                   </span>
                   <span
                     v-if="model.alwaysThinks"
-                    class="inline-flex items-center gap-0.5 text-[10px] text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
+                    class="inline-flex items-center gap-0.5 text-[10px] text-emerald-700 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
                     :title="model.alwaysThinksDetectedFromProvider
                       ? 'Pure reasoning model (provider-confirmed) — thinking is always on'
                       : 'Pure reasoning model (id-pattern match) — thinking is always on'"
@@ -1760,7 +1760,7 @@ const groupedProviders = computed(() => {
                   >audio?</span>
                   <span
                     v-if="model.supportsVideo && model.videoDetectedFromProvider"
-                    class="text-[10px] text-purple-400 border border-purple-400/30 px-1"
+                    class="text-[10px] text-purple-700 dark:text-purple-400 border border-purple-400/30 px-1"
                     title="Video support confirmed by provider"
                   >video</span>
                   <span

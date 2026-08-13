@@ -1093,7 +1093,7 @@ function totalSkillCount(agentId: number) {
                   </button>
                   <button
                     v-if="!isStructuralSkill(skill)"
-                    class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                    class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
                     title="Delete skill"
                     @click.stop="deleteSkill(skill)"
                   >
@@ -1283,7 +1283,7 @@ function totalSkillCount(agentId: number) {
                         />
                       </button>
                       <button
-                        class="p-1 text-fg-muted hover:text-red-400 transition-colors opacity-0 group-hover/skill:opacity-100"
+                        class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors opacity-0 group-hover/skill:opacity-100"
                         title="Delete skill"
                         @click.stop="deleteAgentSkill(agent.id, skill)"
                       >

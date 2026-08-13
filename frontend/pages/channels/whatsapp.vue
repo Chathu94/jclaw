@@ -423,7 +423,7 @@ onBeforeUnmount(stopPoll)
             title="Pair this number by scanning a QR code"
             aria-label="Pair binding"
             class="px-2 py-1 mr-auto inline-flex items-center gap-1 text-xs text-fg-muted
-                   hover:text-emerald-400 border border-border transition-colors"
+                   hover:text-emerald-700 dark:hover:text-emerald-400 border border-border transition-colors"
             @click="openPairing(b)"
           >
             <QrCodeIcon
@@ -448,7 +448,7 @@ onBeforeUnmount(stopPoll)
             type="button"
             title="Delete binding"
             aria-label="Delete binding"
-            class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+            class="p-1 text-fg-muted hover:text-red-700 dark:hover:text-red-400 transition-colors"
             @click="remove(b)"
           >
             <TrashIcon
@@ -495,7 +495,7 @@ onBeforeUnmount(stopPoll)
              the unofficial transport is selected. -->
         <div
           v-if="!isCloud"
-          class="border border-amber-500/60 bg-amber-500/10 p-3 text-xs text-amber-300 space-y-2"
+          class="border border-amber-500/60 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 space-y-2"
         >
           <p class="flex items-center gap-1.5 font-medium text-amber-200">
             <ExclamationTriangleIcon
@@ -536,7 +536,7 @@ onBeforeUnmount(stopPoll)
                 href="https://developers.facebook.com/apps"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="text-fg-strong underline hover:text-emerald-400"
+                class="text-fg-strong underline hover:text-emerald-700 dark:hover:text-emerald-400"
               >Meta for Developers</a>
               dashboard → your app → WhatsApp → API Setup: copy the
               <code class="font-mono px-1 bg-muted text-fg-strong">Phone number ID</code>
