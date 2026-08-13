@@ -42,6 +42,7 @@ public final class LatencyTrace {
     private final AtomicLong toolExecMs = new AtomicLong();
     private final ConcurrentHashMap<String, AtomicLong> toolExecByName = new ConcurrentHashMap<>();
     private final AtomicLong persistMs = new AtomicLong();
+    private final AtomicLong queryEmbedMs = new AtomicLong();
     private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
     private final AtomicLong memoryRecallPromptMs = new AtomicLong();
@@ -160,6 +161,22 @@ public final class LatencyTrace {
         // before PROLOGUE_DONE, the memory tool only ever runs after.
         if (trace.marks.containsKey(PROLOGUE_DONE)) trace.memoryRecallToolMs.addAndGet(elapsedMs);
         else trace.memoryRecallPromptMs.addAndGet(elapsedMs);
+    }
+
+    /**
+     * Record the query-embedding round-trip that precedes prompt assembly.
+     *
+     * <p>It is a network call sitting inside {@code prologue_assemble} and counted by
+     * nothing else — {@code memory_recall} covers the search, not the embed. Measured on
+     * the live instance it is roughly half the segment: assembling with a novel user
+     * message costs ~85 ms against ~15 ms when the message repeats, and the embed alone
+     * times at 32-41 ms novel versus ~5 ms once memoized. Repeating a message is a test
+     * artifact; real turns are always novel, so the segment cannot be read without this.
+     */
+    public static void recordQueryEmbed(long elapsedMs) {
+        var trace = CURRENT.get();
+        if (trace == null) return;
+        trace.queryEmbedMs.addAndGet(elapsedMs);
     }
 
     /** Record the wall-clock cost of a single tool-execution round. */
@@ -378,6 +395,10 @@ public final class LatencyTrace {
         if (promptBuilt != null && promptAssembled != null) {
             emit("prologue_rewrite", nsToMs(promptAssembled - promptBuilt));
         }
+        // Sits inside prologue_assemble, so it decomposes that segment rather than adding
+        // to the chain — same rule as the pair above.
+        long embed = queryEmbedMs.get();
+        if (embed > 0) emit("prologue_embed_query", embed);
         if (promptAssembled != null) {
             emit("prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
