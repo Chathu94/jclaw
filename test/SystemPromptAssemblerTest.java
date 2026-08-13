@@ -494,7 +494,11 @@ class SystemPromptAssemblerTest extends UnitTest {
         // section itself isn't rendered, not that the phrase never appears.
         assertFalse(prompt.contains("## Tool Catalog"),
                 "Loadtest path must NOT include the tool-catalog section");
-        assertFalse(prompt.contains("Relevant Memories") || prompt.contains("memories"),
+        // Same reasoning as the Tool Catalog assertion above: match the section header,
+        // not the word. A bare "memories" also matches the Execution Bias bullet, whose
+        // capture-off variant reads "memories already stored are still loaded back for
+        // you" — prose about the section, not the section (JCLAW-942).
+        assertFalse(prompt.contains(SystemPromptAssembler.RECALL_HEADING),
                 "Loadtest path must NOT include the recalled-memories section");
 
         assertTrue(assembled.skills().isEmpty(),

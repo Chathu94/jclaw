@@ -2,6 +2,9 @@ import memory.MemoryAutoCapture;
 import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.LoadTestRunner;
+
+import java.util.List;
 
 /**
  * JCLAW-534: per-agent memory auto-capture resolution. Capture is on by default;
@@ -81,5 +84,23 @@ class AgentMemorySettingsTest extends UnitTest {
         var a = agent();
         a.memoryAutocaptureEnabled = false;
         assertFalse(MemoryAutoCapture.captureEligible(a));
+    }
+
+    /**
+     * JCLAW-942: benchmark turns are generated traffic, so distilling them stores a
+     * memory of a load test — one run left five rows that then rank against real
+     * recalls. ToolRegistry already withholds the memory tool from these agents; this
+     * is the passive half.
+     */
+    @Test
+    void captureSkipsTheBenchmarkAgents() {
+        for (var name : List.of(LoadTestRunner.LOADTEST_AGENT_NAME,
+                LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME)) {
+            var a = agent();
+            a.name = name;
+            assertTrue(a.memoryAutocaptureEnabled, "guard: capture is on by default");
+            assertFalse(MemoryAutoCapture.captureEligible(a),
+                    name + " must be excluded from auto-capture");
+        }
     }
 }

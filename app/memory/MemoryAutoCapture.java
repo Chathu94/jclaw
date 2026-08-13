@@ -13,6 +13,7 @@ import play.Play;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.LoadTestRunner;
 import services.SessionCompactor;
 import services.Tx;
 import utils.CircuitBreaker;
@@ -286,9 +287,27 @@ public final class MemoryAutoCapture {
      * Capture is for operator-facing (root) agents only — subagents process
      * delegated work, not the operator's own turns (JCLAW-539) — and only when the
      * agent has auto-capture enabled (JCLAW-534, on by default).
+     *
+     * <p>The benchmark agents are excluded too (JCLAW-942). Their turns are generated
+     * traffic, so anything distilled from them is a memory of a load test: a run left
+     * five rows in the store, which then rank against real recalls. It also cost the
+     * run — capture fires per turn against whatever the agent is pointed at, and in
+     * mock mode that is the mock, which answers with chat text rather than extraction
+     * JSON. One run logged 31 parse failures and 370 turns suspended behind the
+     * circuit breaker those failures tripped, all of it DB writes on the path being
+     * measured. {@code ToolRegistry.getToolDefsForAgent} already withholds the memory
+     * tool from them by the same reasoning; this closes the passive half.
      */
+    private static boolean isBenchmarkAgent(Agent agent) {
+        return LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)
+                || LoadTestRunner.LOADTEST_TOOLS_AGENT_NAME.equals(agent.name);
+    }
+
     public static boolean captureEligible(Agent agent) {
-        return agent != null && !agent.isSubagent() && agent.memoryAutocaptureEnabled;
+        return agent != null
+                && !agent.isSubagent()
+                && !isBenchmarkAgent(agent)
+                && agent.memoryAutocaptureEnabled;
     }
 
     /**
