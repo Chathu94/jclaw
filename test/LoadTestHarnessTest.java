@@ -112,6 +112,69 @@ class LoadTestHarnessTest extends UnitTest {
         assertFalse(secondBody.contains("tool_calls"), secondBody);
     }
 
+    private String streamBody(int port) throws Exception {
+        var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        var req = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/v1/chat/completions"))
+                .timeout(Duration.ofSeconds(30))
+                .POST(HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+        var resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, resp.statusCode());
+        return resp.body();
+    }
+
+    private static int contentFrames(String body) {
+        return body.split("\"delta\":\\{\"content\"", -1).length - 1;
+    }
+
+    /**
+     * JCLAW-942: a frame cannot be scheduled less than a millisecond after the one before
+     * it, so one token per frame capped the mock at ~1000 tokens/sec and silently clamped
+     * anything faster. Real providers already exceed that, so the ceiling sat inside the
+     * range being measured and showed up as server-side streaming cost.
+     */
+    @Test
+    void aRateAboveAThousandTokensPerSecondBatchesInsteadOfClamping() throws Exception {
+        int port = LoadTestHarness.start(0);
+        // 200 tokens at 100k/sec is 2ms of generation — two frames of 100 tokens.
+        LoadTestHarness.setScenario(new LoadTestHarness.Scenario(0, 100_000, 200));
+
+        long t0 = System.nanoTime();
+        var body = streamBody(port);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+        assertEquals(2, contentFrames(body), "expected 2 batched frames, body: " + body);
+        assertTrue(body.contains("\"completion_tokens\":200"), "token accounting must survive batching");
+        assertTrue(body.contains("Hello") && body.contains("tok199"), "every token must still be emitted");
+        // One token per frame would have forced >=200ms here. Generous bound: the point is
+        // the ceiling is gone, not the exact figure.
+        assertTrue(elapsedMs < 150, "expected well under the old 1ms/token floor, got " + elapsedMs + "ms");
+    }
+
+    /**
+     * The jittered cadence must average the requested rate, not undershoot it. The previous
+     * integer form — {@code spacing/2 + nextInt(spacing)} — averaged {@code spacing-0.5} and
+     * delivered measurably faster than asked, which reads as the server being quicker than
+     * the scenario configured.
+     */
+    @Test
+    void theDeliveredRateMatchesTheRequestedRate() throws Exception {
+        int port = LoadTestHarness.start(0);
+        // 40 tokens at 200/sec is 200ms of generation, one token per frame.
+        LoadTestHarness.setScenario(new LoadTestHarness.Scenario(0, 200, 40));
+
+        long t0 = System.nanoTime();
+        var body = streamBody(port);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+        assertEquals(40, contentFrames(body), "at 200 tok/s each token gets its own frame");
+        // The biased form averaged 4ms of a nominal 5ms spacing — ~156ms across 39 gaps.
+        // Upper bound is loose because a slow host only ever runs late.
+        assertTrue(elapsedMs >= 170 && elapsedMs < 600,
+                "expected ~200ms of simulated generation, got " + elapsedMs + "ms");
+    }
+
     @Test
     void ttftDelayIsHonored() throws Exception {
         int port = LoadTestHarness.start(0);

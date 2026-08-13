@@ -292,10 +292,27 @@ public final class LoadTestHarness {
 
     private static void streamResponse(ScheduledExecutorService sch, OutputStream out, Scenario scn)
             throws IOException, InterruptedException {
-        int delayMs = scn.tokensPerSecond() > 0
-                ? Math.max(1, 1000 / scn.tokensPerSecond())
-                : 20;
         int n = scn.responseTokens();
+        // How long the whole response should take to generate, and how many SSE frames
+        // that affords at the scheduler's usable 1 ms resolution (JCLAW-942).
+        //
+        // One token per frame caps the mock at ~1000 tokens/sec, because a frame cannot be
+        // scheduled less than a millisecond after the one before it. Rates above that
+        // silently clamped: `--tokens-per-second 100000` streamed at 1000, and the 1 ms per
+        // token showed up in the server's stream_body segment as if it were serving cost.
+        // Real providers already exceed 1000 tok/s, so the ceiling was inside the range
+        // being measured.
+        //
+        // Packing several tokens into one frame removes the ceiling without needing finer
+        // scheduling — 100 tokens per frame at 1 ms is 100k tok/s on the same timer. It is
+        // also the more faithful shape: an SSE delta carries whatever text was decoded since
+        // the last frame, not exactly one token, so one-token frames overstate the per-frame
+        // write+flush+chunk-encode work a real stream would cost.
+        double totalMs = scn.tokensPerSecond() > 0
+                ? 1000.0 * n / scn.tokensPerSecond()
+                : 20.0 * n;
+        int frames = Math.max(1, Math.min(n, (int) Math.floor(totalMs)));
+        double spacingMs = totalMs / frames;
         var done = new CompletableFuture<Void>();
         // Per-call dedicated lock for serializing the per-stream write+flush
         // pairs below. Replaces the prior `synchronized(out)` which Sonar
@@ -308,26 +325,34 @@ public final class LoadTestHarness {
         // identity. Different streams get different writeLock instances
         // and continue to write in parallel.
         final var writeLock = new Object();
-        // Schedule each chunk at an absolute deadline. TTFT is honored exactly
-        // for the first chunk (so ttftDelayIsHonored() stays correct).
-        // Subsequent chunks are spaced by jittered cadence (±50% around delayMs)
-        // — preserves mean rate while modeling real-LLM network jitter. The
-        // +1 floor ensures consecutive deadlines are always strictly increasing
-        // even when delayMs=1 (tps=1000+), without which two chunks could be
-        // scheduled at the same instant and race each other on different
-        // scheduler threads. (Per-stream serialize via synchronized(writeLock)
-        // below also guards against the race; the floor is belt-and-suspenders.)
+        // Schedule each frame at an absolute deadline. TTFT is honored exactly for the first
+        // frame (so ttftDelayIsHonored() stays correct). Subsequent frames are spaced by a
+        // jittered cadence centred on spacingMs — uniform over ±50%, so the mean is the
+        // requested rate rather than under it. The previous form, `spacing/2 +
+        // nextInt(spacing)`, averaged spacing-0.5 in integer arithmetic and delivered
+        // measurably faster than asked: at 500 tok/s it streamed 40 tokens in 58 ms against
+        // the nominal 80. Accumulating in double and rounding only at schedule time keeps
+        // that bias out.
+        //
+        // Deadlines are forced strictly increasing. Two frames landing on the same
+        // millisecond would race on different scheduler threads; the writeLock below also
+        // guards the byte interleaving, so this is belt-and-suspenders.
         var rnd = ThreadLocalRandom.current();
-        long cumDelayMs = Math.max(0, scn.ttftMs());
-        for (int i = 0; i < n; i++) {
-            int idx = i;
-            boolean isLast = (i == n - 1);
+        double cumDelayMs = Math.max(0, scn.ttftMs());
+        long prevDeadline = -1;
+        for (int f = 0; f < frames; f++) {
+            // Even split, exact: consecutive boundaries sum to n with no remainder lost.
+            int from = (int) ((long) f * n / frames);
+            int to = (int) ((long) (f + 1) * n / frames);
+            boolean isLast = (f == frames - 1);
+            var text = new StringBuilder();
+            for (int t = from; t < to; t++) text.append(t == 0 ? "Hello" : " tok" + t);
+            var content = text.toString();
             Runnable chunkTask = () -> {
                 try {
-                    var tok = (idx == 0 ? "Hello" : " tok" + idx);
                     var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
                             + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\""
-                            + tok + "\"}}]}\n\n";
+                            + content + "\"}}]}\n\n";
                     // Serialize per-stream writes — out is the per-request
                     // ChunkedOutputStream from HttpServer, and a write+flush
                     // pair is the unit of HTTP chunk encoding. Without this
@@ -355,8 +380,10 @@ public final class LoadTestHarness {
                     done.completeExceptionally(e);
                 }
             };
+            long deadline = Math.max(prevDeadline + 1, Math.round(cumDelayMs));
+            prevDeadline = deadline;
             try {
-                sch.schedule(chunkTask, cumDelayMs, TimeUnit.MILLISECONDS);
+                sch.schedule(chunkTask, deadline, TimeUnit.MILLISECONDS);
             } catch (RejectedExecutionException rejected) {
                 // Concurrent stop() shut the pool down mid-schedule. Complete
                 // exceptionally so awaitDone unblocks instead of parking forever
@@ -365,11 +392,7 @@ public final class LoadTestHarness {
                 done.completeExceptionally(new IOException("loadtest harness stopped", rejected));
                 break;
             }
-            // 1-ms floor: even when delayMs=1 (tps=1000), consecutive deadlines
-            // strictly increase. Without the floor, integer division gives
-            // jitter=0 for delayMs=1 and every chunk lands at the same instant.
-            int jitterMs = Math.max(1, (delayMs / 2) + rnd.nextInt(Math.max(1, delayMs)));
-            cumDelayMs += jitterMs;
+            cumDelayMs += spacingMs * (0.5 + rnd.nextDouble());
         }
         awaitDone(done);
     }
