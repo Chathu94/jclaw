@@ -17,10 +17,14 @@ import services.EmbeddingModelKeepAlive;
  * JClaw.
  *
  * <p>Half-hourly, not minutes: the pin is a directive rather than a touch, so the interval
- * only has to outlast the ways a pin is lost rather than beat an idle timer. Renewed for
- * every backend including Ollama, because {@code keep_alive: -1} is best-effort — the
- * scheduler evicts under model-load pressure regardless of it, and once that happens nothing
- * else would restore the pin until JClaw itself restarted.
+ * only has to outlast the ways a pin is lost rather than beat an idle timer.
+ *
+ * <p>Renewed for Ollama too, though it survives more than one might expect — a pinned model
+ * stayed resident through a 1.3 GB and a 9 GB model loading beside it. What it does not
+ * survive is the model server exiting, which takes every pin with it and is ordinary
+ * operation: an update, a reboot, a sleep/wake, a crash. Nothing else would re-pin, so
+ * without renewal one Ollama restart silently returns every later idle gap to the 581 ms
+ * reload, until JClaw itself is restarted.
  */
 @OnApplicationStart(async = true)
 @Every("30mn")
