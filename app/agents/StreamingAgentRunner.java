@@ -250,6 +250,8 @@ final class StreamingAgentRunner {
 
         var prepared = AgentPromptPreparer.buildStreamingPrologue(agent, conversation, channelType, userMessage);
 
+        trace.mark(LatencyTrace.PROLOGUE_PROMPT_BUILT);
+
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
         var supportsVisionForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsVision();

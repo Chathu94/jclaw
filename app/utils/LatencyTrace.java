@@ -22,6 +22,7 @@ public final class LatencyTrace {
 
     public static final String PROLOGUE_REQUEST_PARSED = "prologue_request_parsed";
     public static final String PROLOGUE_CONV_RESOLVED = "prologue_conv_resolved";
+    public static final String PROLOGUE_PROMPT_BUILT = "prologue_prompt_built";
     public static final String PROLOGUE_PROMPT_ASSEMBLED = "prologue_prompt_assembled";
     public static final String PROLOGUE_DONE = "prologue_done";
     public static final String FIRST_TOKEN = "first_token";
@@ -310,6 +311,22 @@ public final class LatencyTrace {
         }
         if (convResolved != null && promptAssembled != null) {
             emit("prologue_prompt", nsToMs(promptAssembled - convResolved));
+        }
+        // Decompose prologue_prompt rather than extend the chain — these two sum to it, not
+        // to prologue, so a consumer must pick one level or double-count.
+        //
+        // prologue_prompt is bimodal: 3-23 ms on back-to-back turns against ~600 ms
+        // occasionally (p50 34, p90 135, max 625 over one 10-turn window). Timing
+        // SystemPromptAssembler.assemble on its own through /api/agents/{id}/prompt-text put
+        // it at 2-29 ms for a 40 KB prompt, so the spike is downstream of assembly — in
+        // applyMediaRewrite, which also runs compression, the compaction gate (an LLM call
+        // when it fires) and a full-prompt token estimate. Splitting here says which.
+        Long promptBuilt = marks.get(PROLOGUE_PROMPT_BUILT);
+        if (convResolved != null && promptBuilt != null) {
+            emit("prologue_assemble", nsToMs(promptBuilt - convResolved));
+        }
+        if (promptBuilt != null && promptAssembled != null) {
+            emit("prologue_rewrite", nsToMs(promptAssembled - promptBuilt));
         }
         if (promptAssembled != null) {
             emit("prologue_tools", nsToMs(prologueDone - promptAssembled));

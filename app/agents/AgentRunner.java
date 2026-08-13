@@ -525,6 +525,8 @@ public class AgentRunner {
             }
             var prepared = preparedOpt.get();
 
+            trace.mark(LatencyTrace.PROLOGUE_PROMPT_BUILT);
+
             // Compression → compaction → context-window trim → audio/vision/video
             // capability rewrite, all outside the prologue Tx (LLM calls inside).
             prepared = AgentPromptPreparer.rewriteSyncMedia(prepared, agent, conversation, conversationId, userMessage);
