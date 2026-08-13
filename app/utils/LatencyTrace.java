@@ -43,7 +43,6 @@ public final class LatencyTrace {
     private final ConcurrentHashMap<String, AtomicLong> toolExecByName = new ConcurrentHashMap<>();
     private final AtomicLong persistMs = new AtomicLong();
     private final AtomicLong queryEmbedMs = new AtomicLong();
-    private final AtomicLong queryEmbedWaitMs = new AtomicLong();
     private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
     private final AtomicLong memoryRecallPromptMs = new AtomicLong();
@@ -178,21 +177,6 @@ public final class LatencyTrace {
         var trace = CURRENT.get();
         if (trace == null) return;
         trace.queryEmbedMs.addAndGet(elapsedMs);
-    }
-
-    /**
-     * Record how long assembly actually blocked waiting for that embedding.
-     *
-     * <p>The embed runs concurrently with prompt assembly, so the turn pays only whatever
-     * is left of it once assembly reaches recall. {@code prologue_embed_query} stays the
-     * round trip's own cost, and this is the part that lands on the critical path — the
-     * difference between the two is the overlap won, which is the only way to tell whether
-     * the concurrency is actually helping on this deployment.
-     */
-    public static void recordQueryEmbedWait(long elapsedMs) {
-        var trace = CURRENT.get();
-        if (trace == null) return;
-        trace.queryEmbedWaitMs.addAndGet(elapsedMs);
     }
 
     /** Record the wall-clock cost of a single tool-execution round. */
@@ -415,8 +399,6 @@ public final class LatencyTrace {
         // to the chain — same rule as the pair above.
         long embed = queryEmbedMs.get();
         if (embed > 0) emit("prologue_embed_query", embed);
-        long embedWait = queryEmbedWaitMs.get();
-        if (embedWait > 0) emit("prologue_embed_wait", embedWait);
         if (promptAssembled != null) {
             emit("prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
