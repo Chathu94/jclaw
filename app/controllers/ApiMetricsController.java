@@ -417,11 +417,13 @@ public class ApiMetricsController extends Controller {
         // lock-contention events, no CPU saturation). Disabled for the run and restored after;
         // recall still runs on its keyword leg, so the retrieval path stays exercised.
         //
-        // The store reads this flag once into a final field at construction, so the singleton
-        // has to be dropped for the change to take effect — and again to pick the value back up.
+        // An in-memory override, not a config write: ConfigService.set joins this request's
+        // transaction, so persisting the flag held a write lock on CONFIG for the whole run and
+        // the next config write in the process timed out against it. The store reads the value
+        // once into a final field at construction, so the singleton is dropped on both edges.
         boolean vectorWasEnabled = MemoryVectorSettings.enabled();
         if (vectorWasEnabled) {
-            ConfigService.set(MemoryVectorSettings.KEY_ENABLED, "false");
+            MemoryVectorSettings.setTransientOverride(false);
             MemoryStoreFactory.reset();
         }
 
@@ -435,16 +437,20 @@ public class ApiMetricsController extends Controller {
                     input.agentName()));
 
             long toolInvocations = LoadTestSleepTool.invocations() - toolInvocationsBefore;
-            teardownLoadtest(input, vectorWasEnabled);
+            teardownLoadtest(input);
             renderJSON(GSON.toJson(buildLoadtestResponse(result, input, toolInvocations)));
         } catch (Result r) {
             throw r;
         } catch (Exception e) {
-            teardownLoadtest(input, vectorWasEnabled);
+            teardownLoadtest(input);
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Load test failed: " + e.getMessage());
         } finally {
             if (dispatcherBumped) {
                 HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
+            }
+            if (vectorWasEnabled) {
+                MemoryVectorSettings.setTransientOverride(null);
+                MemoryStoreFactory.reset();
             }
         }
     }
@@ -454,21 +460,12 @@ public class ApiMetricsController extends Controller {
      * runs) or unregister {@code loadtest_sleep} (tools runs). A real non-tool
      * run leaves nothing to undo.
      */
-    private static void teardownLoadtest(LoadtestInput input, boolean restoreVector) {
+    private static void teardownLoadtest(LoadtestInput input) {
         if (!input.real()) {
             LoadTestHarness.stop();
             LoadTestRunner.disable();
         } else if (input.toolAgent()) {
             LoadTestRunner.disable();  // flips loadtest-mock.enabled=false → unregisters the tool
-        }
-        // Restored here rather than in the caller's finally: ConfigService.set joins the
-        // request's ambient transaction, and this action is not @NoTransaction, so a write
-        // issued while unwinding renderJSON's Result lands after the write window and is
-        // silently lost — leaving the instance with vector memory switched off. Teardown runs
-        // on both the success and the failure path while the transaction is still live.
-        if (restoreVector) {
-            ConfigService.set(MemoryVectorSettings.KEY_ENABLED, "true");
-            MemoryStoreFactory.reset();
         }
     }
 

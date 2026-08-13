@@ -30,9 +30,26 @@ public final class MemoryVectorSettings {
     public static final String KEY_MODEL = KEY_PREFIX + "model";
     public static final String KEY_DIMENSIONS = KEY_PREFIX + "dimensions";
 
+    /**
+     * In-memory suppression for the duration of a load test (JCLAW-942). Deliberately not a
+     * config write: {@code ConfigService.set} joins the caller's transaction, so a loadtest
+     * that flipped the persisted key held a write lock on CONFIG for the whole run and the
+     * next config write anywhere in the process timed out against it. It also meant a crash
+     * mid-run left the persisted value switched off. Same shape as
+     * {@code HttpFactories.setLlmDispatcherCapTransient}, which overrides the dispatcher caps
+     * for a run without touching what the operator configured.
+     */
+    private static volatile Boolean transientOverride;
+
     /** Off unless an operator turns it on: a fresh install has no embedding provider. */
     public static boolean enabled() {
-        return ConfigService.getBoolean(KEY_ENABLED, false);
+        var override = transientOverride;
+        return override != null ? override : ConfigService.getBoolean(KEY_ENABLED, false);
+    }
+
+    /** {@code null} clears the override and returns to the persisted value. */
+    public static void setTransientOverride(Boolean value) {
+        transientOverride = value;
     }
 
     /**
