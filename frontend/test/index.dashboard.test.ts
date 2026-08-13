@@ -123,7 +123,9 @@ describe('Dashboard — Chat Performance latency filters (JCLAW-515)', () => {
     await flushPromises()
 
     // Default (latency) view: durations only — Total summarises what is above it.
-    expect(c.text()).toContain('Time to first token')
+    // "text", not "token": TTFT now names the wait until the model emits anything,
+    // and this segment is the narrower one that stops at the first visible token.
+    expect(c.text()).toContain('Time to first text')
     expect(c.text()).not.toContain('LLM calls / turn')
 
     // Switching to the counts view surfaces them, with the cache share derived

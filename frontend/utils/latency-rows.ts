@@ -116,13 +116,22 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   queue_wait: 'Queue wait',
   prologue: 'Prologue',
   dispatcher_wait: 'Dispatcher wait',
-  ttft: 'Time to first token',
+  // TTFT is the wait until the model emits anything at all, which is what the
+  // term means everywhere else. The older segment stops at the first token the
+  // reader sees, so on a turn that reasons or calls a tool first it also covers
+  // that work — named for the text to keep the two apart.
+  ttft_first_signal: 'TTFT',
+  ttft: 'Time to first text',
   stream_body: 'Stream body',
+  tool_gap: 'Tool round gap',
+  think_time: 'Reasoning time',
   tool_exec: 'Tool execution',
   persist: 'Persist',
   total: 'Total',
   terminal_tail: 'Terminal delivery',
   memory_recall: 'Memory recall',
+  memory_recall_prompt: 'Memory recall (prompt)',
+  memory_recall_tool: 'Memory recall (tool)',
 }
 
 /**
@@ -132,6 +141,10 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
  * rather than the raw key. Sentence case, not title case, to match the maps.
  */
 export function humanizeSegment(key: string): string {
+  // Per-tool rounds arrive as `tool_exec:<name>`. The name is the tool's own
+  // identifier, so it stays verbatim — an operator matches it against the tool
+  // list, where it is also snake_case.
+  if (key.startsWith('tool_exec:')) return `Tool: ${key.slice('tool_exec:'.length)}`
   const words = key.replaceAll('_', ' ').trim()
   return words.charAt(0).toUpperCase() + words.slice(1)
 }
@@ -241,6 +254,13 @@ export const PROLOGUE_CHILDREN_ORDER = [
   'prologue_conv',
   'prologue_tools',
   'prologue_prompt',
+  // The four below decompose Prompt rather than continuing the chain, so they
+  // follow it and do not sum with their siblings.
+  'prologue_assemble',
+  'prologue_rewrite',
+  'prologue_embed_query',
+  'prologue_embed_http',
+  'prologue_embed_wait',
 ] as const
 
 export const PROLOGUE_CHILD_LABELS: Record<string, string> = {
@@ -248,6 +268,13 @@ export const PROLOGUE_CHILD_LABELS: Record<string, string> = {
   prologue_conv: 'Conversation',
   prologue_tools: 'Tools',
   prologue_prompt: 'Prompt',
+  prologue_assemble: 'Assemble',
+  prologue_rewrite: 'Rewrite',
+  prologue_embed_query: 'Query embedding',
+  prologue_embed_http: 'Embedding round trip',
+  // Retired with the concurrent-embed revert; kept so historical rows still
+  // render with a name rather than a bare suffix.
+  prologue_embed_wait: 'Embedding wait',
 }
 
 function isPrologueChildKey(key: string): boolean {
