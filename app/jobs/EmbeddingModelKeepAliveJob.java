@@ -16,10 +16,11 @@ import services.EmbeddingModelKeepAlive;
  * Renewing also means warmth survives the model server being restarted underneath a running
  * JClaw.
  *
- * <p>Half-hourly, not minutes: the pin is a directive rather than a touch — Ollama holds
- * the model until it exits and LM Studio for the day the TTL asks for — so the interval only
- * has to be short enough to re-pin after the model server itself restarts, not short enough
- * to beat an idle timer.
+ * <p>Half-hourly, not minutes: the pin is a directive rather than a touch, so the interval
+ * only has to outlast the ways a pin is lost rather than beat an idle timer. Renewed for
+ * every backend including Ollama, because {@code keep_alive: -1} is best-effort — the
+ * scheduler evicts under model-load pressure regardless of it, and once that happens nothing
+ * else would restore the pin until JClaw itself restarted.
  */
 @OnApplicationStart(async = true)
 @Every("30mn")

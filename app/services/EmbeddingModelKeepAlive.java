@@ -25,10 +25,13 @@ import java.util.Locale;
  * pick a provider class:
  *
  * <ul>
- *   <li><b>Ollama</b> — {@code keep_alive: -1} pins until the server exits. Only its native
- *       API honours the field: sending it on the OpenAI-compatible {@code /v1} route left
- *       {@code ollama ps} reporting the ordinary five-minute expiry, while the same value on
- *       {@code /api/embed} reported "Forever". Hence the URL derivation below.</li>
+ *   <li><b>Ollama</b> — {@code keep_alive: -1} asks Ollama to hold the model indefinitely,
+ *       and only its native API honours the field: sending it on the OpenAI-compatible
+ *       {@code /v1} route left {@code ollama ps} reporting the ordinary five-minute expiry,
+ *       while the same value on {@code /api/embed} reported "Forever". Hence the URL
+ *       derivation below. "Indefinitely" is best-effort rather than a guarantee — the
+ *       scheduler still evicts under model-load pressure, reported even between two models
+ *       both pinned at -1 — which is why this is renewed rather than sent once at boot.</li>
  *   <li><b>LM Studio</b> — JIT-loaded models carry a 60-minute idle TTL, and {@code ttl}
  *       (seconds) overrides it on the OpenAI-compatible route, so no special URL is needed.
  *       No infinite value is documented, so this asks for a long one. An operator who wants
