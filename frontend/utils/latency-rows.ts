@@ -122,6 +122,18 @@ export const TOP_LEVEL_LABELS: Record<string, string> = {
   persist: 'Persist',
   total: 'Total',
   terminal_tail: 'Terminal delivery',
+  memory_recall: 'Memory recall',
+}
+
+/**
+ * Wire key to sentence case, for a segment none of the maps here name. The
+ * backend adds segments without this file changing — `memory_recall` shipped and
+ * rendered to operators as `memory_recall` — so the fallback has to be a label
+ * rather than the raw key. Sentence case, not title case, to match the maps.
+ */
+export function humanizeSegment(key: string): string {
+  const words = key.replace(/_/g, ' ').trim()
+  return words.charAt(0).toUpperCase() + words.slice(1)
 }
 
 /**
@@ -169,6 +181,7 @@ export const COUNT_LABELS: Record<string, string> = {
   tool_round_count: 'Tool rounds / turn',
   tool_verify_count: 'Tool results checked / turn',
   tool_verify_failed: 'Tool results flagged / turn',
+  memory_recall_count: 'Memory recalls / turn',
 }
 
 /** Histograms carry a windowed sum alongside the percentiles. Meaningless for a
@@ -208,12 +221,12 @@ export function buildCountRows<H extends { count: number } = LatencyHistogram>(
   for (const key of COUNT_ORDER) {
     const h = metrics[key]
     if (!hasSamples(h)) continue
-    rows.push({ key, label: COUNT_LABELS[key] ?? key, h, isChild: false })
+    rows.push({ key, label: COUNT_LABELS[key] ?? humanizeSegment(key), h, isChild: false })
     seen.add(key)
   }
   for (const [key, h] of Object.entries(metrics)) {
     if (seen.has(key) || !isCountSegment(key) || !hasSamples(h)) continue
-    rows.push({ key, label: COUNT_LABELS[key] ?? key, h, isChild: false })
+    rows.push({ key, label: COUNT_LABELS[key] ?? humanizeSegment(key), h, isChild: false })
   }
   return rows
 }
@@ -324,7 +337,7 @@ function appendVoiceGroup<H extends { count: number }>(
   for (const child of VOICE_CHILDREN_ORDER) {
     const ch = metrics[child]
     if (!hasSamples(ch)) continue
-    rows.push({ key: child, label: VOICE_LABELS[child] ?? child, h: ch, isChild: true })
+    rows.push({ key: child, label: VOICE_LABELS[child] ?? humanizeSegment(child), h: ch, isChild: true })
     seen.add(child)
   }
 }
@@ -353,7 +366,7 @@ function appendUnknownSegments<H extends { count: number }>(
     // land here as an unknown row, which is exactly the mixing the split removes —
     // and it would sit inside a table whose Total does not summarise it.
     if (isCountSegment(key)) continue
-    rows.push({ key, label: key, h, isChild: false })
+    rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? humanizeSegment(key), h, isChild: false })
     seen.add(key)
   }
 }
@@ -375,7 +388,7 @@ export function buildLatencyRows<H extends { count: number } = LatencyHistogram>
     const h = metrics[key]
     const parentEmitted = hasSamples(h)
     if (parentEmitted) {
-      rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? key, h, isChild: false })
+      rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? humanizeSegment(key), h, isChild: false })
       seen.add(key)
     }
     // Nest prologue children immediately under the parent — only when the

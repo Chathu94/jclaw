@@ -152,7 +152,19 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     })
     const parse = rows.find(r => r.key === 'prologue_parse')!
     expect(parse).toBeDefined()
-    expect(parse.label).toBe('prologue_parse')
+    // An orphaned child falls through to the unknown-segment pass, which now
+    // labels rather than echoing the wire key.
+    expect(parse.label).toBe('Prologue parse')
+  })
+
+  it('labels an unrecognised segment instead of showing its wire key', () => {
+    // memory_recall reached operators as "memory_recall" because this file names
+    // segments explicitly and the backend adds them without it changing.
+    const rows = buildLatencyRows({ memory_recall: h(3, 8), total: h(3, 100) })
+    expect(rows.find(r => r.key === 'memory_recall')!.label).toBe('Memory recall')
+
+    const unknown = buildLatencyRows({ some_new_segment: h(3, 8), total: h(3, 100) })
+    expect(unknown.find(r => r.key === 'some_new_segment')!.label).toBe('Some new segment')
   })
 })
 
