@@ -207,6 +207,27 @@ describe('memories admin page (JCLAW-40)', () => {
     await flushPromises()
     expect(c.find('[data-testid="memory-empty"]').exists()).toBe(true)
   })
+
+  // The scary case: an operator filters to one agent and presses the button
+  // labelled "Delete all matching". The request must carry that filter — an
+  // empty filter object here would delete every memory in the store.
+  it('Delete all matching sends the active filter rather than an empty one', async () => {
+    memoriesResponse = [mem()]
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    c.findComponent({ name: 'FilterBar' }).vm.$emit('update:filters', [
+      { key: 'agent', value: '__loadtest__' },
+    ])
+    await flushPromises()
+
+    memoriesResponse = []
+    await c.find('[data-testid="delete-all"]').trigger('click')
+    await flushPromises()
+    useConfirm()._resolve(true)
+    await vi.waitFor(() => expect(bulkDeleteBody).not.toBeNull())
+    expect(bulkDeleteBody).toEqual({ filter: { agent: '__loadtest__' } })
+  })
 })
 
 describe('memories admin page — sortable columns', () => {

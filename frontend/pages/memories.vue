@@ -254,11 +254,18 @@ function activeFilterPayload() {
 
 async function deleteAll() {
   if (deletingAll.value || total.value === 0) return
-  const scope = activeFilterCount.value ? ' matching the active filters' : ''
+  // Name the scope in the title and the button, not just the message body: the
+  // filtered action is reached from a "Delete all matching" button, and a dialog
+  // that then says "Delete all memories" reads as though it ignores the filter.
+  const filtered = activeFilterCount.value > 0
+  const n = total.value
+  const noun = `memor${n === 1 ? 'y' : 'ies'}`
   const ok = await confirm({
-    title: 'Delete all memories',
-    message: `Delete all memories${scope}? This cannot be undone.`,
-    confirmText: 'Delete all',
+    title: filtered ? 'Delete matching memories' : 'Delete all memories',
+    message: filtered
+      ? `Delete ${n} ${noun} matching the active filters? This cannot be undone.`
+      : `Delete all ${n} ${noun}? This cannot be undone.`,
+    confirmText: filtered ? 'Delete matching' : 'Delete all',
     variant: 'danger',
     requireText: 'delete',
   })

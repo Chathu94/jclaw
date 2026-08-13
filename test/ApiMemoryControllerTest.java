@@ -462,6 +462,39 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertEquals(1L, left.longValue());
     }
 
+    /**
+     * Mirrors the live store shape (JCLAW-1013): both agents carry a supersession
+     * trail, so an agent-filtered delete has to leave the other agent's active
+     * *and* superseded rows alone.
+     */
+    @Test
+    void bulkDeleteByAgentLeavesOtherAgentsIntact() {
+        var keepOld = seedMemory("main", "main old", "fact", 0.5);
+        var keepNew = seedMemory("main", "main new", "fact", 0.5);
+        fetchInFreshTx(() -> {
+            models.Memory.<models.Memory>findById(Long.valueOf(keepOld)).supersede(Long.valueOf(keepNew));
+            return null;
+        });
+        var goOld = seedMemory("__loadtest__", "loadtest old", "fact", 0.5);
+        var goNew = seedMemory("__loadtest__", "loadtest new", "fact", 0.5);
+        fetchInFreshTx(() -> {
+            models.Memory.<models.Memory>findById(Long.valueOf(goOld)).supersede(Long.valueOf(goNew));
+            return null;
+        });
+        login();
+
+        var resp = deleteWithJsonBody("/api/memories",
+                "{\"filter\": {\"agent\": \"__loadtest__\"}}");
+        assertIsOk(resp);
+
+        assertNotNull(fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(keepOld))),
+                "other agent's superseded row must survive an agent-filtered delete");
+        assertNotNull(fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(keepNew))),
+                "other agent's active row must survive an agent-filtered delete");
+        assertNull(fetchInFreshTx(() -> models.Memory.findById(Long.parseLong(goNew))),
+                "the filtered agent's active row is deleted");
+    }
+
     @Test
     void bulkDeleteEmptyBodyIs400() {
         login();
