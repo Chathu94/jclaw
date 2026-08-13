@@ -349,7 +349,7 @@ public class SystemPromptAssembler {
             if (!catalog.isEmpty()) {
                 b.startSection("Tool Catalog");
                 b.sb.append("\n## Tool Catalog\n");
-                b.sb.append("The complete set of tools that exist in JClaw. When a skill declares a `tools:` list, it MUST use names from this table:\n\n");
+                b.sb.append("The tools available to you. When a skill declares a `tools:` list, it MUST use names from this table:\n\n");
                 b.sb.append(catalog);
                 b.sb.append("\n");
             }
