@@ -224,6 +224,9 @@ public final class LoadTestRunner {
             long avgResponseTokens,
             long avgReasoningTokens,
             double avgTokensPerSec,
+            long promptTokens,
+            long completionTokens,
+            double costUsd,
             List<TurnBucket> turnBuckets,
             List<SegmentBreakdown> serverSegments) {}
 
@@ -358,6 +361,9 @@ public final class LoadTestRunner {
                 tokenStats.avgVisibleTokens(),
                 tokenStats.avgReasoningTokens(),
                 tokenStats.avgRate(),
+                tokenStats.promptTokens(),
+                tokenStats.completionTokens(),
+                tokenStats.costUsd(),
                 turnBuckets,
                 serverSegments);
     }
@@ -397,6 +403,7 @@ public final class LoadTestRunner {
                 long id = req.realProvider()
                         ? ensureLoadtestAgentRealInner(realProviderName, req.model(), agentName)
                         : ensureLoadtestAgentInner(mockPort);
+                excludeHarnessAgentsFromDashboard();
                 return new AgentSetup(id, null, null, null);
             });
         } catch (Throwable t) {
@@ -812,7 +819,8 @@ public final class LoadTestRunner {
      * tokens" rather than that being silently rolled into the rate.
      * {@code avgRate} = mean of per-request {@code visibleTokens / streamBodyMs * 1000}.
      */
-    private record TokenStats(long avgVisibleTokens, long avgReasoningTokens, double avgRate) {}
+    private record TokenStats(long avgVisibleTokens, long avgReasoningTokens, double avgRate,
+                              long promptTokens, long completionTokens, double costUsd) {}
 
     /** Same chars-per-token heuristic used by SystemPromptAssembler.approxTokens. */
     private static long approxTokens(int chars) {
@@ -852,7 +860,7 @@ public final class LoadTestRunner {
         try {
             return JPA.withTransaction(DEFAULT_DB, true, () -> aggregateTokenStats(agentId, sinceMillis));
         } catch (Throwable _) {
-            return new TokenStats(0L, 0L, 0.0);
+            return new TokenStats(0L, 0L, 0.0, 0L, 0L, 0.0);
         }
     }
 
@@ -872,6 +880,9 @@ public final class LoadTestRunner {
         long tokCount = 0;
         double rateSum = 0.0;
         long rateCount = 0;
+        long promptSum = 0;
+        long completionSum = 0;
+        double costSum = 0.0;
         for (var row : rows) {
             var parsed = parseTokenRow(row);
             if (parsed == null) continue;
@@ -882,15 +893,20 @@ public final class LoadTestRunner {
                 rateSum += parsed.rate();
                 rateCount++;
             }
+            promptSum += parsed.prompt();
+            completionSum += parsed.completion();
+            costSum += parsed.costUsd();
         }
         return new TokenStats(
                 tokCount > 0 ? visSum / tokCount : 0L,
                 tokCount > 0 ? reasonSum / tokCount : 0L,
-                rateCount > 0 ? rateSum / rateCount : 0.0);
+                rateCount > 0 ? rateSum / rateCount : 0.0,
+                promptSum, completionSum, costSum);
     }
 
     /** Per-row token accounting extracted from a Message: visible tokens, "internal" (provider billed but not visible), and the per-second rate (0 when undefined). */
-    private record RowTokenStats(long visible, long internal, double rate) {}
+    private record RowTokenStats(long visible, long internal, double rate,
+                                 long prompt, long completion, double costUsd) {}
 
     private static RowTokenStats parseTokenRow(Object[] row) {
         try {
@@ -911,7 +927,11 @@ public final class LoadTestRunner {
                     rate = (visible * 1000.0) / denomMs;
                 }
             }
-            return new RowTokenStats(visible, internal, rate);
+            // JCLAW-901 writes costUsd only when the provider reported one, so its absence
+            // means "not billed / not reported", never "free".
+            double costUsd = obj.has("costUsd") ? obj.get("costUsd").getAsDouble() : 0d;
+            long promptTokens = obj.has("prompt") ? obj.get("prompt").getAsLong() : 0L;
+            return new RowTokenStats(visible, internal, rate, promptTokens, completion, costUsd);
         } catch (Exception _) {
             return null;
         }
@@ -1071,6 +1091,26 @@ public final class LoadTestRunner {
      * load-test runs. Called explicitly via {@code DELETE /api/metrics/loadtest/data}
      * so the operator can inspect results before clearing them.
      */
+    /**
+     * Keep harness traffic out of the Chat Performance dashboard (JCLAW-942). That panel
+     * reads persisted samples to describe how the operator's own agents behave, and a load
+     * test is not that: one c=100 run wrote 60,436 rows against 146 from real chat, so the
+     * percentiles it showed were synthetic almost end to end.
+     *
+     * <p>Registered per run rather than resolved once at boot because the agents are
+     * provisioned lazily — before the first run there is no id to exclude. Only the
+     * persisted leg is affected; the in-memory histograms still record, which is what the
+     * run's own segment breakdown is computed from.
+     */
+    private static void excludeHarnessAgentsFromDashboard() {
+        var ids = new ArrayList<String>(3);
+        for (var name : List.of(LOADTEST_AGENT_NAME, LOADTEST_TOOLS_AGENT_NAME, Agent.EVALTEST_AGENT_NAME)) {
+            var agent = Agent.findByName(name);
+            if (agent != null) ids.add(String.valueOf(agent.id));
+        }
+        LatencyMetricRecorder.excludeAgents(ids);
+    }
+
     public static void cleanupConversations() {
         try {
             JPA.withTransaction(DEFAULT_DB, false, (F.Function0<Void>) () -> {
@@ -1094,6 +1134,13 @@ public final class LoadTestRunner {
                             .executeUpdate();
                     JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
                             .setParameter("name", name)
+                            .executeUpdate();
+                    // Samples written before the exclusion above existed — a run on a build
+                    // that predates it, or the rows already in the table. Without this the
+                    // dashboard keeps reporting synthetic percentiles for the whole 30-day
+                    // window. LatencyMetric.agentId is the id as a string, not the name.
+                    JPA.em().createQuery("DELETE FROM LatencyMetric l WHERE l.agentId = :agentId")
+                            .setParameter("agentId", String.valueOf(agent.id))
                             .executeUpdate();
                     accumulatedIds.addAll(messageIds);
                 }

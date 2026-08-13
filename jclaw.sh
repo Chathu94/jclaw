@@ -3333,6 +3333,16 @@ do_loadtest() {
 import json, sys
 data = json.load(sys.stdin)
 print(json.dumps(data, indent=2))
+cost = data.get("costUsd") or 0
+pt, ct = data.get("promptTokens") or 0, data.get("completionTokens") or 0
+if pt or ct or cost:
+    print()
+    # Reported here because teardown deletes the rows this is computed from, so a
+    # run never reaches the Chat Cost dashboard (JCLAW-942). costUsd is the
+    # figure reported by the provider; absent for the mock and unpriced providers.
+    print("Run cost: %s  (prompt %s tok, completion %s tok)"
+          % (("$%.4f" % cost) if cost else "not reported by provider",
+             format(pt, ","), format(ct, ",")))
 buckets = data.get("turnBuckets") or []
 if buckets:
     print()

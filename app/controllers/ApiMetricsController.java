@@ -467,6 +467,13 @@ public class ApiMetricsController extends Controller {
         } else if (input.toolAgent()) {
             LoadTestRunner.disable();  // flips loadtest-mock.enabled=false → unregisters the tool
         }
+        // A run leaves conversations, messages, event rows and latency samples behind, and
+        // until JCLAW-942 that sweep only happened when someone passed --clean. The samples
+        // are the reason it now runs every time: they feed the Chat Performance dashboard,
+        // which is meant to describe the operator's own agents, and one c=100 run wrote
+        // 60,436 of them against 146 from real chat. Safe here — the run's token and cost
+        // aggregation reads those messages before this point.
+        LoadTestRunner.cleanupConversations();
     }
 
     @SuppressWarnings("java:S2259")
@@ -621,6 +628,13 @@ public class ApiMetricsController extends Controller {
         // model is doing very different work from a "70 visible / 0
         // reasoning" model even when their visible-token rates match.
         out.addProperty("avgReasoningTokens", result.avgReasoningTokens());
+        // What the run cost, while the rows it is computed from still exist — teardown
+        // deletes them, which is why this never reached the Chat Cost dashboard (JCLAW-942).
+        // costUsd is the provider's own figure summed across turns; 0 when the provider
+        // reported none (every mock run, and providers that do not price per call).
+        out.addProperty("promptTokens", result.promptTokens());
+        out.addProperty("completionTokens", result.completionTokens());
+        out.addProperty("costUsd", result.costUsd());
         out.addProperty("avgTokensPerSec", round1(result.avgTokensPerSec()));
         // Provider/model are echoed only in real-provider mode. Their
         // presence (vs absence) IS the run-mode signal — no separate

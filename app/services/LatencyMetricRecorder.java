@@ -4,6 +4,8 @@ import models.LatencyMetric;
 import play.Logger;
 
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
@@ -27,9 +29,33 @@ public final class LatencyMetricRecorder {
     // the inline flush off most turns while still bounding the in-memory backlog.
     private static final int BATCH_SIZE = 100;
 
+    /**
+     * Agent ids whose samples are never persisted (JCLAW-942). The Chat Performance
+     * dashboard reads this table to describe how the operator's agents behave, and a
+     * load test is not that: one c=100 run wrote 60,436 rows against 146 from real
+     * chat, so the panel's percentiles described synthetic traffic almost entirely.
+     *
+     * <p>Only the persisted leg is suppressed. The in-memory histograms still record,
+     * because that is what the run's own segment breakdown is computed from.
+     *
+     * <p>Eval capture needs no entry: it never calls {@code LatencyTrace.end()}, so it
+     * emits no samples through any leg.
+     */
+    private static volatile Set<String> excludedAgentIds = Set.of();
+
+    /** Replace the exclusion set. Called when a load test provisions its agents. */
+    public static void excludeAgents(Collection<String> agentIds) {
+        excludedAgentIds = Set.copyOf(agentIds);
+    }
+
+    public static boolean isExcluded(String agentId) {
+        return agentId != null && excludedAgentIds.contains(agentId);
+    }
+
     /** Queue one sample. Cheap (constructs a detached entity, no DB); flushes inline
      *  only when the batch threshold trips. */
     public static void enqueue(String agentId, String channel, String segment, long latencyMs) {
+        if (isExcluded(agentId)) return;
         var m = new LatencyMetric();
         m.agentId = agentId;
         m.channel = channel;
