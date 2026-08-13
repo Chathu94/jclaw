@@ -5,6 +5,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import memory.MemoryStoreFactory;
+import memory.MemoryVectorSettings;
 import models.CompressionMetric;
 import models.LatencyMetric;
 import play.db.jpa.JPA;
@@ -407,6 +409,22 @@ public class ApiMetricsController extends Controller {
             HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
         }
 
+        // A loadtest measures the chat turn. Recall embeds the user's message on every turn,
+        // synchronously, before the chat call starts — and that embedding goes to a provider
+        // with its own concurrency limit, so at scale the measurement describes that provider
+        // rather than this one. Measured over 50-turn runs with cold caches: 107 ms/turn at
+        // c=10 against 1115 ms at c=100, linear in offered load, while the JVM sat idle (four
+        // lock-contention events, no CPU saturation). Disabled for the run and restored after;
+        // recall still runs on its keyword leg, so the retrieval path stays exercised.
+        //
+        // The store reads this flag once into a final field at construction, so the singleton
+        // has to be dropped for the change to take effect — and again to pick the value back up.
+        boolean vectorWasEnabled = MemoryVectorSettings.enabled();
+        if (vectorWasEnabled) {
+            ConfigService.set(MemoryVectorSettings.KEY_ENABLED, "false");
+            MemoryStoreFactory.reset();
+        }
+
         long toolInvocationsBefore = LoadTestSleepTool.invocations();
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
@@ -417,12 +435,12 @@ public class ApiMetricsController extends Controller {
                     input.agentName()));
 
             long toolInvocations = LoadTestSleepTool.invocations() - toolInvocationsBefore;
-            teardownLoadtest(input);
+            teardownLoadtest(input, vectorWasEnabled);
             renderJSON(GSON.toJson(buildLoadtestResponse(result, input, toolInvocations)));
         } catch (Result r) {
             throw r;
         } catch (Exception e) {
-            teardownLoadtest(input);
+            teardownLoadtest(input, vectorWasEnabled);
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Load test failed: " + e.getMessage());
         } finally {
             if (dispatcherBumped) {
@@ -436,12 +454,21 @@ public class ApiMetricsController extends Controller {
      * runs) or unregister {@code loadtest_sleep} (tools runs). A real non-tool
      * run leaves nothing to undo.
      */
-    private static void teardownLoadtest(LoadtestInput input) {
+    private static void teardownLoadtest(LoadtestInput input, boolean restoreVector) {
         if (!input.real()) {
             LoadTestHarness.stop();
             LoadTestRunner.disable();
         } else if (input.toolAgent()) {
             LoadTestRunner.disable();  // flips loadtest-mock.enabled=false → unregisters the tool
+        }
+        // Restored here rather than in the caller's finally: ConfigService.set joins the
+        // request's ambient transaction, and this action is not @NoTransaction, so a write
+        // issued while unwinding renderJSON's Result lands after the write window and is
+        // silently lost — leaving the instance with vector memory switched off. Teardown runs
+        // on both the success and the failure path while the transaction is still live.
+        if (restoreVector) {
+            ConfigService.set(MemoryVectorSettings.KEY_ENABLED, "true");
+            MemoryStoreFactory.reset();
         }
     }
 
