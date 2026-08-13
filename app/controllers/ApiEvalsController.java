@@ -90,10 +90,12 @@ public class ApiEvalsController extends Controller {
                                 + "Create %s in the agent editor instead.")
                                 .formatted(Agent.EVALTEST_AGENT_NAME, Agent.MAIN_AGENT_NAME,
                                         Agent.EVALTEST_AGENT_NAME));
+                throw ApiResponses.unreachable();
             }
         }
         if (agent == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "No agent named '%s'".formatted(agentName));
+            throw ApiResponses.unreachable();
         }
 
         var suite = resolveSuite(suiteId, body != null && body.has("local")
