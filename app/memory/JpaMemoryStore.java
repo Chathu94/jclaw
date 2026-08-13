@@ -1013,7 +1013,12 @@ public class JpaMemoryStore implements MemoryStore {
                 // available here, so the call records under "unknown" channel
                 // for dispatcher_wait. Acceptable: embeddings hit a different
                 // provider endpoint than chat and are typically cheap.
-                return provider.embeddings(vectorModel, text, null);
+                long httpStartNs = System.nanoTime();
+                try {
+                    return provider.embeddings(vectorModel, text, null);
+                } finally {
+                    utils.LatencyTrace.recordEmbedHttp((System.nanoTime() - httpStartNs) / 1_000_000L);
+                }
             } catch (Exception e) {
                 EventLogger.warn(EVENT_CATEGORY_MEMORY, "Embedding generation failed: %s".formatted(e.getMessage()));
                 return null;

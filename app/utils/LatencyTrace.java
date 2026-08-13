@@ -43,6 +43,7 @@ public final class LatencyTrace {
     private final ConcurrentHashMap<String, AtomicLong> toolExecByName = new ConcurrentHashMap<>();
     private final AtomicLong persistMs = new AtomicLong();
     private final AtomicLong queryEmbedMs = new AtomicLong();
+    private final AtomicLong embedHttpMs = new AtomicLong();
     private final AtomicBoolean reasoningSeen = new AtomicBoolean();
     private final AtomicLong memoryRecallMs = new AtomicLong();
     private final AtomicLong memoryRecallPromptMs = new AtomicLong();
@@ -177,6 +178,22 @@ public final class LatencyTrace {
         var trace = CURRENT.get();
         if (trace == null) return;
         trace.queryEmbedMs.addAndGet(elapsedMs);
+    }
+
+    /**
+     * Record the provider round trip inside a query embedding — the HTTP call and its
+     * response parse, with none of the store plumbing around it.
+     *
+     * <p>Splits {@code prologue_embed_query}, which was measuring 61-73 ms against an Ollama
+     * that serves the same request in 25-31 ms by any route. The difference is ours, and
+     * this says which side of the provider call it sits on: the store's own work (the query
+     * prefix, its config read, the embedding cache, resolving the provider) or the call
+     * itself. Recorded on the calling thread, so it no-ops outside a turn.
+     */
+    public static void recordEmbedHttp(long elapsedMs) {
+        var trace = CURRENT.get();
+        if (trace == null) return;
+        trace.embedHttpMs.addAndGet(elapsedMs);
     }
 
     /** Record the wall-clock cost of a single tool-execution round. */
@@ -399,6 +416,8 @@ public final class LatencyTrace {
         // to the chain — same rule as the pair above.
         long embed = queryEmbedMs.get();
         if (embed > 0) emit("prologue_embed_query", embed);
+        long embedHttp = embedHttpMs.get();
+        if (embedHttp > 0) emit("prologue_embed_http", embedHttp);
         if (promptAssembled != null) {
             emit("prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
