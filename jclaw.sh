@@ -167,7 +167,10 @@ Load-test options (only used with the 'loadtest' command):
   --ttft-ms <n>           Simulated time-to-first-token in ms (default: 100)
   --tokens-per-second <n> Simulated token throughput (default: 50)
   --response-tokens <n>   Tokens per simulated response (default: 40)
-  --clean                 Delete loadtest conversations/events from DB instead of running a test
+  --clean                 Delete leftover loadtest data (conversations, messages, events,
+                          latency samples) without running a test. Every run already
+                          cleans up on completion, so this is for recovery — a run the
+                          server died partway through, or data from an older build.
   --compress              Send 'Accept-Encoding: br, gzip' on each loadtest request so the
                           server's HttpContentCompressor engages — measures the cost of the
                           encoding path. Default off (Java HttpClient sends no Accept-Encoding,
@@ -760,8 +763,13 @@ Options:
   --tokens-per-second <n> Simulated token throughput (default: 50)
   --response-tokens <n>   Tokens per simulated response (default: 40)
   --backend-port <port>   Target port (default: 9000)
-  --clean                 Delete loadtest conversations/events from the DB
-                          instead of running a test
+  --clean                 Delete leftover loadtest data — conversations, messages,
+                          events and latency samples — without running a test.
+                          Every run now cleans up on completion, so reach for
+                          this only to recover: a run the server died partway
+                          through leaves data behind (stopping a run does not
+                          clean either), as does a run on a build older than
+                          the automatic sweep.
   --compress              Send 'Accept-Encoding: br, gzip' so the server's
                           HttpContentCompressor engages — measures the cost
                           of the encoding path.
@@ -802,7 +810,7 @@ Examples:
   ${INVOKE} --provider openrouter --model google/gemini-3-flash-preview loadtest                    # alt cloud
   ${INVOKE} --turns 10 --prompts loadtest/prompts.txt loadtest                                      # varied prompts (mock)
   ${INVOKE} --turns 10 --prompts loadtest/prompts.txt --provider openrouter --model amazon/nova-micro-v1 loadtest  # varied prompts (real)
-  ${INVOKE} --clean loadtest                                                                        # cleanup only
+  ${INVOKE} --clean loadtest                                                                        # recover leftovers from an interrupted run
 EOF
     else
         cat <<EOF
@@ -3225,7 +3233,7 @@ do_loadtest() {
             -H "X-Loadtest-Auth: $secret" \
             -X DELETE "http://localhost:$BACKEND_PORT/api/metrics/loadtest/data")
         if [[ "$clean_status" == "200" ]]; then
-            echo "==> Loadtest conversations, messages, and events deleted."
+            echo "==> Loadtest conversations, messages, events and latency samples deleted."
         else
             echo "Error: Cleanup failed (HTTP $clean_status)"
             exit 1
