@@ -92,9 +92,14 @@ public final class EmbeddingModelKeepAlive {
         if (!MemoryVectorSettings.enabled()) return false;
         if (!ConfigService.getBoolean(KEY_KEEP_WARM, true)) return false;
 
+        // strategyFor rejects both of these too, and is public and tested on its own. Repeating
+        // them is what makes baseUrl non-null where the URL is built below, rather than
+        // non-null only because a helper happened to return NONE.
         var providerName = MemoryVectorSettings.provider();
-        var baseUrl = providerName == null || providerName.isBlank()
-                ? null : ConfigService.get("provider." + providerName + ".baseUrl");
+        if (providerName == null || providerName.isBlank()) return false;
+        var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
+        if (baseUrl == null || baseUrl.isBlank()) return false;
+
         var strategy = strategyFor(providerName, baseUrl);
         if (strategy == Strategy.NONE) return false;
 
