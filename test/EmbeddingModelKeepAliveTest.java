@@ -3,8 +3,6 @@ import play.test.UnitTest;
 import services.EmbeddingModelKeepAlive;
 import services.EmbeddingModelKeepAlive.Strategy;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 /**
  * Residency has no portable directive, so the pin is chosen per backend — and only for a
  * locally-served one, since a hosted provider has no model to hold and would just be billed.
