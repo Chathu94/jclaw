@@ -242,9 +242,12 @@ describe('Settings — Printers panel', () => {
       options: { options: [SIDES], protocols: ['IPP'], mediaReady: null, fromPrinter: true },
     })
     const c = await mountPanel()
-    // An undefined key matches no <option> at all, so the select renders empty and
-    // reads as broken rather than as "not set".
-    expect((c.find('select#printer-opt-sides').element as HTMLSelectElement).value).toBe('')
+    const select = c.find('select#printer-opt-sides').element as HTMLSelectElement
+    // selectedIndex, not value: an undefined key matches no <option> at all, which
+    // leaves selectedIndex at -1 — and .value reads '' for that too, so it cannot tell
+    // "seeded to the placeholder" from "seeded to nothing".
+    expect(select.selectedIndex).toBe(0)
+    expect(select.selectedOptions[0]!.textContent).toContain('Printer default')
   })
 
   it('preselects the saved value for an option', async () => {
