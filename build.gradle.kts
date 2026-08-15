@@ -132,6 +132,10 @@ sonar {
         property("sonar.coverage.jacoco.xmlReportPaths", "jacoco.xml")
         property("sonar.javascript.lcov.reportPaths", "frontend/coverage/lcov.info")
         property("sonar.junit.reportPaths", "test-result")
+        // sonar.junit.reportPaths is Java-only, so the Vitest suite needs the
+        // language-neutral Generic Execution report instead — without it the
+        // frontend shows coverage but zero tests, which reads as untested.
+        property("sonar.testExecutionReportPaths", "frontend/test-report/sonar.xml")
         property("sonar.dependencyCheck.htmlReportPath", "dependency-check-report.html")
 
         // TypeScript strict-mode + Vue parser picks up the frontend tsconfig

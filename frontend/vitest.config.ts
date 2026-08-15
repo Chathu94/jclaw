@@ -18,7 +18,21 @@ export default defineVitestConfig({
     // Test Result Trend; without it a frontend regression showed only as a red build
     // with no test detail. `default` stays first because ./jclaw.sh test parses its
     // "Test Files"/"Tests"/"Duration" lines for the summary it prints.
-    reporters: ['default', 'junit'],
+    reporters: [
+      'default',
+      'junit',
+      // Sonar reads test execution from its own Generic Execution format, not from
+      // JUnit XML, so this is a second report rather than a reuse of the first.
+      // onWritePath receives the path relative to process.cwd() — always frontend/,
+      // since that is where pnpm runs — while Sonar resolves against the repo root,
+      // so the prefix is what makes each path match an indexed file. Unlike lcov,
+      // the Generic Execution importer will not guess: an unresolvable path is
+      // dropped with a warning and the file silently reports no tests.
+      ['vitest-sonar-reporter', {
+        outputFile: 'test-report/sonar.xml',
+        onWritePath: (path: string) => `frontend/${path}`,
+      }],
+    ],
     outputFile: { junit: 'test-report/junit.xml' },
     coverage: {
       // v8 is the native Vitest coverage provider (istanbul requires a
