@@ -16,6 +16,7 @@ import models.AgentToolConfig;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.Tx;
 import utils.ApiResponses;
 
 import java.util.List;
@@ -162,9 +163,12 @@ public class ApiToolsController extends Controller {
         // requirements just became met is re-included. Prevents a window where the agent can
         // still see/invoke a skill that requires a freshly-disabled tool.
         SkillLoader.clearCache();
-        // Drop the per-agent disabled-tools cache so the next streaming turn sees the
-        // new configuration immediately instead of on cache expiry.
-        ToolRegistry.invalidateDisabledToolsCache(agent);
+        // Drop the per-agent disabled-tools cache so the next streaming turn sees the new
+        // configuration. Deferred to the commit (JCLAW-1042): the save above is in this
+        // request's transaction, so evicting now lets a concurrent tool call recompute the set
+        // from the pre-commit rows and re-cache it — leaving a freshly-disabled tool callable.
+        var toggled = agent;
+        Tx.afterCommit(() -> ToolRegistry.invalidateDisabledToolsCache(toggled));
 
         renderJSON(gson.toJson(new ToolToggleResponse(name, enabled, "ok")));
     }
@@ -229,7 +233,10 @@ public class ApiToolsController extends Controller {
         }
 
         SkillLoader.clearCache();
-        ToolRegistry.invalidateDisabledToolsCache(agent);
+        // Deferred for the same reason as the per-tool toggle above (JCLAW-1042) — and this
+        // path also runs a bulk DELETE, which bypasses the entity lifecycle entirely.
+        var toggled = agent;
+        Tx.afterCommit(() -> ToolRegistry.invalidateDisabledToolsCache(toggled));
 
         renderJSON(gson.toJson(new ToolGroupToggleResponse(group, enabled, 1, "ok")));
     }

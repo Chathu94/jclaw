@@ -10,7 +10,9 @@ import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
 import services.LoadTestRunner;
+import services.Tx;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -636,6 +638,10 @@ public class ToolRegistry {
             "agent-disabled-tools",
             CacheConfig.newBuilder()
                     .maximumSize(1000)
+                    // JCLAW-1042 (VULN-099): size-only eviction meant an entry poisoned by a
+                    // racing read could feed the JCLAW-883 execution guard for the life of the
+                    // JVM. A TTL bounds that to seconds even if an ordering bug returns.
+                    .expireAfterWrite(Duration.ofSeconds(30))
                     .build());
 
     /**
@@ -761,14 +767,31 @@ public class ToolRegistry {
         }
     }
 
-    /** Invalidate the cached disabled-tools set for a specific agent. */
+    /**
+     * Invalidate the cached disabled-tools set for a specific agent, immediately.
+     *
+     * <p>Ordering is the caller's to choose, and deliberately not forced here (JCLAW-1042).
+     * Callers whose grant write shares the ambient transaction — the two
+     * {@code ApiToolsController} toggles — must wrap this in {@link Tx#afterCommit} so a
+     * concurrent tool call cannot recompute the set from the pre-commit rows and re-cache it.
+     * Callers that already committed independently must NOT: {@code EvalCapture.calibrate}
+     * writes through {@code commitInFreshTx} and {@code SubagentChildBootstrap} flips grants
+     * for a child whose next turn must see them, so deferring either to an unrelated
+     * transaction's commit would leave a durable write behind a stale cache.
+     */
     public static void invalidateDisabledToolsCache(Agent agent) {
         if (agent != null && agent.id != null) {
             DISABLED_TOOLS_CACHE.invalidate(agent.id);
         }
     }
 
-    /** Clear the entire disabled-tools cache. Used by tests and admin tooling. */
+    /**
+     * Clear the entire disabled-tools cache. Used by tests and admin tooling.
+     *
+     * <p>Deliberately immediate, unlike {@link #invalidateDisabledToolsCache}: this is an
+     * explicit "clear it now" operation rather than an eviction ordered against a write, and
+     * four test classes call it expecting the next read to recompute.
+     */
     public static void clearDisabledToolsCache() {
         DISABLED_TOOLS_CACHE.invalidateAll();
     }
