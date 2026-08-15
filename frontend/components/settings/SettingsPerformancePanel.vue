@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+// Runtime state first: the dispatcher caps below are tuned against what the JVM is
+// actually doing, so reading them in the other order is backwards.
+import SettingsJvmPanel from './SettingsJvmPanel.vue'
 
 // LLM dispatcher caps — outbound concurrency tuning. Defaults seeded by
 // DefaultConfigJob using clamp(8 * cores, 64, 256) per host (total = 2×);
@@ -24,6 +27,8 @@ async function savePerfField(configKey: string, value: string) {
 </script>
 
 <template>
+  <SettingsJvmPanel />
+
   <!-- Performance: LLM dispatcher caps -->
   <div class="mb-6 space-y-4">
     <h2 class="text-sm font-medium text-fg-muted">

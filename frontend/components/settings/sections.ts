@@ -30,7 +30,6 @@ import {
   DocumentTextIcon,
   EyeIcon,
   FilmIcon,
-  KeyIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
   PhotoIcon,
@@ -53,7 +52,6 @@ import SettingsMemoryEmbeddingsPanel from './SettingsMemoryEmbeddingsPanel.vue'
 import SettingsMemoryLimitsPanel from './SettingsMemoryLimitsPanel.vue'
 import SettingsMemoryRerankerPanel from './SettingsMemoryRerankerPanel.vue'
 import SettingsOcrPanel from './SettingsOcrPanel.vue'
-import SettingsPasswordPanel from './SettingsPasswordPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
 import SettingsPrintersPanel from './SettingsPrintersPanel.vue'
 import SettingsProvidersPanel from './SettingsProvidersPanel.vue'
@@ -100,7 +98,6 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'performance', title: 'Performance', icon: BoltIcon, component: SettingsPerformancePanel },
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
-      { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
       // Last in the group deliberately: this is the section whose controls take
       // the instance down, so it shouldn't sit next to the section the rail
       // opens on by default.
@@ -181,6 +178,7 @@ const retiredSectionIds: Record<string, string> = {
   // Merged into Maintenance (JCLAW-1057).
   upgrade: 'maintenance',
   restart: 'maintenance',
+  password: 'maintenance',
 }
 
 /**

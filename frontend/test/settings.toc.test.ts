@@ -29,7 +29,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     await flushPromises()
 
     // Every section has a rail button.
-    for (const id of ['timezone', 'providers', 'transcription', 'shell', 'password']) {
+    for (const id of ['timezone', 'providers', 'transcription', 'shell', 'maintenance']) {
       expect(component.find(`[data-testid="settings-toc-item-${id}"]`).exists()).toBe(true)
     }
     // Default active section is the first (timezone).
@@ -88,14 +88,18 @@ describe('Settings page — TOC navigation + section swap', () => {
     expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBe('page')
   })
 
-  it('rolls the retired upgrade and restart sections into one Maintenance entry', async () => {
+  it('rolls the retired upgrade, restart and password sections into one Maintenance entry', async () => {
     baseEndpoints()
     const component = await mountSuspended(Settings)
     await flushPromises()
 
     expect(component.find('[data-testid="settings-toc-item-maintenance"]').exists()).toBe(true)
-    expect(component.find('[data-testid="settings-toc-item-upgrade"]').exists()).toBe(false)
-    expect(component.find('[data-testid="settings-toc-item-restart"]').exists()).toBe(false)
+    for (const retired of ['upgrade', 'restart', 'password']) {
+      expect(
+        component.find(`[data-testid="settings-toc-item-${retired}"]`).exists(),
+        `${retired} should no longer have its own rail entry`,
+      ).toBe(false)
+    }
   })
 
   it('opens Maintenance for a bookmark predating the merge', async () => {
@@ -103,7 +107,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     // The real guard. An unrecognised id falls back to the FIRST section, so
     // without the retired-id map these shipped links would land on Timezone and
     // read as though deep-linking had simply stopped working.
-    for (const retired of ['upgrade', 'restart']) {
+    for (const retired of ['upgrade', 'restart', 'password']) {
       clearNuxtData()
       const component = await mountSuspended(Settings, { route: `/settings?section=${retired}` })
       await flushPromises()
@@ -117,8 +121,9 @@ describe('Settings page — TOC navigation + section swap', () => {
     }
   })
 
-  it('shows both controls on the Maintenance section', async () => {
+  it('shows all three maintenance controls on the section', async () => {
     baseEndpoints()
+    registerEndpoint('/api/auth/status', () => ({ authenticated: true, passwordSet: true }))
     registerEndpoint('/api/system/upgrade', () => ({
       available: true, unavailableReason: null, currentVersion: '0.17.73', latestVersion: '0.17.73',
       upgradeAvailable: false, installKind: 'bundle', runningTasks: 0, activeSubagentRuns: 0,
@@ -127,7 +132,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     registerEndpoint('/api/system/upgrade/status', () => null)
     registerEndpoint('/api/system/restart', () => ({
       available: true, unavailableReason: null, mode: 'PROD', backendOnly: false,
-      rebuildExpected: false, runningTasks: 0, activeSubagentRuns: 0, commit: null,
+      rebuildExpected: false, runningTasks: 0, activeSubagentRuns: 0,
     }))
 
     const component = await mountSuspended(Settings, { route: '/settings?section=maintenance' })
@@ -138,5 +143,8 @@ describe('Settings page — TOC navigation + section swap', () => {
     // upgrade needs to know it takes the instance down at the end.
     expect(component.text()).toContain('Upgrade and restart')
     expect(component.text()).toContain('Stops this instance and starts it again')
+    // Password moved here from its own section; without this the merge could drop it
+    // and every other assertion would still pass.
+    expect(component.text()).toContain('Password')
   })
 })

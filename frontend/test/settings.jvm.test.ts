@@ -5,7 +5,7 @@ import { clearNuxtData } from '#app'
 import SettingsJvmPanel from '~/components/settings/SettingsJvmPanel.vue'
 
 /**
- * Settings → Maintenance → Runtime (JCLAW-1057).
+ * Settings → Performance → Runtime (JCLAW-1057).
  *
  * The assertions concentrate on the ways this panel could quietly lie: reporting an
  * unavailable reading as a real number, collapsing the three memory figures into one,

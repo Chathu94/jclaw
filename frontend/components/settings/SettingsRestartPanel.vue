@@ -15,8 +15,6 @@ interface RestartPreflight {
   rebuildExpected: boolean
   runningTasks: number
   activeSubagentRuns: number
-  /** Null on a packaged install, which ships without a repository to report. */
-  commit: string | null
 }
 
 const { confirm } = useConfirm()
@@ -210,12 +208,6 @@ const statusLine = computed(() => {
             <template v-else>
               Checking restart availability…
             </template>
-          </div>
-          <div
-            v-if="preflight?.commit"
-            class="text-xs text-fg-muted mt-0.5 font-mono"
-          >
-            Commit {{ preflight.commit }}
           </div>
         </div>
         <button

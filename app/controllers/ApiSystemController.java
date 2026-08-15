@@ -43,13 +43,10 @@ public class ApiSystemController extends Controller {
      *                           interrupts
      * @param activeSubagentRuns subagent runs live in THIS JVM, which a restart
      *                           interrupts
-     * @param commit             short commit id of the checkout, {@code -dirty} when
-     *                           the tree is modified, or null on a packaged install
      */
     public record RestartPreflight(boolean available, String unavailableReason, String mode,
                                    boolean backendOnly, boolean rebuildExpected,
-                                   long runningTasks, int activeSubagentRuns,
-                                   String commit) {}
+                                   long runningTasks, int activeSubagentRuns) {}
 
     /**
      * GET /api/system/restart — what a restart would do and what it would
@@ -64,8 +61,7 @@ public class ApiSystemController extends Controller {
                 unavailable == null, unavailable, plan.mode(),
                 plan.backendOnly(), plan.rebuildExpected(),
                 TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
-                SubagentRegistry.activeRunIds().size(),
-                GitCheckout.describe())));
+                SubagentRegistry.activeRunIds().size())));
     }
 
     /**

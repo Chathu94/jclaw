@@ -1,4 +1,7 @@
 <script setup lang="ts">
+// Disk footprint of what these levels produce — the levels decide what is
+// written, this shows what it costs.
+import SettingsLogsPanel from './SettingsLogsPanel.vue'
 import { PlusIcon, TrashIcon } from '@heroicons/vue/24/outline'
 
 // Per-logger runtime level overrides. Each (logger, level) pair applies live
@@ -218,4 +221,6 @@ async function deleteLoggerLevel(logger: string) {
       {{ loggingError }}
     </p>
   </div>
+
+  <SettingsLogsPanel />
 </template>

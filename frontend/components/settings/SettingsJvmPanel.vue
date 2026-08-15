@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// JVM runtime state for the Maintenance section (JCLAW-1057).
+// JVM runtime state, shown under Performance above the dispatcher caps that are
+// tuned against it (JCLAW-1057).
 //
 // Polled rather than snapshotted, for two reasons beyond "the numbers move":
 // GC counters are cumulative since JVM start and are close to meaningless raw —

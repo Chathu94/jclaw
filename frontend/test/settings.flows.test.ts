@@ -1895,9 +1895,12 @@ describe('Settings page — Password reset confirm dialog', () => {
     clearNuxtData()
   })
 
-  it('renders the Reset button in the Password section', async () => {
+  // Password moved into Maintenance (JCLAW-1057). This helper assigns activeSectionId
+  // directly rather than going through the URL, so it bypasses the retired-id alias and
+  // has to name the section that actually exists.
+  it('renders the Reset button in the Maintenance section', async () => {
     setupDefaultApi()
-    const component = await mountSettingsSection('password')
+    const component = await mountSettingsSection('maintenance')
 
     const text = component.text()
     expect(text).toContain('Password')
