@@ -382,6 +382,49 @@ class McpGrantsTest extends UnitTest {
 
     // ==================== helpers ====================
 
+    // ============ VULN-032: the per-agent toggle must revoke, not merely hide ============
+
+    @Test
+    void disablingAnMcpServerRefusesItAtDispatchNotJustInTheSchema() throws Exception {
+        // VULN-032 (JCLAW-1042) reads the toggle as writing AgentToolConfig while enforcement
+        // reads AgentSkillAllowedTool, concluding "the toggle never revokes". It does, through
+        // a route the finding does not consider: JCLAW-883 refuses any tool absent from the set
+        // the turn actually offered, and that set is derived from AgentToolConfig. This pins
+        // both halves so the guarantee cannot regress silently.
+        server("alpha");
+        server("beta");
+        ToolRegistrySync.withTools(List.of(
+                handle("alpha"), action("alpha", "search"), handle("beta")), () -> {
+            // Exactly the writes ApiToolsController.updateGroupForAgent performs. Both are
+            // explicit: MCP is default-disabled for a non-main agent, so without granting beta
+            // the comparison would be two absent tools and would pass for the wrong reason.
+            var disabled = McpGrants.newRow(agent, McpServer.toolName("alpha", ""));
+            disabled.enabled = false;
+            disabled.save();
+            var granted = McpGrants.newRow(agent, McpServer.toolName("beta", ""));
+            granted.enabled = true;
+            granted.save();
+            JPA.em().flush();
+            ToolRegistry.clearDisabledToolsCache();
+
+            var managed = (Agent) Agent.findById(agent.id);
+            var offered = ToolRegistry.getToolDefsForAgent(managed).stream()
+                    .map(d -> d.function().name())
+                    .collect(java.util.stream.Collectors.toSet());
+
+            assertFalse(offered.contains("mcp_alpha"),
+                    "a disabled server must not be put in front of the model");
+            assertTrue(offered.contains("mcp_beta"),
+                    "premise: the other server is still offered, so this is not an empty-set pass");
+
+            var refused = ToolRegistry.executeRich("mcp_alpha", "{}", managed, offered);
+            assertEquals(ToolRegistry.ToolResult.Outcome.NOT_ENABLED, refused.outcome(),
+                    "the disabled server must be refused at dispatch even if the model names it "
+                            + "anyway — that is what makes the AgentToolConfig toggle a "
+                            + "revocation rather than a schema filter");
+        });
+    }
+
     private McpServer server(String name) {
         var s = new McpServer();
         s.name = name;
