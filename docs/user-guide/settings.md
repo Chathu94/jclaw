@@ -205,7 +205,27 @@ Per-logger log-level overrides for the running JVM — the operator counterpart 
 
 Overrides are applied through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). They're stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
 
+### Disk used by logs
+
+Below the level table, the same section reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run can't hide from it.
+
+The current file is capped and rolled over automatically, so it is never the thing that grows — the archives are. They're deleted once they pass 30 days, at the next daily rollover, which means an instance that built up a backlog carries it until each file individually ages out. **Delete archives** clears them now.
+
+That button removes only the rolled-over `.gz` archives. The file currently being written is kept: log4j2 holds it open, and deleting it would leave the instance logging into a file nothing can read until the next rollover. The confirmation says so, because "delete logs" is otherwise ambiguous about exactly that file. Nothing here is required maintenance — it only reclaims disk sooner than retention would.
+
 ## Performance
+
+### Runtime
+
+Live state of the JVM serving the page, refreshed every few seconds while the section is open, above the caps you'd tune against it.
+
+Memory appears as three separate figures, because they measure different things and only one of them answers "how much RAM is this using?":
+
+- **Heap** — used, currently held, and the ceiling. What the JVM allocates inside its own arena.
+- **Non-heap** — metaspace, code cache and direct buffers. Invisible to every heap figure, and where the outbound HTTP stack's buffers live.
+- **Process memory** — what the operating system charges JClaw, and the figure to compare against the machine's RAM. It sits **well above** the heap, because the JVM also holds non-heap memory and reserves address space the heap hasn't filled. A large gap is normal and is not a leak. On a platform with no supported way to read it, this shows a dash rather than a substituted heap number.
+
+Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample — the total alone says little), uptime, and **platform threads** with their high-water mark. That last label is deliberate: it excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
 
 OkHttp dispatcher concurrency caps for outbound LLM calls:
 
@@ -300,23 +320,25 @@ Multiple scanners run independently and compose under OR: a skill is rejected if
 
 Off by default; turn on for environments where users can upload arbitrary skill bundles.
 
-## Password
+## Maintenance
+
+The operator actions that change this instance, ordered by how much they disrupt it: resetting the password costs nothing, an upgrade downloads a release and ends in a restart, and a restart cuts everything in flight.
+
+This section was previously three — **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
+
+### Password
 
 The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
 
 When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
-
-## Maintenance
-
-Two controls that take the instance down, on one page: installing a new release, and rebooting the one you have. Both report the commit the instance is running when JClaw is served from a git checkout, so you can tell which build is live — a checkout keeps the same version number across many commits.
-
-This section was previously two, **Upgrade** and **Restart**. Links to the old `?section=upgrade` and `?section=restart` addresses still resolve here.
 
 ### Upgrade and restart
 
 Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade` — the same command you'd run by hand — so the CLI and the UI take exactly the same path.
 
 The panel shows the version you're running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
+
+When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
 
 **The download happens while JClaw keeps serving.** The release (~400 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
 
