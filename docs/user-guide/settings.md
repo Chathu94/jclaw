@@ -306,7 +306,13 @@ The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Res
 
 When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
-## Upgrade
+## Maintenance
+
+Two controls that take the instance down, on one page: installing a new release, and rebooting the one you have. Both report the commit the instance is running when JClaw is served from a git checkout, so you can tell which build is live — a checkout keeps the same version number across many commits.
+
+This section was previously two, **Upgrade** and **Restart**. Links to the old `?section=upgrade` and `?section=restart` addresses still resolve here.
+
+### Upgrade and restart
 
 Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade` — the same command you'd run by hand — so the CLI and the UI take exactly the same path.
 
@@ -357,7 +363,7 @@ jclaw upgrade --version v0.17.48 --yes   # pin a release (also how you step back
 
 Re-running the one-line installer over an existing install now delegates here too, so it upgrades rather than replacing your data.
 
-## Restart
+### Restart
 
 Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart` — the same command you'd run by hand — so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.
 

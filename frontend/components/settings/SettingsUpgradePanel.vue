@@ -249,7 +249,7 @@ const summaryLine = computed(() => {
 <template>
   <div class="mb-6 space-y-4">
     <h2 class="text-sm font-medium text-fg-muted">
-      Upgrade
+      Upgrade and restart
     </h2>
     <p class="text-xs text-fg-muted">
       Downloads the newest release and installs it in place via <code>jclaw.sh upgrade</code>, then

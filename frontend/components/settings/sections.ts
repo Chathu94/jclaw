@@ -16,7 +16,6 @@
 import type { Component } from 'vue'
 import {
   AdjustmentsHorizontalIcon,
-  ArrowPathIcon,
   ArrowsUpDownIcon,
   ArrowUpTrayIcon,
   BoltIcon,
@@ -25,7 +24,6 @@ import {
   ClipboardDocumentCheckIcon,
   ClockIcon,
   CircleStackIcon,
-  CloudArrowDownIcon,
   CommandLineIcon,
   CpuChipIcon,
   DocumentMagnifyingGlassIcon,
@@ -41,6 +39,7 @@ import {
   ShieldCheckIcon,
   SpeakerWaveIcon,
   UserGroupIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
 
 import SettingsChatPanel from './SettingsChatPanel.vue'
@@ -48,6 +47,7 @@ import SettingsTimezonePanel from './SettingsTimezonePanel.vue'
 import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
 import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
 import SettingsLoggingPanel from './SettingsLoggingPanel.vue'
+import SettingsMaintenancePanel from './SettingsMaintenancePanel.vue'
 import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
 import SettingsMemoryEmbeddingsPanel from './SettingsMemoryEmbeddingsPanel.vue'
 import SettingsMemoryLimitsPanel from './SettingsMemoryLimitsPanel.vue'
@@ -57,7 +57,6 @@ import SettingsPasswordPanel from './SettingsPasswordPanel.vue'
 import SettingsPerformancePanel from './SettingsPerformancePanel.vue'
 import SettingsPrintersPanel from './SettingsPrintersPanel.vue'
 import SettingsProvidersPanel from './SettingsProvidersPanel.vue'
-import SettingsRestartPanel from './SettingsRestartPanel.vue'
 import SettingsSearchPanel from './SettingsSearchPanel.vue'
 import SettingsShellPanel from './SettingsShellPanel.vue'
 import SettingsSkillsPanel from './SettingsSkillsPanel.vue'
@@ -65,7 +64,6 @@ import SettingsSpeechPanel from './SettingsSpeechPanel.vue'
 import SettingsSubagentsPanel from './SettingsSubagentsPanel.vue'
 import SettingsTasksPanel from './SettingsTasksPanel.vue'
 import SettingsTranscriptionPanel from './SettingsTranscriptionPanel.vue'
-import SettingsUpgradePanel from './SettingsUpgradePanel.vue'
 import SettingsUploadsPanel from './SettingsUploadsPanel.vue'
 import SettingsVideoGenPanel from './SettingsVideoGenPanel.vue'
 import SettingsVideoInterpPanel from './SettingsVideoInterpPanel.vue'
@@ -103,11 +101,10 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'uploads', title: 'Uploads', icon: ArrowUpTrayIcon, component: SettingsUploadsPanel },
       { id: 'printers', title: 'Printers', icon: PrinterIcon, component: SettingsPrintersPanel },
       { id: 'password', title: 'Password', icon: KeyIcon, component: SettingsPasswordPanel },
-      // Last in the group deliberately: these two are the sections whose
-      // primary control takes the instance down, so they shouldn't sit next to
-      // the section the rail opens on by default.
-      { id: 'upgrade', title: 'Upgrade', icon: CloudArrowDownIcon, component: SettingsUpgradePanel },
-      { id: 'restart', title: 'Restart', icon: ArrowPathIcon, component: SettingsRestartPanel },
+      // Last in the group deliberately: this is the section whose controls take
+      // the instance down, so it shouldn't sit next to the section the rail
+      // opens on by default.
+      { id: 'maintenance', title: 'Maintenance', icon: WrenchScrewdriverIcon, component: SettingsMaintenancePanel },
     ],
   },
   {
@@ -172,3 +169,26 @@ export const sectionGroups: SettingsSectionGroup[] = [
  * is single-sourced. Used for id lookup and the default (first) section.
  */
 export const sections: SettingsSection[] = sectionGroups.flatMap(g => g.sections)
+
+/**
+ * Ids that no longer name a section, mapped to the one that absorbed them.
+ *
+ * Retiring an id without an entry here is silent: `settings.vue` falls back to
+ * the FIRST section for anything it doesn't recognise, so every shipped
+ * bookmark and doc link lands on Timezone and looks merely broken.
+ */
+const retiredSectionIds: Record<string, string> = {
+  // Merged into Maintenance (JCLAW-1057).
+  upgrade: 'maintenance',
+  restart: 'maintenance',
+}
+
+/**
+ * Canonical id for a `?section=` value, following any retirement, or null when
+ * it names nothing at all.
+ */
+export function resolveSectionId(id: unknown): string | null {
+  if (typeof id !== 'string') return null
+  if (sections.some(s => s.id === id)) return id
+  return retiredSectionIds[id] ?? null
+}

@@ -17,7 +17,7 @@
  * Sections come from `components/settings/sections.ts` — one entry per panel.
  */
 import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
-import { sectionGroups, sections } from '~/components/settings/sections'
+import { sectionGroups, sections, resolveSectionId } from '~/components/settings/sections'
 
 // The shared /api/config store, inline config-row editor, and /api/providers
 // billing projection live in the composable; every panel injects this context.
@@ -29,12 +29,11 @@ const route = useRoute()
 const router = useRouter()
 const mobileNavOpen = ref(false)
 
-function isKnownSection(id: unknown): id is string {
-  return typeof id === 'string' && sections.some(s => s.id === id)
-}
-
+// resolveSectionId, not a plain membership test: it also follows ids retired by
+// a section merge, so a bookmark predating the merge opens the section that
+// absorbed it instead of silently falling through to the first one.
 const activeSectionId = ref<string>(
-  isKnownSection(route.query.section) ? route.query.section : (sections[0]?.id ?? ''),
+  resolveSectionId(route.query.section) ?? sections[0]?.id ?? '',
 )
 const activeSection = computed(() =>
   sections.find(s => s.id === activeSectionId.value) ?? sections[0],
@@ -50,7 +49,8 @@ function selectSection(id: string) {
 // Keep the active section in sync with the URL for deep links and browser
 // back/forward (which change route.query without remounting the page).
 watch(() => route.query.section, (s) => {
-  if (isKnownSection(s) && s !== activeSectionId.value) activeSectionId.value = s
+  const id = resolveSectionId(s)
+  if (id && id !== activeSectionId.value) activeSectionId.value = id
 })
 </script>
 

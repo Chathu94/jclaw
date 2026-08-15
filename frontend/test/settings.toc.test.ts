@@ -87,4 +87,56 @@ describe('Settings page — TOC navigation + section swap', () => {
 
     expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBe('page')
   })
+
+  it('rolls the retired upgrade and restart sections into one Maintenance entry', async () => {
+    baseEndpoints()
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    expect(component.find('[data-testid="settings-toc-item-maintenance"]').exists()).toBe(true)
+    expect(component.find('[data-testid="settings-toc-item-upgrade"]').exists()).toBe(false)
+    expect(component.find('[data-testid="settings-toc-item-restart"]').exists()).toBe(false)
+  })
+
+  it('opens Maintenance for a bookmark predating the merge', async () => {
+    baseEndpoints()
+    // The real guard. An unrecognised id falls back to the FIRST section, so
+    // without the retired-id map these shipped links would land on Timezone and
+    // read as though deep-linking had simply stopped working.
+    for (const retired of ['upgrade', 'restart']) {
+      clearNuxtData()
+      const component = await mountSuspended(Settings, { route: `/settings?section=${retired}` })
+      await flushPromises()
+
+      expect(
+        component.find('[data-testid="settings-toc-item-maintenance"]').attributes('aria-current'),
+        `?section=${retired} should open Maintenance`,
+      ).toBe('page')
+      expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current'))
+        .toBeUndefined()
+    }
+  })
+
+  it('shows both controls on the Maintenance section', async () => {
+    baseEndpoints()
+    registerEndpoint('/api/system/upgrade', () => ({
+      available: true, unavailableReason: null, currentVersion: '0.17.73', latestVersion: '0.17.73',
+      upgradeAvailable: false, installKind: 'bundle', runningTasks: 0, activeSubagentRuns: 0,
+      commit: null,
+    }))
+    registerEndpoint('/api/system/upgrade/status', () => null)
+    registerEndpoint('/api/system/restart', () => ({
+      available: true, unavailableReason: null, mode: 'PROD', backendOnly: false,
+      rebuildExpected: false, runningTasks: 0, activeSubagentRuns: 0, commit: null,
+    }))
+
+    const component = await mountSuspended(Settings, { route: '/settings?section=maintenance' })
+    await flushPromises()
+    await flushPromises()
+
+    // The upgrade heading names the restart too: an operator reaching for the
+    // upgrade needs to know it takes the instance down at the end.
+    expect(component.text()).toContain('Upgrade and restart')
+    expect(component.text()).toContain('Stops this instance and starts it again')
+  })
 })
