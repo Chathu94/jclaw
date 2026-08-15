@@ -43,7 +43,15 @@ public class ChannelConfig extends TimestampedModel {
     @PostUpdate
     @PostRemove
     void invalidateCache() {
+        // Immediate, because the admin save path re-reads this row inside its own
+        // transaction — ApiChannelsController.save calls reconcileRunner after saving, and
+        // starting or stopping the wrong runner is worse than a stale cache entry.
         evictCache(channelType);
+        // And again once the write is durable (JCLAW-1042): these callbacks fire at flush, so
+        // a reader racing the flush-to-commit window re-populates the cache from the row the
+        // commit has not written yet, and that entry then outlives the commit for the full TTL.
+        var type = channelType;
+        Tx.afterCommit(() -> evictCache(type));
     }
 
     // JCLAW-203: secondary-key lookup cache. Stores Optional<ChannelConfig>

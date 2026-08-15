@@ -3,6 +3,7 @@ package mcp;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import play.db.jpa.JPA;
+import services.Tx;
 
 import java.util.HashSet;
 import java.util.List;
@@ -192,7 +193,15 @@ public final class McpAllowlist {
      */
     private static int deleteAndEvict(String query, Object... params) {
         var removed = AgentSkillAllowedTool.delete(query, params);
-        JPA.em().getEntityManagerFactory().getCache().evict(AgentSkillAllowedTool.class);
+        // Resolved here, not inside the after-commit action: by afterCompletion the
+        // EntityManager may already be closing, while the factory's L2 handle outlives it.
+        var l2 = JPA.em().getEntityManagerFactory().getCache();
+        l2.evict(AgentSkillAllowedTool.class);
+        // Again once the delete is durable (JCLAW-1042): a concurrent reader repopulates L2
+        // from the rows this transaction has not removed yet, and these rows are what decide
+        // whether a tool call is permitted — so a revoked grant stays callable for as long as
+        // the stale entry survives.
+        Tx.afterCommit(() -> l2.evict(AgentSkillAllowedTool.class));
         return removed;
     }
 
