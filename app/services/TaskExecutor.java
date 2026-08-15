@@ -528,13 +528,11 @@ public final class TaskExecutor {
     }
 
     /**
-     * Whether the fire pushed via the {@code message} tool. Runs inside the
-     * caller's transaction (finalizeRun's re-read Tx) — no own {@code Tx.run}
-     * wrapper — so the LIKE count shares that connection.
-     */
-    /**
      * Whether {@code runId}'s transcript shows the fire delivering its own payload: a
      * {@code message} call with a delivering action whose answering TOOL row reports success.
+     *
+     * <p>Runs inside the caller's transaction — finalizeRun's re-read Tx, with no
+     * {@code Tx.run} wrapper of its own — so the transcript read shares that connection.
      *
      * <p>Public as a pure-logic test seam — Play compiles {@code test/} into the default
      * package, which cannot reach a package-private member, and driving this through a real
