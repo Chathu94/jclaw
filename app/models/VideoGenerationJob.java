@@ -114,6 +114,19 @@ public class VideoGenerationJob extends Model {
     @Column(name = "result_attachment_id")
     public Long resultAttachmentId;
 
+    /**
+     * Workspace-relative path the finished clip should also be written to, or null
+     * (JCLAW-1057). Carried on the job because generation is asynchronous: the bytes
+     * arrive minutes after the tool call returns, long after the agent's turn ended, so
+     * the request has to outlive the turn that made it.
+     *
+     * <p>Validated for containment when the job is submitted, not when it completes — a
+     * traversal attempt has to fail in front of the agent that made it, rather than
+     * silently inside a background poller nobody is watching.
+     */
+    @Column(name = "save_to_path")
+    public String saveToPath;
+
     // Deliberately NOT on TimestampedModel: that base stamps createdAt unconditionally,
     // which would stomp a caller-supplied value. The null guard below is the difference,
     // and it is load-bearing — a job can be constructed with its submission time already

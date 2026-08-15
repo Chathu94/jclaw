@@ -8,6 +8,7 @@ import models.Agent;
 import models.VideoGenerationJob;
 import services.ConfigService;
 import services.Tx;
+import services.WorkspaceFiles;
 import services.videogen.VideoGenerationJobService;
 import services.videogen.VideoGenerationRouter;
 import services.videogen.VideoGenerationService.VideoGenRequest;
@@ -39,6 +40,7 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
      *  (fps 24, landscape). */
     private static final int DEFAULT_FPS = 24;
     private static final String DEFAULT_ASPECT = "16:9";
+    private static final String ARG_SAVE_TO = "save_to";
 
     @Override public String name() { return "generate_video"; }
     @Override public String category() { return "Utilities"; }
@@ -72,6 +74,12 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
                 SchemaKeys.PROPERTIES, Map.of(
                         ARG_PROMPT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "A detailed description of the video to generate."),
+                        ARG_SAVE_TO, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Optional filename, relative to your workspace, to also write "
+                                        + "the finished clip to (e.g. \"clip.mp4\"). The file does NOT exist when "
+                                        + "this call returns — generation takes minutes and the file appears only "
+                                        + "when the job completes. It is written whole, so its existence means the "
+                                        + "clip is complete and safe to use. Without this, no file is written at all."),
                         ARG_DURATION, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                                 SchemaKeys.DESCRIPTION, "Optional clip length in seconds (provider-dependent bounds)."),
                         ARG_FPS, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
@@ -117,10 +125,40 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
         // Tool execution runs on the [agent-stream] thread, which Play's JPAPlugin never wraps in a JPA
         // transaction, so submit()'s job.save() has no EntityManager of its own. Open one here — the same
         // Tx.run convention every other DB-touching tool (ShellExecTool, TaskTool, …) follows.
-        var job = Tx.run(() -> VideoGenerationJobService.submit(agent.id, null, req));
+        // Validate containment NOW, in front of the agent that asked. The write itself
+        // happens minutes later on a background poller, where a rejection would go
+        // unseen and the caller would wait for a file that is never coming.
+        var saveTo = JsonArgs.optString(args, ARG_SAVE_TO, null);
+        String savedPath = null;
+        if (saveTo != null && !saveTo.isBlank()) {
+            try {
+                savedPath = WorkspaceFiles.acquireWorkspacePath(agent.name, saveTo.trim())
+                        .toAbsolutePath().toString();
+            } catch (SecurityException e) {
+                return ToolRegistry.ToolResult.text(
+                        "Error: '" + saveTo + "' resolves outside the agent workspace.");
+            }
+        }
+
+        final var requestedPath = saveTo == null || saveTo.isBlank() ? null : saveTo.trim();
+        var job = Tx.run(() -> {
+            var submitted = VideoGenerationJobService.submit(agent.id, null, req);
+            if (requestedPath != null) {
+                submitted.saveToPath = requestedPath;
+                submitted.save();
+            }
+            return submitted;
+        });
         var text = "Started generating a video for the prompt; it runs in the background (typically a "
                 + "few minutes) and appears in the chat automatically when ready. Do not re-embed or "
                 + "link it — it shows on its own.";
+        if (savedPath != null) {
+            // Say plainly that it is not there yet. The whole point of this wording is to
+            // stop a caller sending a path that does not exist for another few minutes.
+            text += " It will ALSO be written to " + savedPath + " when the job finishes — that file "
+                    + "does not exist yet. If you need to act on it, wait for it to appear (it is "
+                    + "written whole, so existence means complete); do not send or open it before then.";
+        }
         return ToolRegistry.ToolResult.withVideoJob(text, job.id, buildMetadata(req, job));
     }
 

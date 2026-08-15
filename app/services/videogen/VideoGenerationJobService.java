@@ -11,6 +11,7 @@ import services.AttachmentService;
 import services.ConfigService;
 import services.videogen.VideoGenerationService.PollResult;
 import services.videogen.VideoGenerationService.VideoGenRequest;
+import tools.GeneratedMediaFile;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -127,10 +128,35 @@ public final class VideoGenerationJobService {
         job.percent = 100;
         job.completedAt = Instant.now();
         job.save();
-        var placeholder = MessageAttachment.findByGenerationJobId(job.id);
-        if (placeholder == null || resultUrl == null) return;
+        if (resultUrl == null) return;
+
+        byte[] bytes;
         try {
-            var bytes = fetchBytes(resultUrl);
+            bytes = fetchBytes(resultUrl);
+        } catch (RuntimeException e) {
+            Logger.error(e, "videogen: failed to fetch result for job %s", job.id);
+            return;
+        }
+
+        // Workspace copy first, and independently of the placeholder (JCLAW-1057). A job
+        // submitted from a scheduled task has no conversation and therefore no placeholder
+        // attachment, so folding this in after the placeholder null-check would skip the
+        // write in exactly the case the option exists for.
+        if (job.saveToPath != null && job.agent != null) {
+            try {
+                var written = GeneratedMediaFile.write(job.agent.name, job.saveToPath, bytes);
+                Logger.info("videogen: job %s wrote %s", job.id, written);
+            } catch (IllegalArgumentException e) {
+                // Containment was checked at submit time, so reaching here means the
+                // workspace changed underneath the job. Log and keep the attachment path.
+                Logger.error(e, "videogen: failed to save result for job %s to %s",
+                        job.id, job.saveToPath);
+            }
+        }
+
+        var placeholder = MessageAttachment.findByGenerationJobId(job.id);
+        if (placeholder == null) return;
+        try {
             AttachmentService.fillGeneratedVideo(placeholder, bytes, "video/mp4");
             job.resultAttachmentId = placeholder.id;
             job.save();

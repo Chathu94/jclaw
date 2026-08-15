@@ -5,6 +5,8 @@ import play.test.UnitTest;
 import services.WorkspaceFiles;
 import tools.GenerateAudioTool;
 import tools.GenerateImageTool;
+import tools.GenerateVideoTool;
+import tools.GeneratedMediaFile;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -97,5 +99,47 @@ class GeneratedMediaFileTest extends UnitTest {
 
         assertTrue(Files.isRegularFile(resolved));
         assertTrue(resolved.startsWith(root.toRealPath()));
+    }
+
+    /**
+     * Video is asynchronous: the file appears minutes later, after the turn that asked
+     * for it has ended. The schema has to say so, because a caller that assumes the file
+     * is ready on return will send a path that does not exist yet — the same shape of
+     * failure this whole change exists to stop.
+     */
+    @Test
+    void theVideoToolSaysTheFileIsNotThereYet() {
+        var json = new GenerateVideoTool().parameters().toString();
+        assertTrue(json.contains("save_to"), "the option must be in the schema: " + json);
+        assertTrue(json.contains("does NOT exist when"),
+                "the schema must say the file is not ready on return: " + json);
+        assertTrue(json.contains("written whole"),
+                "a caller polling for the file needs to know existence means complete: " + json);
+    }
+
+    /**
+     * The completion signal for an async generation is the file appearing, so a partial
+     * write is indistinguishable from a finished one. Write-then-rename is what makes
+     * {@code test -f} trustworthy; without it a poller can pick up a truncated clip.
+     */
+    @Test
+    void leavesNoPartialFileBehind() throws Exception {
+        GeneratedMediaFile.write(AGENT, "clip.mp4", new byte[]{1, 2, 3, 4});
+
+        assertTrue(Files.isRegularFile(root.resolve("clip.mp4")));
+        assertEquals(4, Files.size(root.resolve("clip.mp4")));
+        try (var walk = Files.walk(root)) {
+            assertTrue(walk.noneMatch(f -> f.getFileName().toString().endsWith(".partial")),
+                    "the temp file must not survive the write");
+        }
+    }
+
+    @Test
+    void overwritesAnEarlierFileOfTheSameName() throws Exception {
+        GeneratedMediaFile.write(AGENT, "clip.mp4", new byte[]{1, 2, 3, 4});
+        GeneratedMediaFile.write(AGENT, "clip.mp4", new byte[]{9});
+
+        assertEquals(1, Files.size(root.resolve("clip.mp4")),
+                "a re-run must replace the previous clip, not fail on it");
     }
 }

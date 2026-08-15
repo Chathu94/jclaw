@@ -5,6 +5,7 @@ import services.WorkspaceFiles;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 
 /**
  * Write generated media to the agent's workspace and hand the model a real path
@@ -23,7 +24,7 @@ import java.nio.file.Files;
  * image. The fix is to make the honest path available, so the tool can hand back
  * somewhere real instead of the model inventing one.
  */
-final class GeneratedMediaFile {
+public final class GeneratedMediaFile {
 
     private GeneratedMediaFile() {}
 
@@ -40,11 +41,27 @@ final class GeneratedMediaFile {
      *                                  fails; the caller surfaces the message as tool text
      */
     static String write(Agent agent, String relativePath, byte[] bytes) {
+        return write(agent.name, relativePath, bytes);
+    }
+
+    /**
+     * Name-taking form, for callers that have no {@code Agent} instance to hand — the
+     * video job completes on a background poller, in another package and long after the
+     * submitting turn ended, which is why this one is public.
+     */
+    public static String write(String agentName, String relativePath, byte[] bytes) {
         try {
-            var target = WorkspaceFiles.acquireWorkspacePath(agent.name, relativePath);
+            var target = WorkspaceFiles.acquireWorkspacePath(agentName, relativePath);
             var parent = target.getParent();
             if (parent != null) Files.createDirectories(parent);
-            Files.write(target, bytes);
+            // Write-then-rename, so the file never exists in a half-written state. A
+            // caller waiting on an async generation has no completion signal other than
+            // the file appearing, and `test -f` on a partial download is exactly the
+            // race that would send a truncated clip.
+            var tmp = target.resolveSibling(target.getFileName() + ".partial");
+            Files.write(tmp, bytes);
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
             return target.toAbsolutePath().toString();
         } catch (SecurityException e) {
             throw new IllegalArgumentException(
