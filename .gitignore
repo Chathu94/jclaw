@@ -101,6 +101,7 @@ nbproject/private/
 # Build outputs
 dist/
 test-result/
+frontend/test-report/
 *.war
 *.ear
 *.zip

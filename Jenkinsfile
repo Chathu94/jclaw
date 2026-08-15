@@ -227,6 +227,15 @@ pipeline {
                             sh 'pnpm test --coverage'
                         }
                     }
+                    post {
+                        always {
+                            // Separate from the backend's test-result/ so the two
+                            // globs stay disjoint and Sonar's junit path keeps
+                            // resolving to the backend results only.
+                            junit testResults: 'frontend/test-report/junit.xml',
+                                  allowEmptyResults: true
+                        }
+                    }
                 }
             }
         }

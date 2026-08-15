@@ -14,6 +14,12 @@ export default defineVitestConfig({
     // Playwright E2E specs live under tests/e2e/ and use @playwright/test, not
     // Vitest. Exclude them so `pnpm test` only runs the Vitest unit suite.
     exclude: ['**/node_modules/**', '**/dist/**', '**/.{idea,git,cache,output,temp}/**', 'tests/e2e/**'],
+    // `junit` feeds the Jenkinsfile's junit step so the frontend suite reaches the
+    // Test Result Trend; without it a frontend regression showed only as a red build
+    // with no test detail. `default` stays first because ./jclaw.sh test parses its
+    // "Test Files"/"Tests"/"Duration" lines for the summary it prints.
+    reporters: ['default', 'junit'],
+    outputFile: { junit: 'test-report/junit.xml' },
     coverage: {
       // v8 is the native Vitest coverage provider (istanbul requires a
       // separate Babel transform); both emit Sonar-compatible lcov but v8
