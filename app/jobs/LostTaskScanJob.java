@@ -1,5 +1,6 @@
 package jobs;
 
+import play.Play;
 import play.jobs.Every;
 import play.jobs.Job;
 import services.EventLogger;
@@ -27,6 +28,11 @@ public class LostTaskScanJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        // Test mode has no db-scheduler — DbSchedulerBootstrapJob skips starting it — so
+        // nothing heartbeats and every RUNNING Task reads as stale. Left ungated, this sweep
+        // flips whichever test's seeded rows it finds to LOST, roughly fourteen times over a
+        // suite run. LostTaskDetector stays reachable for the tests that drive it directly.
+        if (Play.runningInTestMode()) return;
         int lost = LostTaskDetector.detect();
         if (lost > 0) {
             EventLogger.info("task", null, null,
