@@ -7,9 +7,11 @@ import models.VideoGenerationJob;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AttachmentService;
+import services.ConfigService;
 import services.videogen.ReplicateVideoModelCatalog;
 import services.videogen.VideoCapabilityProbe;
 import services.videogen.VideoGenerationJobService;
+import services.videogen.VideoGenerationRouter;
 import utils.ApiResponses;
 
 import java.util.ArrayList;
@@ -35,6 +37,38 @@ public class ApiVideogenController extends Controller {
     /** Per-request id cap — the chat only ever polls a handful of visible placeholders; this just bounds
      *  the work a single request can ask for (defense-in-depth), not an authorization control. */
     private static final int MAX_IDS = 50;
+
+    /**
+     * @param provider   the operator's {@code videogen.provider} selection, or null when unset
+     * @param model      the model that provider will actually use, with the router's per-provider
+     *                   default applied — not the raw config value, which is blank when defaulted
+     * @param configured whether {@code provider} resolves to a usable client
+     */
+    public record VideogenStateResponse(String provider, String model, boolean configured) {}
+
+    /**
+     * GET /api/videogen/state — which provider and model video generation will use.
+     *
+     * <p>Named {@code state} to match {@code /api/transcription/state}, {@code /api/tts/state} and
+     * {@code /api/imagegen/local/state}, which likewise report a configured selection rather than
+     * activity. Live job status is {@link #jobs} — the same split image generation already ships as
+     * {@code /api/imagegen/local/state} beside {@code /api/imagegen/progress}.
+     *
+     * <p>Unlike the imagegen one this is not scoped to {@code /local/}: the selection here may be a
+     * cloud provider, which a local-only path could not report.
+     *
+     * <p>Exists because the effective model is not readable from config alone — the router applies a
+     * per-provider default ({@code ltx}, {@code wan-5b}) when the key is unset, so a caller reading
+     * {@code videogen.local.model} directly sees a blank where a real model will be used.
+     */
+    @Operation(summary = "Selected video-generation provider and its effective model")
+    public static void state() {
+        var provider = ConfigService.get("videogen.provider");
+        renderJSON(gson.toJson(new VideogenStateResponse(
+                provider,
+                VideoGenerationRouter.effectiveModel(provider),
+                VideoGenerationRouter.serviceFor(provider).isPresent())));
+    }
 
     /** GET /api/videogen/jobs?ids=1,2,3 — lightweight status for the chat poll loop.
      *

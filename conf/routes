@@ -58,6 +58,8 @@ POST    /api/imagegen/capability/probe           ApiImagegenController.probeCapa
 GET     /api/videogen/jobs                       ApiVideogenController.jobs
 # Recent video jobs — dashboard Recent Activity (video view) (JCLAW-236)
 GET     /api/videogen/jobs/recent                ApiVideogenController.recent
+# Selected provider + its effective model — Settings, and anything asking what will run
+GET     /api/videogen/state                      ApiVideogenController.state
 # Replicate text-to-video model discovery — Settings model dropdown (JCLAW-236)
 GET     /api/videogen/models                     ApiVideogenController.models
 # Local engine capability probe — adaptive Settings dropdown (JCLAW-232/233)

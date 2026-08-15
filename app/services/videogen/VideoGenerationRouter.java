@@ -38,6 +38,24 @@ public final class VideoGenerationRouter {
      * the provider it was <em>submitted</em> with (stored on the job row), which may differ from the
      * current {@code videogen.provider} if the operator changed the Settings mid-job.
      */
+    /**
+     * The model {@code provider} will actually use, with the same per-provider defaults
+     * {@link #serviceFor} applies (JCLAW-1057). Reading the config key directly is not
+     * equivalent: it is blank whenever the default is in force, so a caller would report
+     * "no model" for a provider that has one.
+     *
+     * @return the effective model id, or null when the provider is unknown or unset
+     */
+    public static String effectiveModel(String provider) {
+        if (provider == null || provider.isBlank()) return null;
+        return switch (provider) {
+            case "replicate" -> Strings.firstNonBlank(ConfigService.get("videogen.cloud.model"));
+            case "ltx-local" -> Strings.firstNonBlank(ConfigService.get("videogen.local.model"), "ltx");
+            case "wan-local" -> Strings.firstNonBlank(ConfigService.get("videogen.local.model"), "wan-5b");
+            default -> null;
+        };
+    }
+
     public static Optional<VideoGenerationService> serviceFor(String provider) {
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
