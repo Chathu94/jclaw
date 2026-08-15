@@ -27,7 +27,17 @@ Enumerate the target source files with `git ls-files -- <scope>` restricted to s
 
 **Phase 2 — Detection battery (grep source files, then verify each hit in context)**
 
-Run these `git grep -nE` patterns over the source scope. Treat every hit as a *candidate*; open the surrounding lines and classify it against Phase 3 before it becomes a finding.
+Run these patterns with **`git grep -nIP`** (PCRE). Treat every hit as a *candidate*; open the surrounding lines and classify it against Phase 3 before it becomes a finding.
+
+**`-P`, never `-E`.** macOS git (Apple Git 2.50.1) silently ignores `\b`, `\d` and `\s` under `-E` — no error, just zero matches. Most patterns below are `\b`-anchored, so under `-E` the battery matches nothing and the scan reports CLEAN whatever the files contain. Verified on this repo: `git grep -cE '\bMemorySafety\b'` → 0 where `-P` → 94.
+
+Three more invocation traps with the same false-CLEAN signature:
+
+- **Write the pathspec literally.** zsh does not word-split unquoted expansions, so `-- $SCOPE` passes the single pathspec `"app test frontend sidecar"` and matches no file. Use literal paths or a shell array.
+- **`-e` before any pattern starting with `-`.** The two `-----BEGIN` patterns are otherwise parsed as command-line options: `git grep -nIP -e '-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----'`.
+- **Never `2>/dev/null` a detection pass.** It hides precisely these errors, which is what makes a broken scan indistinguishable from a clean repo.
+
+**Prove the harness before trusting a zero.** Before reporting anything, run a known-positive control — `git grep -cP 'looksLikeSecret' -- test` must be non-zero, and each tree's source-file count must be non-zero. A pass that has not been shown capable of matching is not evidence of absence (AGENTS.md §6: *a green result you did not scope is not evidence*). State in the report that the control passed, so the CLEAN verdict is falsifiable.
 
 *Cryptographic material (CRITICAL — a private key literal in code):*
 - `-----BEGIN( [A-Z0-9]+)? PRIVATE KEY-----` · `-----BEGIN PGP PRIVATE KEY BLOCK-----`
@@ -47,7 +57,7 @@ Run these `git grep -nE` patterns over the source scope. Treat every hit as a *c
 *PII (MEDIUM — real personal data in code, seed/fixture data, or comments):*
 - Email `\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b` (then subtract the noise, Phase 3)
 - US SSN `\b\d{3}-\d{2}-\d{4}\b` · payment card `\b(?:\d[ -]?){13,16}\b` (report only if it passes a **Luhn** check)
-- Phone number — E.164 `\+[1-9][0-9]{0,3}[ .()-]?[0-9][0-9 .()-]{5,13}[0-9]` (a `+<country-code>` number) or separated national `\(?[0-9]{3}\)?[ .-][0-9]{3}[ .-][0-9]{4}`. Run this over comments **and** string/seed data. A `+<cc>` number sitting next to a **person's name** is real PII, not fixture noise — exactly the class an earlier run waved through (a real-format `+60` Malaysian mobile attributed to a person in a memory-search test's seed data; digits omitted here on purpose — don't embed the real value in the doc).
+- Phone number — E.164 `\+[1-9][0-9]{0,3}[ .()-]?[0-9][0-9 .()-]{5,13}[0-9]` (a `+<country-code>` number) or separated national `\(?[0-9]{3}\)?[ .-][0-9]{3}[ .-][0-9]{4}`. Run this over comments **and** string/seed data. A `+<cc>` number sitting next to a **person's name** must be *checked* rather than assumed fixture noise — but decide it on the digits and the file's history, not on the surrounding prose. Worked example, because this one has been read both ways: the `+60` number in the memory-search seed data (`DirectLuceneMessageSearchRepositoryTest`) is attributed to a named person and so reads as PII, yet the value is the sequential placeholder `12-345 6789`, and `git log -S'+60'` on that file returns exactly one commit — the one that introduced it — so it has never held anything else. Dismissed. Had that search returned two commits, the earlier value would still be in history and compromised.
 
 **Phase 3 — Suppress the known-safe (this is what makes the scan usable here)**
 
@@ -65,7 +75,9 @@ A real-looking secret is still a finding **even inside a test file** — it's co
 
 **Phase 4 — (history mode only) scan the source history**
 
-Run the Phase-2 high-signal patterns across history — `git grep -nE '<pattern>' $(git rev-list --all) -- '<source scope>'`, or `git log -p -S<needle> -- '<scope>'` for a specific token. Anything found in *any* reachable commit is compromised regardless of the current tree.
+Run the Phase-2 high-signal patterns across history — `git grep -nIP '<pattern>' $(git rev-list --all) -- '<source scope>'` (`-P` for the reason in Phase 2; under `-E` this pass silently finds nothing), or `git log -p -S<needle> -- '<scope>'` for a specific token. Anything found in *any* reachable commit is compromised regardless of the current tree.
+
+`git log -S<needle> -- <file>` is also how you settle whether a suspicious literal was ever a different value. A single introducing commit means the value in the tree is the value it was born with — which distinguishes a sanitized placeholder from a real secret that was swapped out later and still sits in history.
 
 ---
 
@@ -75,6 +87,7 @@ Lead with the verdict, then findings grouped by severity, then the appendix. For
 
 ```
 Secret scan — source scope: <default: app/ test/ frontend/ sidecar/ | path | staged | history> · <N> source files searched
+Harness: git grep -P · control '<pattern>' matched <N> — detection proven live
 Verdict: <CLEAN | N findings (C critical / H high / M medium / L low)>
 
 CRITICAL
