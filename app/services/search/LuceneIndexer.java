@@ -21,6 +21,7 @@ import org.apache.lucene.search.SearcherManager;
 import org.apache.lucene.store.FSDirectory;
 import play.Play;
 import services.EventLogger;
+import services.Tx;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -29,6 +30,7 @@ import java.nio.file.Path;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -498,10 +500,19 @@ public final class LuceneIndexer {
      */
     public static void removeAll(Scope scope, Collection<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
-        for (Long id : ids) {
-            remove(scope, id);
-        }
-        commit(scope);
+        // Deferred to the caller's commit (JCLAW-1042). Unlike remove and upsert, this
+        // commits the index — durably — and every caller runs it inside the JPA transaction
+        // that deletes the rows. A throw after this point therefore left the documents gone
+        // while the rows survived: present in the database and on the UI, but unsearchable
+        // until a restart noticed docCount < rowCount and rebuilt the whole scope. Runs
+        // immediately when there is no transaction, so the backfill path is unaffected.
+        var snapshot = List.copyOf(ids);
+        Tx.afterCommit(() -> {
+            for (Long id : snapshot) {
+                remove(scope, id);
+            }
+            commit(scope);
+        });
     }
 
     /**

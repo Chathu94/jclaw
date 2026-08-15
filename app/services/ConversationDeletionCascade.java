@@ -127,11 +127,17 @@ public final class ConversationDeletionCascade {
      * (and no commit) when {@code ids} is empty.
      */
     private static void evictAndCommit(LuceneIndexer.Scope scope, List<Long> ids) {
-        for (Long id : ids) {
-            LuceneIndexer.remove(scope, id);
-        }
-        if (!ids.isEmpty()) {
+        if (ids.isEmpty()) return;
+        // Deferred to the caller's commit (JCLAW-1042): this commits the index durably while
+        // the cascade's own transaction is still open, so a throw later in the cascade left
+        // the documents gone and the rows alive — unsearchable until a restart rebuilt the
+        // scope. Same shape as JpaMemoryStore.evictAfterCommit (JCLAW-1014).
+        var snapshot = List.copyOf(ids);
+        Tx.afterCommit(() -> {
+            for (Long id : snapshot) {
+                LuceneIndexer.remove(scope, id);
+            }
             LuceneIndexer.commit(scope);
-        }
+        });
     }
 }

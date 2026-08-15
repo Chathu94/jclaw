@@ -120,26 +120,33 @@ public final class AgentDeletionCascade {
         List<Long> taskRunMessageIds = em.createQuery(
                 "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.agent.id IN :ids", Long.class)
                 .setParameter("ids", subtreeIds).getResultList();
-        for (Long runId : subagentRunIds) {
-            LuceneIndexer.remove(LuceneIndexer.Scope.SUBAGENT_RUN, runId);
-        }
-        if (!subagentRunIds.isEmpty()) {
-            LuceneIndexer.commit(LuceneIndexer.Scope.SUBAGENT_RUN);
-        }
-        for (Long taskId : taskIds) {
-            LuceneIndexer.remove(LuceneIndexer.Scope.TASK, taskId);
-        }
-        if (!taskIds.isEmpty()) {
-            LuceneIndexer.commit(LuceneIndexer.Scope.TASK);
-        }
+        evictAfterCommit(LuceneIndexer.Scope.SUBAGENT_RUN, subagentRunIds);
+        evictAfterCommit(LuceneIndexer.Scope.TASK, taskIds);
         // TASK_RUN_MESSAGE docs orphan too: an agent delete cascades
         // Task -> TaskRun -> TaskRunMessage, and none of those fire @PostRemove.
-        for (Long messageId : taskRunMessageIds) {
-            LuceneIndexer.remove(messageId);
-        }
-        if (!taskRunMessageIds.isEmpty()) {
-            LuceneIndexer.commit(LuceneIndexer.Scope.TASK_RUN_MESSAGE);
-        }
+        evictAfterCommit(LuceneIndexer.Scope.TASK_RUN_MESSAGE, taskRunMessageIds);
+    }
+
+    /**
+     * Drop {@code ids} from {@code scope} and commit the index, once this cascade's
+     * transaction commits (JCLAW-1042).
+     *
+     * <p>These sweeps commit the Lucene index durably, and ran while the cascade still had
+     * config rows to delete, other scopes to evict and the Agent row itself to cascade. A
+     * throw anywhere after them left the documents permanently gone with their rows alive —
+     * present in the database and on the UI, invisible to search until a restart noticed
+     * {@code docCount < rowCount} and rebuilt the whole scope. The MEMORY scope of this same
+     * cascade was given exactly this treatment by JCLAW-1014; these three were not.
+     */
+    private static void evictAfterCommit(LuceneIndexer.Scope scope, List<Long> ids) {
+        if (ids.isEmpty()) return;
+        var snapshot = List.copyOf(ids);
+        Tx.afterCommit(() -> {
+            for (Long id : snapshot) {
+                LuceneIndexer.remove(scope, id);
+            }
+            LuceneIndexer.commit(scope);
+        });
     }
 
     /**

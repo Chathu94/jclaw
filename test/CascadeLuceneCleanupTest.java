@@ -214,7 +214,15 @@ class CascadeLuceneCleanupTest extends UnitTest {
         assertEquals(TaskExecutor.MAX_RUNS_PER_TASK,
                 repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, keptToken, 20).size());
 
-        TaskExecutor.pruneRunHistory(taskId);
+        // Through a committed transaction, like the agent- and conversation-delete cases above
+        // and like production: TaskExecutor:99 calls this "in its own transaction (the run
+        // above is already committed)". Called bare, it would join this test's ambient
+        // transaction, and the eviction is now ordered after that transaction's commit
+        // (JCLAW-1042) rather than fired mid-cascade.
+        commitInFreshTx(() -> {
+            TaskExecutor.pruneRunHistory(taskId);
+            return null;
+        });
 
         assertTrue(repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, prunedToken + "0", 10).isEmpty(),
                 "pruned run's TASK_RUN_MESSAGE doc must be evicted");
@@ -261,6 +269,42 @@ class CascadeLuceneCleanupTest extends UnitTest {
         task.nextRunAt = Instant.now();
         task.save();
         return task;
+    }
+
+    // ── JCLAW-1042 / VULN-085: the eviction must not outlive a rolled-back transaction ──
+
+    @Test
+    void aRolledBackEvictionLeavesTheTranscriptDocIntact() throws Exception {
+        var token = "rollbackevicttrmtoken";
+        long messageId = commitInFreshTx(() -> {
+            var agent = newAgent("cl-rollback");
+            agent.save();
+            var task = new Task();
+            task.agent = agent;
+            task.name = "rollback-task";
+            task.type = Task.Type.IMMEDIATE;
+            task.status = Task.Status.PENDING;
+            task.scheduledAt = Instant.now();
+            task.nextRunAt = Instant.now();
+            task.save();
+            seedRunWithMessage(task, Instant.now(), token);
+            return ((TaskRunMessage) TaskRunMessage.find("content = ?1", token).first()).id;
+        });
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, token, 10).size(),
+                "precondition: the transcript is indexed");
+
+        // A cascade that evicts the doc and then fails, which is the shape every caller of
+        // removeAll has: collect ids, delete rows, evict — with more work still to come.
+        assertThrows(RuntimeException.class, () -> commitInFreshTx(() -> {
+            LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, List.of(messageId));
+            throw new IllegalStateException("cascade failed after the eviction");
+        }));
+
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.TASK_RUN_MESSAGE, token, 10).size(),
+                "a rolled-back transaction must not destroy the index entry: removeAll commits "
+                        + "the index durably, so the row would survive in the database while its "
+                        + "document was permanently gone — unsearchable until a restart noticed "
+                        + "docCount < rowCount and rebuilt the whole scope");
     }
 
     private static void seedRunWithMessage(Task task, Instant startedAt, String content) {

@@ -1144,11 +1144,16 @@ public final class LoadTestRunner {
                             .executeUpdate();
                     accumulatedIds.addAll(messageIds);
                 }
-                for (Long messageId : accumulatedIds) {
-                    LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
-                }
                 if (!accumulatedIds.isEmpty()) {
-                    LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
+                    // Deferred to this transaction's commit (JCLAW-1042): the index commit is
+                    // durable, so a rollback here left the docs gone and the messages alive.
+                    var snapshot = List.copyOf(accumulatedIds);
+                    Tx.afterCommit(() -> {
+                        for (Long messageId : snapshot) {
+                            LuceneIndexer.remove(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageId);
+                        }
+                        LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
+                    });
                 }
                 return null;
             });

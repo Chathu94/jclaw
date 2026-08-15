@@ -575,8 +575,13 @@ public final class TaskExecutor {
                         .setParameter("tid", task.id).executeUpdate();
                 em.flush();
                 LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, messageIds);
-                LuceneIndexer.remove(LuceneIndexer.Scope.TASK, task.id);
-                LuceneIndexer.commit(LuceneIndexer.Scope.TASK);
+                // Deferred alongside removeAll above (JCLAW-1042) — committing the TASK doc
+                // here made the removal durable while this transaction could still roll back.
+                var taskId = task.id;
+                Tx.afterCommit(() -> {
+                    LuceneIndexer.remove(LuceneIndexer.Scope.TASK, taskId);
+                    LuceneIndexer.commit(LuceneIndexer.Scope.TASK);
+                });
                 return null;
             });
             // One-shots are reaped by db-scheduler's OnCompleteRemove, but cancel
