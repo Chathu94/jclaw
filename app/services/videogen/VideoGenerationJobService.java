@@ -155,13 +155,23 @@ public final class VideoGenerationJobService {
         }
 
         var placeholder = MessageAttachment.findByGenerationJobId(job.id);
-        if (placeholder == null) return;
-        try {
-            AttachmentService.fillGeneratedVideo(placeholder, bytes, "video/mp4");
-            job.resultAttachmentId = placeholder.id;
-            job.save();
-        } catch (RuntimeException e) {
-            Logger.error(e, "videogen: failed to store result for job %s", job.id);
+        if (placeholder != null) {
+            try {
+                AttachmentService.fillGeneratedVideo(placeholder, bytes, "video/mp4");
+                job.resultAttachmentId = placeholder.id;
+                job.save();
+            } catch (RuntimeException e) {
+                Logger.error(e, "videogen: failed to store result for job %s", job.id);
+            }
+        }
+
+        // Push it to the channel that asked (JCLAW-1057). Storing the attachment is
+        // enough for web chat, whose UI polls the message and re-renders once the bytes
+        // land — every other channel got only the "started generating" text and never
+        // saw the clip. Last, and best-effort: a delivery failure must not undo a
+        // generation that succeeded.
+        if (VideoDelivery.send(job.conversation, bytes, job.prompt)) {
+            Logger.info("videogen: delivered job %s to %s", job.id, job.conversation.channelType);
         }
     }
 
