@@ -47,6 +47,24 @@ class JvmStatsTest extends UnitTest {
                 "peak cannot be below the current count");
     }
 
+    /**
+     * The bound that makes process memory drawable as a proportion. Absent stays absent:
+     * a bar against a guessed machine size would be a confident lie.
+     */
+    @Test
+    void reportsMachineMemoryAsTheBoundForProcessMemory() {
+        var s = JvmStats.snapshot();
+        var machine = s.machineMemoryBytes();
+        if (machine != null) {
+            assertTrue(machine > 0, "a reported machine size is never zero");
+            if (s.rssBytes() != null) {
+                assertTrue(s.rssBytes() <= machine,
+                        "a process cannot be resident in more memory than the machine has: "
+                                + s.rssBytes() + " > " + machine);
+            }
+        }
+    }
+
     @Test
     void reportsUptimeAndProcessorCount() {
         var s = JvmStats.snapshot();

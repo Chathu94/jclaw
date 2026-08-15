@@ -36,6 +36,10 @@ function sample(over: Record<string, unknown> = {}) {
     uptimeMs: 9_000_000,
     processCpuLoad: 0.0734,
     availableProcessors: 10,
+    machineMemoryBytes: 17_179_869_184,
+    llmCallsRunning: 3,
+    llmCallsQueued: 0,
+    llmCallsMax: 224,
     ...over,
   }
 }
@@ -52,8 +56,10 @@ describe('SettingsJvmPanel — memory is three figures, not one', () => {
     await flushPromises()
 
     // 256 MB live inside a 512 MB heap, 128 MB non-heap, 1.5 GB charged by the OS.
+    // The held/max figures sit on the card's context line, not in the headline value.
     expect(c.find('[data-testid="jvm-heap"]').text()).toContain('256 MB')
-    expect(c.find('[data-testid="jvm-heap"]').text()).toContain('512 MB')
+    expect(c.text()).toContain('512 MB')
+    expect(c.text()).toContain('2.0 GB')
     expect(c.find('[data-testid="jvm-nonheap"]').text()).toContain('128 MB')
     expect(c.find('[data-testid="jvm-rss"]').text()).toContain('1.5 GB')
   })
@@ -82,8 +88,8 @@ describe('SettingsJvmPanel — memory is three figures, not one', () => {
     stats = sample({ heapMax: -1 })
     const c = await mountSuspended(SettingsJvmPanel)
     await flushPromises()
-    expect(c.find('[data-testid="jvm-heap"]').text()).toContain('no ceiling')
-    expect(c.find('[data-testid="jvm-heap"]').text()).not.toContain('-1')
+    expect(c.text()).toContain('no ceiling')
+    expect(c.text()).not.toContain('-1')
   })
 })
 
@@ -112,7 +118,7 @@ describe('SettingsJvmPanel — threads', () => {
     await flushPromises()
 
     expect(c.find('[data-testid="jvm-threads"]').text()).toContain('44')
-    expect(c.find('[data-testid="jvm-threads"]').text()).toContain('61')
+    expect(c.text()).toContain('peak 61')
     // A low flat number here is expected on a virtual-thread-only fork; unlabelled it
     // reads as an idle instance.
     expect(c.text()).toContain('excludes virtual threads')
@@ -123,9 +129,9 @@ describe('SettingsJvmPanel — garbage collection', () => {
   it('shows the cumulative counters on the first sample', async () => {
     const c = await mountSuspended(SettingsJvmPanel)
     await flushPromises()
-    expect(c.find('[data-testid="jvm-gc"]').text()).toContain('412')
-    // No delta is claimed until there are two samples to subtract.
-    expect(c.find('[data-testid="jvm-gc"]').text()).not.toContain('since last sample')
+    // Without a prior sample there is no delta to claim, so the headline falls back to
+    // the running total rather than asserting a change of zero.
+    expect(c.find('[data-testid="jvm-gc"]').text()).toBe('412')
   })
 
   it('derives collections-since-last-sample once a second sample arrives', async () => {
@@ -138,8 +144,10 @@ describe('SettingsJvmPanel — garbage collection', () => {
       await vi.advanceTimersByTimeAsync(5_000)
       await flushPromises()
 
-      // The reason this panel polls at all: 419 on its own says nothing, +7 does.
-      expect(c.find('[data-testid="jvm-gc"]').text()).toContain('+7 since last sample')
+      // The reason this panel polls at all: 419 on its own says nothing, +7 does. The
+      // headline is the delta; the cumulative total is demoted to the context line.
+      expect(c.find('[data-testid="jvm-gc"]').text()).toBe('+7')
+      expect(c.text()).toContain('419 total')
     }
     finally {
       vi.useRealTimers()
@@ -171,5 +179,151 @@ describe('SettingsJvmPanel — polling discipline', () => {
     const c = await mountSuspended(SettingsJvmPanel)
     await flushPromises()
     expect(c.text()).toContain('Could not read the JVM metrics')
+  })
+})
+
+describe('SettingsJvmPanel — visuals', () => {
+  /**
+   * The layout bug this design exists to prevent: cards whose value text wraps to a
+   * different number of lines used to push their chart to a different height, so a row
+   * of charts stepped down the page. jsdom performs no layout, so the pixel result is
+   * unassertable — what is pinned here is the mechanism that produces it: every visual
+   * sits in an mt-auto box inside a flex-col cell, which bottom-aligns it whatever the
+   * text above does.
+   */
+  it('anchors every visual to the bottom of its cell', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    for (const id of ['jvm-heap-bar', 'jvm-rss-bar', 'jvm-cpu-spark', 'jvm-gc-spark']) {
+      const anchor = c.find(`[data-testid="${id}"]`).element.parentElement
+      expect(anchor?.className, `${id} should sit in a bottom-anchored box`).toContain('mt-auto')
+      expect(anchor?.parentElement?.className, `${id}'s cell should be a flex column`)
+        .toContain('flex-col')
+    }
+  })
+
+  it('draws the heap as used and held-unused against the ceiling', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    const segs = c.find('[data-testid="jvm-heap-bar"]').findAll('div')
+    expect(segs).toHaveLength(2)
+    // 256 MB used and 256 MB held-but-unused inside a 2 GB ceiling — an eighth each.
+    expect(segs[0]!.attributes('style')).toContain('12.5%')
+    expect(segs[1]!.attributes('style')).toContain('12.5%')
+  })
+
+  it('scales the heap bar to committed when there is no ceiling', async () => {
+    stats = sample({ heapMax: -1 })
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    // Against committed (512 MB), not -1, which would make every width negative.
+    expect(c.find('[data-testid="jvm-heap-bar"]').find('div').attributes('style')).toContain('50%')
+  })
+
+  /** A real-but-tiny share must still be visible, or it reads as a rendering fault. */
+  it('keeps a sub-pixel proportion visible without overstating it', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    // 1.5 GB of 16 GB is 9.4%; the floor only matters below ~0.2%, so both the true
+    // percentage and the floor appear in the width expression.
+    const style = c.find('[data-testid="jvm-rss-bar"]').find('div').attributes('style')!
+    expect(style).toContain('9.375%')
+    expect(style).toContain('2px')
+  })
+
+  it('omits the process-memory bar when the machine size is unknown', async () => {
+    stats = sample({ machineMemoryBytes: null })
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    // Without a bound there is no proportion to draw; the figure still renders.
+    expect(c.find('[data-testid="jvm-rss-bar"]').findAll('div')).toHaveLength(0)
+    expect(c.find('[data-testid="jvm-rss"]').text()).toContain('1.5 GB')
+  })
+
+  it('draws no trend line until there are two samples to join', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+    expect(c.find('[data-testid="jvm-cpu-spark"]').find('path').exists()).toBe(false)
+  })
+
+  it('plots processor share once a second sample arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const c = await mountSuspended(SettingsJvmPanel)
+      await flushPromises()
+
+      stats = sample({ processCpuLoad: 0.5 })
+      await vi.advanceTimersByTimeAsync(5_000)
+      await flushPromises()
+
+      expect(c.find('[data-testid="jvm-cpu-spark"]').find('path').exists()).toBe(true)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('SettingsJvmPanel — LLM dispatcher occupancy', () => {
+  /**
+   * The reason this metric sits here: the dispatcher caps render directly beneath this
+   * panel, and without in-flight and queued counts there is no evidence to tune them on.
+   */
+  it('reports calls in flight against the cap they are bounded by', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    expect(c.find('[data-testid="jvm-llm"]').text()).toBe('3')
+    expect(c.text()).toContain('0 queued')
+    expect(c.text()).toContain('cap 224')
+  })
+
+  /** Queued is the alarm: it only moves when the cap, not the provider, is the limit. */
+  it('surfaces a queue building behind the cap', async () => {
+    stats = sample({ llmCallsRunning: 224, llmCallsQueued: 17 })
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    expect(c.find('[data-testid="jvm-llm"]').text()).toBe('224')
+    expect(c.text()).toContain('17 queued')
+  })
+
+  it('plots calls in flight once a second sample arrives', async () => {
+    vi.useFakeTimers()
+    try {
+      const c = await mountSuspended(SettingsJvmPanel)
+      await flushPromises()
+
+      stats = sample({ llmCallsRunning: 9 })
+      await vi.advanceTimersByTimeAsync(5_000)
+      await flushPromises()
+
+      expect(c.find('[data-testid="jvm-llm-spark"]').find('path').exists()).toBe(true)
+    }
+    finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * The layout change this accompanies: all three trend cells share row two, and uptime
+   * moved down to sit beside platform threads. jsdom performs no layout, so the ordering
+   * of the cells is what is pinned — the visual alignment is verified in the browser.
+   */
+  it('groups the three sparkline cells together, ahead of the plain-figure cells', async () => {
+    const c = await mountSuspended(SettingsJvmPanel)
+    await flushPromises()
+
+    const labels = c.findAll('dt').map(d => d.text())
+    expect(labels).toEqual([
+      'Heap', 'Non-heap', 'Process memory',
+      'CPU', 'Garbage collection', 'LLM calls in flight',
+      'Uptime', 'Platform threads',
+    ])
   })
 })

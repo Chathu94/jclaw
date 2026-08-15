@@ -26,6 +26,12 @@ import java.lang.management.ManagementFactory;
  * @param processCpuLoad      0..1 share of the machine this process is using, or null
  *                            when the JVM declines to report it
  * @param availableProcessors cores visible to this JVM
+ * @param machineMemoryBytes  total physical RAM, or null when unavailable — the bound
+ *                            that makes {@code rssBytes} drawable as a proportion
+ * @param llmCallsRunning     outbound LLM calls executing now
+ * @param llmCallsQueued      outbound LLM calls waiting on the dispatcher — non-zero
+ *                            means the cap is throttling, not the provider
+ * @param llmCallsMax         the live dispatcher ceiling those two are measured against
  */
 public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                        long nonHeapUsed, long nonHeapCommitted,
@@ -34,7 +40,9 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                        int platformThreads, int peakPlatformThreads,
                        long uptimeMs,
                        Double processCpuLoad,
-                       int availableProcessors) {
+                       int availableProcessors,
+                       Long machineMemoryBytes,
+                       int llmCallsRunning, int llmCallsQueued, int llmCallsMax) {
 
     /**
      * Read every figure from the platform MXBeans.
@@ -65,10 +73,15 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
         }
 
         Double cpu = null;
+        Long machineMemory = null;
         if (ManagementFactory.getOperatingSystemMXBean()
                 instanceof com.sun.management.OperatingSystemMXBean sun) {
             var load = sun.getProcessCpuLoad();
             if (load >= 0) cpu = load;
+            // Only a bounded value can be drawn as a proportion, and "352 MB" has no
+            // bound until you know the machine it is resident on.
+            var total = sun.getTotalMemorySize();
+            if (total > 0) machineMemory = total;
         }
 
         return new JvmStats(
@@ -79,6 +92,13 @@ public record JvmStats(long heapUsed, long heapCommitted, long heapMax,
                 threads.getThreadCount(), threads.getPeakThreadCount(),
                 ManagementFactory.getRuntimeMXBean().getUptime(),
                 cpu,
-                Runtime.getRuntime().availableProcessors());
+                Runtime.getRuntime().availableProcessors(),
+                machineMemory,
+                // Process state rather than JVM state strictly speaking, but it is what
+                // the caps rendered directly beneath this panel are tuned against, and a
+                // second endpoint polled on the same 5s cadence would buy nothing.
+                HttpFactories.llmDispatcherRunningCalls(),
+                HttpFactories.llmDispatcherQueuedCalls(),
+                HttpFactories.llmDispatcherMaxRequests());
     }
 }

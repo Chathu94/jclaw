@@ -36,6 +36,7 @@ public class GenerateImageTool implements ToolRegistry.Tool {
     private static final String ARG_HEIGHT = "height";
     private static final String ARG_ASPECT = "aspect_ratio";
     private static final String ARG_USE_REFERENCE = "use_reference_image";
+    private static final String ARG_SAVE_TO = "save_to";
 
     @Override public String name() { return "generate_image"; }
     @Override public String category() { return "Utilities"; }
@@ -82,7 +83,13 @@ public class GenerateImageTool implements ToolRegistry.Tool {
                         ARG_USE_REFERENCE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                                 SchemaKeys.DESCRIPTION, "When true, use the most recent image the user uploaded in this "
                                         + "conversation as a reference for style transfer / visual consistency "
-                                        + "(image-to-image). Defaults to false (text-to-image).")
+                                        + "(image-to-image). Defaults to false (text-to-image)."),
+                        ARG_SAVE_TO, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Optional filename, relative to your workspace, to also write "
+                                        + "the image to (e.g. \"tea.png\"). Use this whenever you need the file "
+                                        + "afterwards — to attach it, send it, or pass it to a command. Without it "
+                                        + "the image is only shown inline and NO file exists on disk; do not go "
+                                        + "looking for one.")
                 ),
                 SchemaKeys.REQUIRED, List.of(ARG_PROMPT)
         );
@@ -138,6 +145,22 @@ public class GenerateImageTool implements ToolRegistry.Tool {
             // Replicate slug sent to OpenAI, which 400s with "model does not exist".
             var image = serviceOpt.get().generate(prompt, null, dims[0], dims[1], reference);
             var metadata = buildMetadata(prompt, image.generatedBy(), dims[0], dims[1]);
+
+            // Optional workspace copy, for callers that need the file afterwards — a
+            // scheduled task has no chat surface to render the inline attachment into.
+            String savedPath = null;
+            var saveTo = JsonArgs.optString(args, ARG_SAVE_TO, null);
+            if (saveTo != null && !saveTo.isBlank()) {
+                try {
+                    savedPath = GeneratedMediaFile.write(agent, saveTo.trim(), image.bytes());
+                } catch (IllegalArgumentException e) {
+                    // Report rather than proceed. Silently returning the inline-only text
+                    // is what leaves a caller hunting the filesystem for a file that was
+                    // never written.
+                    return ToolRegistry.ToolResult.text(
+                            "Image generated, but saving it failed: " + e.getMessage());
+                }
+            }
             // The image is delivered out-of-band (raw bytes -> generated attachment, rendered inline by
             // the chat UI); the model never receives its URL. Say so explicitly: a model that
             // "helpfully" re-embeds the image with markdown/HTML has to invent a URL, which resolves to
@@ -146,6 +169,12 @@ public class GenerateImageTool implements ToolRegistry.Tool {
             var text = "Image generated and displayed to the user inline. It is already shown — do not "
                     + "re-embed or link it in your reply (no markdown image syntax, no HTML <img> tag); "
                     + "just acknowledge or describe it in words.";
+            if (savedPath != null) {
+                // State the path explicitly: this is the only thing that stops a caller
+                // that needs a file from guessing at one.
+                text += " Also saved to " + savedPath + " — use exactly that path; no other "
+                        + "copy of this image exists on disk.";
+            }
             return ToolRegistry.ToolResult.withImage(text, null,
                     new GeneratedAttachment(image.bytes(), image.mimeType(), metadata));
         } catch (ImageGenerationException e) {

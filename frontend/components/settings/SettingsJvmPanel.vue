@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import MetricBar from './MetricBar.vue'
+import MetricSparkline from './MetricSparkline.vue'
 // JVM runtime state, shown under Performance above the dispatcher caps that are
 // tuned against it (JCLAW-1057).
 //
@@ -24,13 +26,25 @@ interface JvmStats {
   /** Null when the JVM declines to report a share. */
   processCpuLoad: number | null
   availableProcessors: number
+  /** Null when unreadable — the bound that makes process memory drawable. */
+  machineMemoryBytes: number | null
+  llmCallsRunning: number
+  llmCallsQueued: number
+  llmCallsMax: number
 }
 
 const REFRESH_MS = 5_000
+// ~5 minutes of trend at the refresh rate above.
+const HISTORY = 60
 
 const stats = ref<JvmStats | null>(null)
 const previous = ref<JvmStats | null>(null)
 const failed = ref(false)
+// Held client-side: the endpoint is a snapshot, and persisting history server-side would
+// be a database for something the panel discards on close.
+const cpuHistory = ref<number[]>([])
+const gcHistory = ref<number[]>([])
+const llmHistory = ref<number[]>([])
 
 let timer: ReturnType<typeof setInterval> | null = null
 
@@ -41,10 +55,20 @@ async function load() {
     previous.value = stats.value
     stats.value = next
     failed.value = false
+
+    if (next.processCpuLoad !== null) push(cpuHistory, next.processCpuLoad * 100)
+    // Per-sample collections. The cumulative count only climbs, so charting it draws a
+    // slope that says nothing about GC pressure now.
+    if (previous.value) push(gcHistory, Math.max(0, next.gcCount - previous.value.gcCount))
+    push(llmHistory, next.llmCallsRunning)
   }
   catch {
     failed.value = true
   }
+}
+
+function push(buffer: Ref<number[]>, value: number) {
+  buffer.value = [...buffer.value, value].slice(-HISTORY)
 }
 
 function start() {
@@ -105,11 +129,30 @@ function duration(ms: number): string {
   return `${s}s`
 }
 
-const heapLabel = computed(() => {
+const heapLabel = computed(() => stats.value ? bytes(stats.value.heapUsed) : '—')
+
+const heapContext = computed(() => {
   const s = stats.value
-  if (!s) return '—'
+  if (!s) return ''
   const max = s.heapMax < 0 ? 'no ceiling' : bytes(s.heapMax)
-  return `${bytes(s.heapUsed)} of ${bytes(s.heapCommitted)} held (max ${max})`
+  return `of ${bytes(s.heapCommitted)} held · max ${max}`
+})
+
+/** Used inside currently-held, against the ceiling the heap may grow to. */
+const heapSegments = computed(() => {
+  const s = stats.value
+  if (!s) return []
+  return [
+    { label: 'Used', value: s.heapUsed, class: 'bg-emerald-500' },
+    { label: 'Held, unused', value: Math.max(0, s.heapCommitted - s.heapUsed), class: 'bg-emerald-500/30' },
+  ]
+})
+
+/** Falls back to committed when there is no ceiling: a bar needs a real bound. */
+const heapTotal = computed(() => {
+  const s = stats.value
+  if (!s) return null
+  return s.heapMax > 0 ? s.heapMax : s.heapCommitted
 })
 
 const cpuLabel = computed(() => {
@@ -123,9 +166,22 @@ const gcLabel = computed(() => {
   const s = stats.value
   if (!s) return '—'
   const p = previous.value
-  const delta = p ? s.gcCount - p.gcCount : null
-  const total = `${s.gcCount.toLocaleString()} total, ${duration(s.gcTimeMs)} spent`
-  return delta === null ? total : `+${delta} since last sample · ${total}`
+  return p ? `+${s.gcCount - p.gcCount}` : s.gcCount.toLocaleString()
+})
+
+const llmLabel = computed(() => stats.value ? String(stats.value.llmCallsRunning) : '—')
+
+/** Queued is the figure that matters — it only moves when the cap is the constraint. */
+const llmContext = computed(() => {
+  const s = stats.value
+  if (!s) return ''
+  return `${s.llmCallsQueued} queued · cap ${s.llmCallsMax}`
+})
+
+const gcContext = computed(() => {
+  const s = stats.value
+  if (!s) return ''
+  return `${s.gcCount.toLocaleString()} total · ${duration(s.gcTimeMs)} spent`
 })
 </script>
 
@@ -151,8 +207,12 @@ const gcLabel = computed(() => {
       v-else
       class="bg-surface-elevated border border-border"
     >
-      <dl class="grid grid-cols-2 sm:grid-cols-3 gap-4 p-4">
-        <div>
+      <!-- Cells are equal-height grid items with the visual pinned to the bottom via
+           mt-auto, so a value that wraps to two lines cannot push its chart out of line
+           with the rest of the row (PatternFly: uniform heights, no gaps). Bars and
+           sparklines are grouped onto their own rows for the same reason. -->
+      <dl class="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-5 p-4">
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             Heap
           </dt>
@@ -162,8 +222,19 @@ const gcLabel = computed(() => {
           >
             {{ heapLabel }}
           </dd>
+          <dd class="text-[11px] text-fg-muted">
+            {{ heapContext }}
+          </dd>
+          <div class="mt-auto pt-2">
+            <MetricBar
+              data-testid="jvm-heap-bar"
+              :segments="heapSegments"
+              :total="heapTotal"
+            />
+          </div>
         </div>
-        <div>
+
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             Non-heap
           </dt>
@@ -173,8 +244,12 @@ const gcLabel = computed(() => {
           >
             {{ stats ? bytes(stats.nonHeapUsed) : '—' }}
           </dd>
+          <dd class="text-[11px] text-fg-muted">
+            metaspace, code cache, buffers
+          </dd>
         </div>
-        <div>
+
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             Process memory
           </dt>
@@ -184,8 +259,21 @@ const gcLabel = computed(() => {
           >
             {{ stats ? bytes(stats.rssBytes) : '—' }}
           </dd>
+          <dd class="text-[11px] text-fg-muted">
+            <template v-if="stats?.rssBytes && stats.machineMemoryBytes">
+              of {{ bytes(stats.machineMemoryBytes) }} on this machine
+            </template>
+          </dd>
+          <div class="mt-auto pt-2">
+            <MetricBar
+              data-testid="jvm-rss-bar"
+              :segments="[{ label: 'Resident', value: stats?.rssBytes ?? 0, class: 'bg-emerald-500' }]"
+              :total="stats?.machineMemoryBytes ?? null"
+            />
+          </div>
         </div>
-        <div>
+
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             CPU
           </dt>
@@ -194,10 +282,20 @@ const gcLabel = computed(() => {
             data-testid="jvm-cpu"
           >
             {{ cpuLabel }}
-            <span class="text-fg-muted">of {{ stats?.availableProcessors ?? '—' }} cores</span>
           </dd>
+          <dd class="text-[11px] text-fg-muted">
+            of {{ stats?.availableProcessors ?? '—' }} cores
+          </dd>
+          <div class="mt-auto pt-2">
+            <MetricSparkline
+              data-testid="jvm-cpu-spark"
+              :points="cpuHistory"
+              label="Processor share over the last few minutes"
+            />
+          </div>
         </div>
-        <div>
+
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             Garbage collection
           </dt>
@@ -207,16 +305,53 @@ const gcLabel = computed(() => {
           >
             {{ gcLabel }}
           </dd>
+          <dd class="text-[11px] text-fg-muted">
+            {{ gcContext }}
+          </dd>
+          <div class="mt-auto pt-2">
+            <MetricSparkline
+              data-testid="jvm-gc-spark"
+              :points="gcHistory"
+              label="Collections per sample over the last few minutes"
+            />
+          </div>
         </div>
-        <div>
+
+        <div class="flex flex-col">
+          <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+            LLM calls in flight
+          </dt>
+          <dd
+            class="mt-1 text-sm font-mono text-fg-primary"
+            data-testid="jvm-llm"
+          >
+            {{ llmLabel }}
+          </dd>
+          <dd class="text-[11px] text-fg-muted">
+            {{ llmContext }}
+          </dd>
+          <div class="mt-auto pt-2">
+            <MetricSparkline
+              data-testid="jvm-llm-spark"
+              :points="llmHistory"
+              label="Outbound LLM calls in flight over the last few minutes"
+            />
+          </div>
+        </div>
+
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             Uptime
           </dt>
           <dd class="mt-1 text-sm font-mono text-fg-primary">
             {{ stats ? duration(stats.uptimeMs) : '—' }}
           </dd>
+          <dd class="text-[11px] text-fg-muted">
+            since this JVM started
+          </dd>
         </div>
-        <div>
+
+        <div class="flex flex-col">
           <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
             Platform threads
           </dt>
@@ -225,7 +360,9 @@ const gcLabel = computed(() => {
             data-testid="jvm-threads"
           >
             {{ stats ? stats.platformThreads : '—' }}
-            <span class="text-fg-muted">peak {{ stats?.peakPlatformThreads ?? '—' }}</span>
+          </dd>
+          <dd class="text-[11px] text-fg-muted">
+            peak {{ stats?.peakPlatformThreads ?? '—' }}
           </dd>
         </div>
       </dl>

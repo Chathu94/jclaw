@@ -60,8 +60,13 @@ class GenerateAudioToolTest extends UnitTest {
         assertEquals(List.of("text"), params.get("required"));
         @SuppressWarnings("unchecked")
         var props = (Map<String, Object>) params.get("properties");
-        assertEquals(1, props.size());
         assertTrue(props.containsKey("text"));
+        // save_to joined the schema in JCLAW-1057 and is deliberately optional: a caller
+        // that needs the audio as a file asks for one, and a caller that does not still
+        // gets the inline attachment. The count stays asserted so a third parameter
+        // arriving unnoticed still fails here.
+        assertTrue(props.containsKey("save_to"));
+        assertEquals(2, props.size(), "unexpected parameter: " + props.keySet());
     }
 
     @Test

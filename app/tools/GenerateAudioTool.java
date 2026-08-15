@@ -42,6 +42,7 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
 
     static final String NAME = "generate_audio";
     private static final String ARG_TEXT = "text";
+    private static final String ARG_SAVE_TO = "save_to";
 
     /** Shared with read-aloud rather than a second limit of its own: the ceiling is
      *  a property of the TTS engines, not of who is calling them. */
@@ -84,6 +85,12 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, Map.of(
+                        ARG_SAVE_TO, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Optional filename, relative to your workspace, to also write "
+                                        + "the audio to (e.g. \"message.mp3\"). Use this whenever you need the file "
+                                        + "afterwards — to attach it, send it, or pass it to a command. Without it "
+                                        + "the audio is only attached to the reply and NO file exists on disk; do "
+                                        + "not go looking for one."),
                         ARG_TEXT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "The words to speak, written as they should "
                                         + "sound. Read verbatim — plain prose only, no markdown or URLs.")
@@ -122,9 +129,11 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
     @Override
     public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
         String text;
+        String saveTo;
         try {
             var args = JsonParser.parseString(argsJson).getAsJsonObject();
             text = JsonArgs.optString(args, ARG_TEXT, "");
+            saveTo = JsonArgs.optString(args, ARG_SAVE_TO, null);
         } catch (RuntimeException e) {
             return ToolRegistry.ToolResult.text("Error: could not parse arguments: " + e.getMessage());
         }
@@ -154,6 +163,17 @@ public class GenerateAudioTool implements ToolRegistry.Tool {
             // resolves to nothing and renders as a dead link.
             var summary = "Audio attached to your reply and playable by the user. It is already "
                     + "attached — do not link or embed it; just say what you sent, briefly.";
+            if (saveTo != null && !saveTo.isBlank()) {
+                // Optional workspace copy — a scheduled task has no reply to attach to.
+                try {
+                    var savedPath = GeneratedMediaFile.write(agent, saveTo.trim(), encoded.bytes());
+                    summary += " Also saved to " + savedPath + " — use exactly that path; no other "
+                            + "copy of this audio exists on disk.";
+                } catch (IllegalArgumentException e) {
+                    return ToolRegistry.ToolResult.text(
+                            "Audio generated, but saving it failed: " + e.getMessage());
+                }
+            }
             return new ToolRegistry.ToolResult(summary, null,
                     List.of(new GeneratedAttachment(encoded.bytes(), encoded.mimeType(),
                             NAME, filename)),

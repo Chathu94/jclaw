@@ -143,6 +143,20 @@ public final class HttpFactories {
         return LLM_DISPATCHER.getMaxRequests();
     }
 
+    /** Outbound LLM calls executing right now. */
+    public static int llmDispatcherRunningCalls() {
+        return LLM_DISPATCHER.runningCallsCount();
+    }
+
+    /**
+     * Outbound LLM calls waiting on the dispatcher. The signal that matters: a sustained
+     * non-zero value means the caps above are the thing throttling throughput, which is
+     * not otherwise visible from a running install.
+     */
+    public static int llmDispatcherQueuedCalls() {
+        return LLM_DISPATCHER.queuedCallsCount();
+    }
+
     /**
      * Push transient caps into the live dispatcher WITHOUT touching Config.
      * Used by the loadtest controller to bump the cap above the static
