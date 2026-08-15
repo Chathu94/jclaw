@@ -183,11 +183,18 @@ describe('Settings — Printers panel', () => {
 
   // ─────── manual entry ─────────────────────────────────────────────────────
 
-  it('ignores a manual save with no host', async () => {
+  it('will not save a manual entry until a host is typed', async () => {
     setupApi()
     const c = await mountPanel()
-    await click(c, 'Set default')
-    await flushPromises()
+    const save = buttonByText(c, 'Set default')[0]!
+    expect(save.attributes('disabled')).toBeDefined()
+
+    // Whitespace is not a host — trim() decides, so the control must stay shut.
+    await c.find('input[placeholder="10.0.0.5"]').setValue('   ')
+    expect(buttonByText(c, 'Set default')[0]!.attributes('disabled')).toBeDefined()
+
+    await c.find('input[placeholder="10.0.0.5"]').setValue('10.0.0.9')
+    expect(buttonByText(c, 'Set default')[0]!.attributes('disabled')).toBeUndefined()
     expect(put).toBeNull()
   })
 
@@ -199,6 +206,9 @@ describe('Settings — Printers panel', () => {
     await click(c, 'Set default')
     await vi.waitFor(() => expect(put).toBeTruthy())
     expect(put).toMatchObject({ name: '10.0.0.9', host: '10.0.0.9', port: 9100 })
+    // The fields empty on success, so the form does not sit there looking unsaved.
+    await vi.waitFor(() =>
+      expect((c.find('input[placeholder="10.0.0.5"]').element as HTMLInputElement).value).toBe(''))
   })
 
   it('treats an unparseable port as "let the protocol decide"', async () => {
