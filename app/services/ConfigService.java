@@ -87,7 +87,10 @@ public class ConfigService {
         var raw = get(key);
         if (raw == null) return defaultValue;
         try {
-            return Double.parseDouble(raw.trim());
+            double parsed = Double.parseDouble(raw.trim());
+            // parseDouble accepts "NaN"/"Infinity" without throwing, so the catch below never
+            // sees them (JCLAW-1016) — and NaN passes any caller's own `v < lo || v > hi` check.
+            return Double.isFinite(parsed) ? parsed : defaultValue;
         } catch (NumberFormatException _) {
             return defaultValue;
         }

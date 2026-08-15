@@ -53,6 +53,41 @@ class ConfigServiceTest extends UnitTest {
         assertEquals(7L, ConfigService.getLong("bad.long", 7L));
     }
 
+    // --- getDouble: rejects the non-finite values parseDouble accepts (JCLAW-1016) ---
+
+    @Test
+    void parseDoubleAcceptsTheNonFiniteLiterals() {
+        // Pinned so the next reader does not re-derive why getDouble's catch was insufficient:
+        // these three parse successfully, so a NumberFormatException arm can never reject them.
+        assertEquals(Double.NaN, Double.parseDouble("NaN"));
+        assertEquals(Double.POSITIVE_INFINITY, Double.parseDouble("Infinity"));
+        assertEquals(Double.NEGATIVE_INFINITY, Double.parseDouble("-Infinity"));
+    }
+
+    @Test
+    void getDoubleReturnsDefaultForNonFiniteValues() {
+        for (var stored : new String[] {"NaN", "Infinity", "-Infinity", "  NaN  "}) {
+            ConfigService.set("some.double", stored);
+            assertEquals(0.25, ConfigService.getDouble("some.double", 0.25),
+                    "a stored '" + stored + "' must not reach the caller as a non-finite double");
+        }
+    }
+
+    @Test
+    void getDoubleStillParsesFiniteValues() {
+        // The guard must reject non-finite values, not every value.
+        ConfigService.set("some.double", "0.62");
+        assertEquals(0.62, ConfigService.getDouble("some.double", -1.0));
+        ConfigService.set("some.double", "-1.0");
+        assertEquals(-1.0, ConfigService.getDouble("some.double", 99.0));
+    }
+
+    @Test
+    void getDoubleReturnsDefaultForNonNumeric() {
+        ConfigService.set("bad.double", "not-a-number");
+        assertEquals(0.5, ConfigService.getDouble("bad.double", 0.5));
+    }
+
     @Test
     void setOverwrites() {
         ConfigService.set("key", "v1");
@@ -213,8 +248,8 @@ class ConfigServiceTest extends UnitTest {
 
     @Test
     void setWithSideEffectsRejectsNonFiniteMinCosine() {
-        // Double.parseDouble("NaN") SUCCEEDS, so getDouble's try/catch cannot reject it at
-        // read — and a NaN floor fails every comparison, silently dropping the vector leg.
+        // getDouble refuses non-finite values since JCLAW-1016, so this guard is not the last
+        // line of defence — it is what turns a silent fallback into an error the operator sees.
         var error = ConfigService.setWithSideEffects(
                 memory.JpaMemoryStore.KEY_RECALL_MIN_COSINE, "NaN");
         assertNotNull(error, "a NaN minCosine must be rejected");

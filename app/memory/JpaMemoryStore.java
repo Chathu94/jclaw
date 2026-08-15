@@ -612,10 +612,7 @@ public class JpaMemoryStore implements MemoryStore {
      * below it.
      */
     private static boolean vectorLegAboveFloor(double bestCosine) {
-        double floor = ConfigService.getDouble(KEY_RECALL_MIN_COSINE, DEFAULT_RECALL_MIN_COSINE);
-        // A NaN floor fails every comparison, silently dropping the whole vector leg (JCLAW-970).
-        // ConfigService.getDouble cannot catch it: Double.parseDouble("NaN") succeeds.
-        return bestCosine >= (Double.isNaN(floor) ? DEFAULT_RECALL_MIN_COSINE : floor);
+        return bestCosine >= ConfigService.getDouble(KEY_RECALL_MIN_COSINE, DEFAULT_RECALL_MIN_COSINE);
     }
 
     /**
