@@ -20,6 +20,8 @@ interface UpgradePreflight {
   installKind: string
   runningTasks: number
   activeSubagentRuns: number
+  /** Null on a packaged install, which ships without a repository to report. */
+  commit: string | null
 }
 
 interface UpgradeStatus {
@@ -262,6 +264,12 @@ const summaryLine = computed(() => {
           <span class="text-sm font-medium text-fg-strong">JClaw {{ preflight?.currentVersion ?? '' }}</span>
           <div class="text-xs text-fg-muted mt-0.5">
             {{ summaryLine }}
+          </div>
+          <div
+            v-if="preflight?.commit"
+            class="text-xs text-fg-muted mt-0.5 font-mono"
+          >
+            Commit {{ preflight.commit }}
           </div>
         </div>
         <div class="shrink-0 flex items-center gap-2">

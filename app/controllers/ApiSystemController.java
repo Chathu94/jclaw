@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.TaskRun;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.GitCheckout;
 import services.RestartService;
 import services.SubagentRegistry;
 import services.UpgradeService;
@@ -42,10 +43,13 @@ public class ApiSystemController extends Controller {
      *                           interrupts
      * @param activeSubagentRuns subagent runs live in THIS JVM, which a restart
      *                           interrupts
+     * @param commit             short commit id of the checkout, {@code -dirty} when
+     *                           the tree is modified, or null on a packaged install
      */
     public record RestartPreflight(boolean available, String unavailableReason, String mode,
                                    boolean backendOnly, boolean rebuildExpected,
-                                   long runningTasks, int activeSubagentRuns) {}
+                                   long runningTasks, int activeSubagentRuns,
+                                   String commit) {}
 
     /**
      * GET /api/system/restart — what a restart would do and what it would
@@ -60,7 +64,8 @@ public class ApiSystemController extends Controller {
                 unavailable == null, unavailable, plan.mode(),
                 plan.backendOnly(), plan.rebuildExpected(),
                 TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
-                SubagentRegistry.activeRunIds().size())));
+                SubagentRegistry.activeRunIds().size(),
+                GitCheckout.describe())));
     }
 
     /**
@@ -108,11 +113,14 @@ public class ApiSystemController extends Controller {
      * @param runningTasks       task runs in RUNNING state, which the restart
      *                           at the end of the upgrade interrupts
      * @param activeSubagentRuns subagent runs live in THIS JVM, likewise
+     * @param commit             short commit id of the checkout, {@code -dirty} when
+     *                           the tree is modified, or null on a packaged install
      */
     public record UpgradePreflight(boolean available, String unavailableReason,
                                    String currentVersion, String latestVersion,
                                    boolean upgradeAvailable, String installKind,
-                                   long runningTasks, int activeSubagentRuns) {}
+                                   long runningTasks, int activeSubagentRuns,
+                                   String commit) {}
 
     /**
      * GET /api/system/upgrade — what an upgrade would install and what it would
@@ -133,7 +141,8 @@ public class ApiSystemController extends Controller {
                 unavailable == null, unavailable, current, latest,
                 UpgradeService.isNewer(latest, current), UpgradeService.installKind(),
                 TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
-                SubagentRegistry.activeRunIds().size())));
+                SubagentRegistry.activeRunIds().size(),
+                GitCheckout.describe())));
     }
 
     /**

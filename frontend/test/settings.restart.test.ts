@@ -49,6 +49,9 @@ function available(over: Record<string, unknown> = {}) {
     rebuildExpected: false,
     runningTasks: 0,
     activeSubagentRuns: 0,
+    // Default to a packaged install: that is the shape every pre-existing case here
+    // assumes, and the checkout case is asserted explicitly below.
+    commit: null,
     ...over,
   }
 }
@@ -191,5 +194,31 @@ describe('SettingsRestartPanel — confirmation', () => {
 
     // Stop the reconnect poll this started; nothing here is serving /api/status.
     c.unmount()
+  })
+})
+
+describe('SettingsRestartPanel — running commit', () => {
+  it('names the commit when running from a checkout', async () => {
+    preflight = available({ commit: '32601246' })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    // Which build is actually serving is not derivable from the version alone: a
+    // checkout keeps reporting the same version across many commits.
+    expect(c.text()).toContain('Commit 32601246')
+  })
+
+  it('marks a modified working tree', async () => {
+    preflight = available({ commit: '32601246-dirty' })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.text()).toContain('32601246-dirty')
+  })
+
+  it('says nothing about commits on a packaged install', async () => {
+    preflight = available()
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    // A dist install has no repository, so an empty or placeholder row would be noise.
+    expect(c.text()).not.toContain('Commit')
   })
 })

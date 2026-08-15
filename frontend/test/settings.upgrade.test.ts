@@ -52,6 +52,9 @@ function available(over: Record<string, unknown> = {}) {
     installKind: 'bundle',
     runningTasks: 0,
     activeSubagentRuns: 0,
+    // Default to a packaged install: that is the shape every pre-existing case here
+    // assumes, and the checkout case is asserted explicitly below.
+    commit: null,
     ...over,
   }
 }
@@ -247,5 +250,31 @@ describe('SettingsUpgradePanel — outcome of a previous upgrade', () => {
     // which reads as "the button did nothing".
     expect(c.text()).toContain('rolled back')
     expect(c.text()).toContain('logs/upgrade.log')
+  })
+})
+
+describe('SettingsUpgradePanel — running commit', () => {
+  it('names the commit when running from a checkout', async () => {
+    preflight = available({ commit: '32601246' })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    // A checkout reports the same version across many commits, so the version
+    // line alone cannot tell the operator which build is serving.
+    expect(c.text()).toContain('Commit 32601246')
+  })
+
+  it('marks a modified working tree', async () => {
+    preflight = available({ commit: '32601246-dirty' })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.text()).toContain('32601246-dirty')
+  })
+
+  it('says nothing about commits on a packaged install', async () => {
+    preflight = available()
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    // A dist install has no repository, so an empty or placeholder row would be noise.
+    expect(c.text()).not.toContain('Commit')
   })
 })
