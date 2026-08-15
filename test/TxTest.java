@@ -1,4 +1,6 @@
+import jakarta.persistence.EntityManager;
 import models.EventLog;
+import org.hibernate.Session;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
@@ -89,6 +91,62 @@ class TxTest extends UnitTest {
         // Rollback visibility of a persist-then-throw sequence is a JPA
         // property, not a Tx.run property — and it can't be observed inside
         // this test's own ambient transaction. Covered by integration tests.
+    }
+
+    // --- afterCommit: eviction ordering (JCLAW-1042) ---
+
+    @Test
+    void afterCommitRunsImmediatelyWhenThereIsNoTransactionToWaitFor() throws Exception {
+        // The arm that can go quietly wrong. Tx.run joins an ambient transaction rather than
+        // opening its own, so a caller cannot tell whether it has already committed; if this
+        // arm registered a synchronization instead of running, the eviction would be dropped
+        // outright rather than delayed — a permanently stale cache entry, not a briefly one.
+        // Driven from a plain thread, which has no JPA context regardless of what the harness
+        // holds, so the branch under test is the no-transaction one either way.
+        var insideTx = new AtomicBoolean(true);
+        var ran = new AtomicBoolean(false);
+        var probe = new Thread(() -> {
+            insideTx.set(JPA.isInsideTransaction());
+            Tx.afterCommit(() -> ran.set(true));
+        });
+        probe.start();
+        probe.join();
+        assertFalse(insideTx.get(), "precondition: a plain thread has no ambient JPA transaction");
+        assertTrue(ran.get(), "with no transaction to wait for, the action must run immediately");
+    }
+
+    @Test
+    void afterCommitDefersUntilTheTransactionCommits() {
+        // Fresh, thread-unbound EntityManager so the commit boundary is this test's to drive —
+        // the same device ConfigServiceTest uses for scheduleRollbackEviction, and for the same
+        // reason: driving the harness's own transaction from a test body would disturb it.
+        var ran = new AtomicBoolean(false);
+        EntityManager em = JPA.newEntityManager("default");
+        try {
+            em.getTransaction().begin();
+            Tx.afterCommit(em.unwrap(Session.class), () -> ran.set(true));
+            assertFalse(ran.get(), "the action must not run while the transaction is still open");
+            em.getTransaction().commit();
+        } finally {
+            if (em.isOpen()) em.close();
+        }
+        assertTrue(ran.get(), "the action must run once the transaction commits");
+    }
+
+    @Test
+    void afterCommitDoesNotRunOnRollback() {
+        // A rolled-back write invalidated nothing, so evicting for it would discard a live
+        // cache entry for no reason.
+        var ran = new AtomicBoolean(false);
+        EntityManager em = JPA.newEntityManager("default");
+        try {
+            em.getTransaction().begin();
+            Tx.afterCommit(em.unwrap(Session.class), () -> ran.set(true));
+            em.getTransaction().rollback();
+        } finally {
+            if (em.isOpen()) em.close();
+        }
+        assertFalse(ran.get(), "a rolled-back transaction must not fire the after-commit action");
     }
 
     @Test

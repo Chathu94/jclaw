@@ -504,4 +504,47 @@ class ConfigServiceTest extends UnitTest {
         assertEquals("phantom-value", ConfigService.get(key),
                 "a committed transaction must NOT evict the eagerly-cached value");
     }
+
+    // --- JCLAW-1042 / VULN-100: a delete must not leave a window for a racing reader to
+    // re-cache the row the commit is about to remove. ---
+
+    /** Insert {@code key} on its own connection so the row is committed and visible to every
+     *  other connection — the state a racing reader would actually observe. */
+    private void seedCommittedRow(String key, String value) {
+        EntityManager em = JPA.newEntityManager("default");
+        try {
+            em.getTransaction().begin();
+            var row = new models.Config();
+            row.key = key;
+            row.value = value;
+            em.persist(row);
+            em.getTransaction().commit();
+        } finally {
+            if (em.isOpen()) em.close();
+        }
+    }
+
+    @Test
+    void deleteDoesNotLetAReaderOnAnotherConnectionRecacheTheUncommittedRow() throws Exception {
+        // The delete below runs in this test's ambient transaction and is NOT committed, so a
+        // reader on its own connection still sees the row. Before the fix, delete() invalidated
+        // the cache inline: that reader missed, loaded the still-present row and re-cached it
+        // for the full 60s TTL, so a deleted password hash outlived its own deletion.
+        var key = "jclaw1042.vuln100.recache";
+        seedCommittedRow(key, "old-password-hash");
+        assertEquals("old-password-hash", ConfigService.get(key),
+                "precondition: the cache is warm from the committed row");
+
+        ConfigService.delete(key);
+
+        var seen = new java.util.concurrent.atomic.AtomicReference<String>("<unset>");
+        var reader = new Thread(() -> seen.set(ConfigService.get(key)));
+        reader.start();
+        reader.join(10_000);
+        assertFalse(reader.isAlive(),
+                "the reader must not block on the uncommitted delete — it reads its own connection");
+        assertNull(seen.get(),
+                "a reader on another connection must be served the absence, not the value the "
+                        + "delete is removing; serving the value is what let it survive the commit");
+    }
 }

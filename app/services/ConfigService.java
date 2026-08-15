@@ -324,7 +324,22 @@ public class ConfigService {
                 config.delete();
             }
         });
-        cache.invalidate(key);
+        // JCLAW-1042 (VULN-100): an invalidate here runs before the commit whenever Tx.run
+        // joined an ambient transaction, and a racing login then missed the cache, read the
+        // not-yet-deleted row and re-cached the password hash for the full 60s TTL — so the
+        // old password kept working. Caching the absence instead makes that read a HIT: it
+        // returns null without reaching the DB, so there is nothing stale to re-cache. Mirrors
+        // the eager put set() makes for JCLAW-832; a plain deferral would not, because it would
+        // leave delete() unable to honour deleteEvictsCacheSoSubsequentGetReturnsNull.
+        cache.put(key, Optional.empty());
+        if (JPA.isInsideTransaction()) {
+            // Same rollback contract as set(): an uncommitted delete must not leave the cache
+            // asserting an absence the database never accepted.
+            scheduleRollbackEviction(JPA.em().unwrap(Session.class), key);
+        }
+        // Closes the window between the delete and the put above, where a reader that had
+        // already loaded the row could still land its stale write after ours.
+        Tx.afterCommit(() -> cache.invalidate(key));
     }
 
     /**
