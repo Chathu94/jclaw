@@ -16,7 +16,19 @@
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
                 <SizeBasedTriggeringPolicy size="50MB"/>
             </Policies>
-            <DefaultRolloverStrategy max="30"/>
+            <!-- max= bounds the %i counter, and these patterns have no %i, so it
+                 never pruned anything: 70 consecutive daily archives had accumulated
+                 under "max=30" (JCLAW-1057). Retention needs an explicit Delete.
+                 The regex tolerates an optional -N index so adding %i later, which a
+                 second rollover within one day would require, does not silently stop
+                 the pruning. Delete runs on rollover, so an existing backlog clears at
+                 the next one rather than at startup. -->
+            <DefaultRolloverStrategy>
+                <Delete basePath="logs" maxDepth="1">
+                    <IfFileName regex="application-test-\d{4}-\d{2}-\d{2}(-\d+)?\.log\.gz"/>
+                    <IfLastModified age="P30D"/>
+                </Delete>
+            </DefaultRolloverStrategy>
         </RollingFile>
     </Appenders>
     <Loggers>
