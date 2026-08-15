@@ -105,6 +105,62 @@ public class MessageTool implements ToolRegistry.Tool {
             Set.of(ACTION_SEND, ACTION_DELETE, ACTION_PIN, ACTION_UNPIN,
                     ACTION_REACT, ACTION_REPLY, ACTION_EDIT, ACTION_POLL);
 
+    /**
+     * Actions that put content in front of the recipient, so a task's auto-delivery of the
+     * same run would duplicate it (JCLAW-1017). The other four — delete, pin, unpin, react —
+     * change an existing message or add an ornament and deliver nothing, so a fire that only
+     * used those still needs its output dispatched.
+     *
+     * <p>{@code edit} and {@code poll} are counted as delivering on purpose. Both can be how
+     * the agent chose to present the payload, and the two errors are not symmetric: calling a
+     * delivering action non-delivering costs a duplicate message, while the reverse loses the
+     * run's output entirely, which is the defect this exists to fix.
+     */
+    private static final Set<String> DELIVERING_ACTIONS =
+            Set.of(ACTION_SEND, ACTION_REPLY, ACTION_EDIT, ACTION_POLL);
+
+    /** Whether {@code action} pushes content a task's auto-delivery would duplicate. */
+    public static boolean isDeliveringAction(String action) {
+        return action != null && DELIVERING_ACTIONS.contains(action.trim().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * As {@link #isDeliveringAction}, reading the action out of a recorded call's raw
+     * {@code arguments} JSON. Kept here so the argument schema stays owned by the tool that
+     * defines it. Unreadable arguments are not delivering: suppressing a task's delivery
+     * requires positive evidence that the fire already sent something.
+     */
+    public static boolean isDeliveringCall(String argumentsJson) {
+        if (argumentsJson == null || argumentsJson.isBlank()) return false;
+        try {
+            var parsed = JsonParser.parseString(argumentsJson);
+            if (!parsed.isJsonObject()) return false;
+            var action = parsed.getAsJsonObject().get(PARAM_ACTION);
+            return action != null && action.isJsonPrimitive()
+                    && isDeliveringAction(action.getAsString());
+        } catch (RuntimeException _) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether {@code toolResult} is this tool's success payload rather than a failure.
+     *
+     * <p>Every success path returns a JSON object carrying {@code action}; every failure path
+     * returns a bare {@code "Error: ..."} string, which is not parseable JSON. Tested
+     * positively — for a caller deciding whether the agent already delivered, an unrecognised
+     * result must not read as success.
+     */
+    public static boolean isSuccessResult(String toolResult) {
+        if (toolResult == null || toolResult.isBlank()) return false;
+        try {
+            var parsed = JsonParser.parseString(toolResult);
+            return parsed.isJsonObject() && parsed.getAsJsonObject().has(PARAM_ACTION);
+        } catch (RuntimeException _) {
+            return false;
+        }
+    }
+
     // JCLAW-387 (C1): a native poll must carry 2-10 options. Telegram's own cap
     // is 12, but a 10-option ceiling keeps the agent-facing surface conservative.
     private static final int MIN_POLL_OPTIONS = 2;

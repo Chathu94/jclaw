@@ -3,17 +3,24 @@ package services;
 import agents.AgentRunner;
 import agents.RunCancelledException;
 import agents.TaskRunSink;
+import llm.LlmTypes;
 import models.Agent;
+import models.MessageRole;
 import models.Task;
 import models.TaskRun;
+import models.TaskRunMessage;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 import tools.MessageTool;
+import utils.GsonHolder;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Orchestrates one fire of a {@link Task}. Creates the {@link TaskRun},
@@ -475,11 +482,22 @@ public final class TaskExecutor {
         // since tool names are uniqued. Reminders skip the dedup — their
         // fire path doesn't invoke the message tool, so the scan can't
         // produce a meaningful signal. The signal is precomputed in
-        // finalizeRun's re-read Tx (see {@link Resolved}) so the LIKE count
+        // finalizeRun's re-read Tx (see {@link Resolved}) so the read
         // shares that transaction rather than opening its own.
+        //
+        // JCLAW-1017: the tool being *called* was never the right test, and both
+        // false positives lost the run's output entirely. A call that errored —
+        // task 4003 run 38705 hit `channel_not_found` twice — delivered nothing,
+        // and neither does one whose action was react/pin/unpin/delete. Suppression
+        // now requires positive evidence: a delivering action whose answering TOOL
+        // row carries a success payload. Everything else falls through to the
+        // dispatcher, because a duplicate message is a smaller failure than a
+        // silently discarded run. There is no third status to stamp for "the fire
+        // tried and failed": the dispatcher takes over and its own DELIVERED /
+        // NOT_DELIVERED outcome is what distinguishes that case from this one.
         if (deliveredViaMessageTool) {
             stampDelivery(closed.id, TaskRun.DeliveryStatus.NOT_REQUESTED, spec,
-                    "Skipped auto-delivery: fire called the 'message' tool directly");
+                    "Skipped auto-delivery: the fire already delivered it via the 'message' tool");
             return;
         }
         var content = closed.outputSummary;
@@ -514,20 +532,62 @@ public final class TaskExecutor {
      * caller's transaction (finalizeRun's re-read Tx) — no own {@code Tx.run}
      * wrapper — so the LIKE count shares that connection.
      */
-    private static boolean deliveredViaMessageTool(Long runId) {
-        var em = JPA.em();
-        // Match the JSON substring produced by GSON's compact encoding of
-        // the FunctionCall record: `"name":"message"`. Single-call rows
-        // dominate (MessageHydrator.parseToolCalls deserialises into a
-        // single ToolCall), so the LIKE wildcard count is bounded.
-        var count = (Long) em.createQuery(
-                "SELECT COUNT(m) FROM TaskRunMessage m "
-                        + "WHERE m.taskRun.id = :runId "
-                        + "AND m.toolCalls LIKE :pattern")
-                .setParameter("runId", runId)
-                .setParameter("pattern", "%\"name\":\"" + MessageTool.TOOL_NAME + "\"%")
-                .getSingleResult();
-        return count != null && count > 0;
+    /**
+     * Whether {@code runId}'s transcript shows the fire delivering its own payload: a
+     * {@code message} call with a delivering action whose answering TOOL row reports success.
+     *
+     * <p>Public as a pure-logic test seam — Play compiles {@code test/} into the default
+     * package, which cannot reach a package-private member, and driving this through a real
+     * agent loop to assert one boolean would test everything except the boolean.
+     */
+    public static boolean deliveredViaMessageTool(Long runId) {
+        // Element copy, not a cast: Play's find().fetch() hands back a raw List and
+        // (List<TaskRunMessage>) on it fails at runtime.
+        var raw = TaskRunMessage.find("taskRun.id = ?1 ORDER BY turnIndex", runId).fetch();
+        List<TaskRunMessage> rows = new ArrayList<>(raw.size());
+        for (var r : raw) rows.add((TaskRunMessage) r);
+
+        // Calls that would have delivered something. The tool name alone is not enough:
+        // react/pin/unpin/delete name the same tool and push nothing (JCLAW-1017).
+        Set<String> deliveringCallIds = new HashSet<>();
+        for (var m : rows) {
+            var call = rawToolCall(m.toolCalls);
+            if (call == null || call.id() == null || call.function() == null) continue;
+            if (MessageTool.TOOL_NAME.equals(call.function().name())
+                    && MessageTool.isDeliveringCall(call.function().arguments())) {
+                deliveringCallIds.add(call.id());
+            }
+        }
+        if (deliveringCallIds.isEmpty()) return false;
+
+        // The outcome is on the TOOL row answering the call, and the columns are not named
+        // the way that sentence suggests: tool_results carries the call id, content carries
+        // the result text. One success is enough — a fire that sent twice and failed once
+        // still delivered, so re-dispatching would duplicate it.
+        for (var m : rows) {
+            if (m.role == MessageRole.TOOL
+                    && m.toolResults != null
+                    && deliveringCallIds.contains(m.toolResults)
+                    && MessageTool.isSuccessResult(m.content)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Deserialise one recorded tool call, deliberately not through
+     * {@code MessageHydrator.parseToolCalls}: that sanitises the id to {@code [a-zA-Z0-9_-]}
+     * for re-shipping to a provider, which rewrites a real id like
+     * {@code functions.message:27} and would no longer match the TOOL row it has to join to.
+     */
+    private static LlmTypes.ToolCall rawToolCall(String toolCallsJson) {
+        if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
+        try {
+            return GsonHolder.GSON.fromJson(toolCallsJson, LlmTypes.ToolCall.class);
+        } catch (RuntimeException _) {
+            return null;
+        }
     }
 
     private static void stampDelivery(Long runId, TaskRun.DeliveryStatus status,
