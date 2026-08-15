@@ -152,6 +152,17 @@ class ApiMetricsControllerTest extends FunctionalTest {
         assertTrue(total > 0, "the test run's own log makes the directory non-empty");
     }
 
+    /**
+     * Auth only. The behaviour is covered by {@code LogFootprintTest} against a temp
+     * directory — exercising the real endpoint here would delete this working tree's
+     * actual log archives, on every run.
+     */
+    @Test
+    void purgeLogsRequiresAuth() {
+        var response = DELETE("/api/metrics/logs");
+        assertEquals(401, response.status.intValue());
+    }
+
     @Test
     void dbPoolRequiresAuth() {
         var response = GET("/api/metrics/db-pool");

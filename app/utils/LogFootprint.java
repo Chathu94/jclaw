@@ -32,6 +32,47 @@ public record LogFootprint(long liveBytes, int archiveCount, long archiveBytes,
      */
     public static final int RETENTION_DAYS = 30;
 
+    /**
+     * Delete every rolled-over archive, returning how many went and what they freed.
+     *
+     * <p>Archives only. The appender's current file is excluded because it is open —
+     * deleting it on Linux or macOS leaves log4j2 writing to an unlinked inode, so the
+     * instance keeps logging into a file nobody can read until the next rollover. Any
+     * other {@code .log} in the directory is left alone too: this reclaims the archives
+     * the panel counts, and deleting more than the panel reported would surprise.
+     *
+     * <p>A file that vanishes between the listing and the delete is not an error — the
+     * daily rollover prunes on its own schedule and may be doing so right now.
+     */
+    public static Purged purgeArchives() {
+        return purgeArchives(new File(Play.applicationPath, "logs"));
+    }
+
+    /**
+     * Directory-taking overload so a test can exercise this against a temp directory
+     * rather than the working tree's real archives. Public because Play compiles
+     * {@code test/} into the default package, which cannot see package-private members.
+     */
+    public static Purged purgeArchives(File dir) {
+        var files = dir.listFiles();
+        if (files == null) return new Purged(0, 0);
+
+        int deleted = 0;
+        long freed = 0;
+        for (var f : files) {
+            if (!f.isFile() || !f.getName().toLowerCase(Locale.ROOT).endsWith(".gz")) continue;
+            var length = f.length();
+            if (f.delete()) {
+                deleted++;
+                freed += length;
+            }
+        }
+        return new Purged(deleted, freed);
+    }
+
+    /** @param deleted archives removed @param freedBytes disk they occupied */
+    public record Purged(int deleted, long freedBytes) {}
+
     /** Empty rather than absent when {@code logs/} does not exist: nothing logged is a real zero. */
     public static LogFootprint snapshot() {
         var dir = new File(Play.applicationPath, "logs");

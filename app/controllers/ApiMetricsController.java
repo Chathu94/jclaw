@@ -66,7 +66,7 @@ public class ApiMetricsController extends Controller {
 
     // NB: `only` is an allowlist, so an action omitted here is served UNAUTHENTICATED.
     @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows",
-            "cost", "compression", "resetCompression", "dbPool", "jvm", "logs"})
+            "cost", "compression", "resetCompression", "dbPool", "jvm", "logs", "purgeLogs"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -267,6 +267,20 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "Disk used by the log directory (live file, archives, total)")
     public static void logs() {
         renderJSON(GSON.toJson(LogFootprint.snapshot()));
+    }
+
+    /**
+     * DELETE /api/metrics/logs — remove the rolled-over archives.
+     *
+     * <p>Retention already deletes them after 30 days; this is for reclaiming the disk
+     * now, which matters on an instance that accumulated a backlog before the retention
+     * fix. Only archives go — see {@link LogFootprint#purgeArchives()} for why the live
+     * file is excluded rather than merely skipped by name.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogFootprint.Purged.class)))
+    @Operation(summary = "Delete rolled-over log archives, keeping the current log file")
+    public static void purgeLogs() {
+        renderJSON(GSON.toJson(LogFootprint.purgeArchives()));
     }
 
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */

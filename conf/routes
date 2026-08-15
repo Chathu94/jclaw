@@ -309,6 +309,7 @@ GET     /api/metrics/cost                       ApiMetricsController.cost
 GET     /api/metrics/db-pool                    ApiMetricsController.dbPool
 GET     /api/metrics/jvm                        ApiMetricsController.jvm
 GET     /api/metrics/logs                       ApiMetricsController.logs
+DELETE  /api/metrics/logs                       ApiMetricsController.purgeLogs
 GET     /api/metrics/compression                ApiMetricsController.compression
 DELETE  /api/metrics/compression                ApiMetricsController.resetCompression
 POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
