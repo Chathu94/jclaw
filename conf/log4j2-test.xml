@@ -10,20 +10,24 @@
             <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
         </Console>
         <RollingFile name="File" fileName="logs/application-test.log"
-                     filePattern="logs/application-test-%d{yyyy-MM-dd}.log.gz">
+                     filePattern="logs/application-test-%d{yyyy-MM-dd}-%i.log.gz">
             <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
             <Policies>
                 <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
                 <SizeBasedTriggeringPolicy size="50MB"/>
             </Policies>
-            <!-- max= bounds the %i counter, and these patterns have no %i, so it
-                 never pruned anything: 70 consecutive daily archives had accumulated
-                 under "max=30" (JCLAW-1057). Retention needs an explicit Delete.
-                 The regex tolerates an optional -N index so adding %i later, which a
-                 second rollover within one day would require, does not silently stop
-                 the pruning. Delete runs on rollover, so an existing backlog clears at
-                 the next one rather than at startup. -->
-            <DefaultRolloverStrategy>
+            <!-- Retention is the Delete action, never max=. max bounds the %i
+                 counter, so on the date-only pattern this used to carry it had nothing
+                 to count and pruned nothing: 70 daily archives had accumulated under
+                 "max=30" (JCLAW-1057).
+                 %i is required by the size policy above — two rollovers in one day would
+                 otherwise be handed the same name and the second would overwrite the
+                 first. max caps that counter; the default of 7 would start discarding a
+                 busy day's archives at 50MB each.
+                 The -N in the regex is optional so archives written before %i was added
+                 are still pruned. Delete runs on rollover, so a backlog clears at the
+                 next one rather than at startup. -->
+            <DefaultRolloverStrategy max="100">
                 <Delete basePath="logs" maxDepth="1">
                     <IfFileName regex="application-test-\d{4}-\d{2}-\d{2}(-\d+)?\.log\.gz"/>
                     <IfLastModified age="P30D"/>
