@@ -24,6 +24,7 @@ import utils.DbPoolStats;
 import utils.HttpFactories;
 import utils.JvmStats;
 import utils.LatencyStats;
+import utils.LogFootprint;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -64,10 +65,8 @@ public class ApiMetricsController extends Controller {
     private static final String STATUS_RESET = "reset";
 
     // NB: `only` is an allowlist, so an action omitted here is served UNAUTHENTICATED.
-    // An action missing from this list is served unauthenticated — the filter opts in
-    // by name rather than guarding the class, so adding an endpoint means adding it here.
     @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows",
-            "cost", "compression", "resetCompression", "dbPool", "jvm"})
+            "cost", "compression", "resetCompression", "dbPool", "jvm", "logs"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -256,6 +255,18 @@ public class ApiMetricsController extends Controller {
     @Operation(summary = "JVM runtime state (heap, non-heap, RSS, GC, threads, uptime, CPU)")
     public static void jvm() {
         renderJSON(GSON.toJson(JvmStats.snapshot()));
+    }
+
+    /**
+     * JCLAW-1057: disk taken by {@code logs/}. The live file is capped by the rollover
+     * and was never the problem; the archives are, and nothing surfaced them — 97 MB
+     * across 70 unpruned files had accumulated before the retention fix, invisible from
+     * the UI.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogFootprint.class)))
+    @Operation(summary = "Disk used by the log directory (live file, archives, total)")
+    public static void logs() {
+        renderJSON(GSON.toJson(LogFootprint.snapshot()));
     }
 
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */

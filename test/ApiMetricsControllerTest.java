@@ -118,6 +118,41 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void logsRequiresAuth() {
+        var response = GET("/api/metrics/logs");
+        assertEquals(401, response.status.intValue());
+    }
+
+    /**
+     * JCLAW-1057. The archives are the figure that matters — 70 unpruned files and 97 MB
+     * had accumulated invisibly — so the total must account for the whole directory
+     * rather than only the categories the panel names.
+     */
+    @Test
+    void logsReportTheWholeDirectoryNotJustTheNamedCategories() {
+        login();
+        var response = GET("/api/metrics/logs");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+
+        var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        for (var field : new String[]{"liveBytes", "archiveCount", "archiveBytes",
+                "totalBytes", "retentionDays"}) {
+            assertTrue(json.has(field), "logs must report '" + field + "'; got: " + json);
+        }
+        assertEquals(30, json.get("retentionDays").getAsInt(),
+                "the panel's retention claim comes from here");
+
+        var archives = json.get("archiveBytes").getAsLong();
+        var total = json.get("totalBytes").getAsLong();
+        assertTrue(total >= archives,
+                "the total must cover the archives it contains; got: " + json);
+        // The suite itself writes application-test.log, so the directory is never empty
+        // when this runs — a zero total would mean the scan found nothing at all.
+        assertTrue(total > 0, "the test run's own log makes the directory non-empty");
+    }
+
+    @Test
     void dbPoolRequiresAuth() {
         var response = GET("/api/metrics/db-pool");
         assertEquals(401, response.status.intValue());

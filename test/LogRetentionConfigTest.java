@@ -1,10 +1,11 @@
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Element;
-import org.w3c.dom.NodeList;
 import play.Play;
 import play.test.UnitTest;
+import utils.LogFootprint;
 
 import javax.xml.parsers.DocumentBuilderFactory;
+
 import java.io.File;
 import java.util.regex.Pattern;
 
@@ -72,6 +73,20 @@ class LogRetentionConfigTest extends UnitTest {
         assertFalse(regex.matcher(foreignArchive).matches(),
                 configName + " must not prune another appender's archives; " + regex
                         + " matched " + foreignArchive);
+    }
+
+    /**
+     * The Maintenance panel tells the operator how many days of logs are kept, reading
+     * {@link LogFootprint#RETENTION_DAYS}. If the appender's window is edited without it,
+     * the panel promises a retention the configuration does not implement.
+     */
+    @Test
+    void thePanelsRetentionClaimMatchesTheAppenders() throws Exception {
+        var delete = deleteAction(rollingFile("log4j2-prod.xml"), "log4j2-prod.xml");
+        var age = ((Element) delete.getElementsByTagName("IfLastModified").item(0))
+                .getAttribute("age");
+        assertEquals("P" + LogFootprint.RETENTION_DAYS + "D", age,
+                "LogFootprint.RETENTION_DAYS and the appender's IfLastModified must agree");
     }
 
     @Test

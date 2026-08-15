@@ -308,6 +308,7 @@ DELETE  /api/metrics/latency/rows               ApiMetricsController.clearLatenc
 GET     /api/metrics/cost                       ApiMetricsController.cost
 GET     /api/metrics/db-pool                    ApiMetricsController.dbPool
 GET     /api/metrics/jvm                        ApiMetricsController.jvm
+GET     /api/metrics/logs                       ApiMetricsController.logs
 GET     /api/metrics/compression                ApiMetricsController.compression
 DELETE  /api/metrics/compression                ApiMetricsController.resetCompression
 POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
