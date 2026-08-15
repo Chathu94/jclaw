@@ -51,7 +51,10 @@ public final class VideoDelivery {
             if (channel == null) return false;
 
             // The send contract takes a File, and the bytes are only in memory here.
-            tmp = File.createTempFile("jclaw-video-", ".mp4");
+            // Files.createTempFile, not File.createTempFile: the NIO form creates with
+            // owner-only permissions on POSIX, where the legacy one leaves a readable
+            // file in a world-writable directory for the length of the upload.
+            tmp = Files.createTempFile("jclaw-video-", ".mp4").toFile();
             Files.write(tmp.toPath(), bytes);
 
             // sendDocument rather than a video-specific call: it is the cross-channel
@@ -69,7 +72,16 @@ public final class VideoDelivery {
                     conversation.id);
             return false;
         } finally {
-            if (tmp != null && !tmp.delete()) tmp.deleteOnExit();
+            if (tmp != null) {
+                try {
+                    Files.deleteIfExists(tmp.toPath());
+                } catch (IOException e) {
+                    // Say why rather than dropping a silent false; the JVM still clears it.
+                    Logger.warn("videogen: could not remove the temp clip %s (%s)",
+                            tmp, e.getMessage());
+                    tmp.deleteOnExit();
+                }
+            }
         }
     }
 

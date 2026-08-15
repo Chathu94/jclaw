@@ -134,7 +134,7 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
             try {
                 savedPath = WorkspaceFiles.acquireWorkspacePath(agent.name, saveTo.trim())
                         .toAbsolutePath().toString();
-            } catch (SecurityException e) {
+            } catch (SecurityException _) {
                 return ToolRegistry.ToolResult.text(
                         "Error: '" + saveTo + "' resolves outside the agent workspace.");
             }

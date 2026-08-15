@@ -1,8 +1,11 @@
 package utils;
 
+import play.Logger;
 import play.Play;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Locale;
 
 /**
@@ -62,9 +65,16 @@ public record LogFootprint(long liveBytes, int archiveCount, long archiveBytes,
         for (var f : files) {
             if (!f.isFile() || !f.getName().toLowerCase(Locale.ROOT).endsWith(".gz")) continue;
             var length = f.length();
-            if (f.delete()) {
+            try {
+                Files.delete(f.toPath());
                 deleted++;
                 freed += length;
+            } catch (IOException e) {
+                // A file that vanished under the daily rollover is not an error; anything
+                // else is worth naming rather than counting as "not deleted".
+                if (f.exists()) {
+                    Logger.warn("logs: could not delete %s (%s)", f.getName(), e.getMessage());
+                }
             }
         }
         return new Purged(deleted, freed);
