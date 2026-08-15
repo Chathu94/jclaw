@@ -22,6 +22,7 @@ import tools.LoadTestSleepTool;
 import utils.ApiResponses;
 import utils.DbPoolStats;
 import utils.HttpFactories;
+import utils.JvmStats;
 import utils.LatencyStats;
 
 import java.time.Instant;
@@ -63,8 +64,10 @@ public class ApiMetricsController extends Controller {
     private static final String STATUS_RESET = "reset";
 
     // NB: `only` is an allowlist, so an action omitted here is served UNAUTHENTICATED.
+    // An action missing from this list is served unauthenticated — the filter opts in
+    // by name rather than guarding the class, so adding an endpoint means adding it here.
     @Before(only = {"latency", "resetLatency", "latencyRows", "clearLatencyRows",
-            "cost", "compression", "resetCompression", "dbPool"})
+            "cost", "compression", "resetCompression", "dbPool", "jvm"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -239,6 +242,20 @@ public class ApiMetricsController extends Controller {
             throw ApiResponses.unreachable();
         }
         renderJSON(GSON.toJson(stats.get()));
+    }
+
+    /**
+     * JCLAW-1057: JVM runtime state for the Maintenance panel. Nothing exposed heap,
+     * non-heap or process RSS before this, so "how much memory is this instance actually
+     * using?" could not be answered from a running install without a shell.
+     *
+     * <p>Always renders: unlike the pool, every figure here degrades to null or -1
+     * individually rather than the snapshot as a whole becoming unavailable.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JvmStats.class)))
+    @Operation(summary = "JVM runtime state (heap, non-heap, RSS, GC, threads, uptime, CPU)")
+    public static void jvm() {
+        renderJSON(GSON.toJson(JvmStats.snapshot()));
     }
 
     /** DELETE /api/metrics/compression — clear all recorded compression metrics. */

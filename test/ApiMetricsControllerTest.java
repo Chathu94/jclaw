@@ -72,6 +72,52 @@ class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void jvmRequiresAuth() {
+        var response = GET("/api/metrics/jvm");
+        assertEquals(401, response.status.intValue());
+    }
+
+    /**
+     * JCLAW-1057. Asserts the route resolves and the three memory figures are separate
+     * readings rather than one value repeated — the specific way this endpoint could
+     * look healthy while telling the Maintenance panel the same number three times.
+     */
+    @Test
+    void jvmReportsMemoryAsThreeDistinctFigures() {
+        login();
+        var response = GET("/api/metrics/jvm");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+
+        var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        for (var field : new String[]{"heapUsed", "heapCommitted", "nonHeapUsed",
+                "gcCount", "platformThreads", "uptimeMs", "availableProcessors"}) {
+            assertTrue(json.has(field), "jvm must report '" + field + "'; got: " + json);
+        }
+        var heapUsed = json.get("heapUsed").getAsLong();
+        var nonHeapUsed = json.get("nonHeapUsed").getAsLong();
+        assertTrue(heapUsed > 0, "a serving JVM has a non-empty heap");
+        assertTrue(nonHeapUsed > 0, "classes are loaded, so non-heap is in use");
+        assertNotEquals(heapUsed, nonHeapUsed, "non-heap must be its own reading");
+        assertTrue(json.get("heapCommitted").getAsLong() >= heapUsed,
+                "committed must cover used; got: " + json);
+    }
+
+    /**
+     * RSS has no portable API. Absent is a legitimate answer and must arrive as null so
+     * the panel can render "unavailable" — a zero would read as a process using no memory.
+     */
+    @Test
+    void jvmLeavesUnreadableProcessMemoryNullRatherThanZero() {
+        login();
+        var json = JsonParser.parseString(getContent(GET("/api/metrics/jvm"))).getAsJsonObject();
+        if (json.has("rssBytes") && !json.get("rssBytes").isJsonNull()) {
+            assertTrue(json.get("rssBytes").getAsLong() > 0,
+                    "a reported resident set is never zero bytes; got: " + json);
+        }
+    }
+
+    @Test
     void dbPoolRequiresAuth() {
         var response = GET("/api/metrics/db-pool");
         assertEquals(401, response.status.intValue());
