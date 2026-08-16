@@ -3,6 +3,10 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.JClawApiTool;
 
+import java.util.List;
+import java.util.SortedSet;
+import java.util.TreeSet;
+
 /**
  * Unit coverage for {@link JClawApiTool}'s argument parsing, deny-floor, and the
  * blacklist discover/call gate.
@@ -324,4 +328,198 @@ class JClawApiToolTest extends UnitTest {
         assertFalse(tool.dangerous("[1,2,3]"), "non-object JSON -> not dangerous");
         assertFalse(tool.dangerous("{\"path\":\"/api/agents\"}"), "method-less call is a no-op -> not dangerous");
     }
+
+    /**
+     * The exact set of endpoints {@code jclaw_api} advertises and will invoke.
+     *
+     * <p>JCLAW-1036: the tool is deliberately <em>default-allow</em> — a new {@code /api/}
+     * route is reachable with no annotation, which is what makes it worth giving an operator's
+     * agent at all. Inverting that was considered and rejected: an allow-list would make every
+     * endpoint added from here invisible until someone remembered to mark it, and the tool would
+     * decay silently as the API grew.
+     *
+     * <p>What default-allow lacks is any moment where somebody has to decide. Four
+     * privilege-bearing routes were found by hand after the fact (JCLAW-1023 gated three, the
+     * workspace write was the fourth), each reachable simply because nothing asked. This pin is
+     * that moment: adding a route fails this test until its author either lists it here or marks
+     * it {@link controllers.ChatHidden}. The runtime default stays permissive; the decision moves
+     * to review time.
+     *
+     * <p>So a diff to this list is not a chore — it is the review. Adding a line says "an agent
+     * may drive this"; if that is wrong, the fix is {@code @ChatHidden} on the action, or the
+     * deny-floor in {@link JClawApiTool} for a whole subsystem.
+     */
+    @Test
+    void theCallableApiSurfaceIsExactlyTheseRoutes() {
+        var expected = new TreeSet<>(List.of("""
+            DELETE /api/agents/{id}
+            DELETE /api/agents/{id}/skills/{name}/delete
+            DELETE /api/apps/{slug}
+            DELETE /api/attachments/{uuid}
+            DELETE /api/channels/whatsapp/bindings/{id}
+            DELETE /api/conversations/{id}/model-override
+            DELETE /api/logging/levels/{logger}
+            DELETE /api/mcp-servers/{id}
+            DELETE /api/metrics/compression
+            DELETE /api/metrics/latency
+            DELETE /api/metrics/latency/rows
+            DELETE /api/metrics/logs
+            DELETE /api/notifications/{id}
+            DELETE /api/prompts/{id}
+            DELETE /api/skills/{name}
+            DELETE /api/subagent-runs
+            DELETE /api/subagent-runs/{id}
+            DELETE /api/subagents/acp-harnesses
+            DELETE /api/tasks/{id}
+            DELETE /api/tts/reference-voice
+            GET /api/agents
+            GET /api/agents/{agentId}/core-migration
+            GET /api/agents/{id}
+            GET /api/agents/{id}/files/{<.+>filePath}
+            GET /api/agents/{id}/prompt-breakdown
+            GET /api/agents/{id}/prompt-text
+            GET /api/agents/{id}/shell/effective-allowlist
+            GET /api/agents/{id}/skills
+            GET /api/agents/{id}/skills/{name}/files
+            GET /api/agents/{id}/skills/{name}/files/{<.+>filePath}
+            GET /api/agents/{id}/tools
+            GET /api/agents/{id}/workspace/{filename}
+            GET /api/apps
+            GET /api/apps/{slug}/files/{uuid}
+            GET /api/attachments/{uuid}
+            GET /api/channels
+            GET /api/channels/active
+            GET /api/channels/whatsapp/bindings
+            GET /api/channels/whatsapp/bindings/{id}/qr
+            GET /api/config
+            GET /api/config/{key}
+            GET /api/conversations
+            GET /api/conversations/channels
+            GET /api/conversations/{id}
+            GET /api/conversations/{id}/messages
+            GET /api/conversations/{id}/queue
+            GET /api/imagegen/capability
+            GET /api/imagegen/local/state
+            GET /api/imagegen/models
+            GET /api/imagegen/progress
+            GET /api/logging/levels
+            GET /api/mcp-servers
+            GET /api/mcp-servers/{id}
+            GET /api/metrics/compression
+            GET /api/metrics/cost
+            GET /api/metrics/db-pool
+            GET /api/metrics/jvm
+            GET /api/metrics/latency
+            GET /api/metrics/latency/rows
+            GET /api/metrics/logs
+            GET /api/notifications
+            GET /api/ocr/status
+            GET /api/onboarding/tour-status
+            GET /api/printers
+            GET /api/printers/default
+            GET /api/printers/default/status
+            GET /api/printers/options
+            GET /api/prompts
+            GET /api/prompts/categories
+            GET /api/prompts/export
+            GET /api/providers
+            GET /api/providers/{name}/embedding-models
+            GET /api/providers/{name}/models
+            GET /api/providers/{name}/reachable
+            GET /api/providers/{name}/video-models
+            GET /api/skills
+            GET /api/skills/catalog/search
+            GET /api/skills/catalogs
+            GET /api/skills/{name}
+            GET /api/skills/{name}/files
+            GET /api/skills/{name}/files/{<.+>filePath}
+            GET /api/status
+            GET /api/subagent-runs
+            GET /api/subagent-runs/{id}/steps
+            GET /api/subagents/acp-harnesses
+            GET /api/system/restart
+            GET /api/system/upgrade
+            GET /api/system/upgrade/status
+            GET /api/task-runs/recent
+            GET /api/task-runs/search
+            GET /api/task-runs/{id}/messages
+            GET /api/tasks
+            GET /api/tasks/stats
+            GET /api/tasks/{id}/delivery-advisory
+            GET /api/tasks/{id}/runs
+            GET /api/timezones
+            GET /api/tools
+            GET /api/tools/meta
+            GET /api/transcription/diarization/models
+            GET /api/transcription/state
+            GET /api/tts/state
+            GET /api/videogen/capability
+            GET /api/videogen/jobs
+            GET /api/videogen/jobs/recent
+            GET /api/videogen/models
+            GET /api/videogen/state
+            GET /api/workspace/stats
+            PATCH /api/tasks/{id}
+            POST /api/agents
+            POST /api/agents/{agentId}/core-migration
+            POST /api/apps/{slug}/invoke
+            POST /api/channels/whatsapp/bindings
+            POST /api/evals/capture
+            POST /api/evals/memory-ingest
+            POST /api/logging/levels
+            POST /api/mcp-servers
+            POST /api/mcp-servers/{id}/test
+            POST /api/notifications/{id}/ack
+            POST /api/onboarding/tour-progress
+            POST /api/prompts
+            POST /api/prompts/generate
+            POST /api/prompts/import
+            POST /api/providers/refresh-prices
+            POST /api/providers/{name}/discover-models
+            POST /api/providers/{name}/embedding-probe
+            POST /api/providers/{name}/models
+            POST /api/skills/catalog/import
+            POST /api/skills/catalog/refresh
+            POST /api/skills/promote
+            POST /api/subagent-runs/{id}/kill
+            POST /api/subagents/acp-harnesses
+            POST /api/task-runs/reset
+            POST /api/task-runs/{runId}/cancel
+            POST /api/tasks
+            POST /api/tasks/{id}/cancel
+            POST /api/tasks/{id}/pause
+            POST /api/tasks/{id}/reenable
+            POST /api/tasks/{id}/resume
+            POST /api/tasks/{id}/retry
+            POST /api/tasks/{id}/run
+            POST /api/tts/reference-voice
+            PUT /api/agents/{id}
+            PUT /api/agents/{id}/workspace/{filename}
+            PUT /api/channels/whatsapp/bindings/{id}
+            PUT /api/conversations/{id}/model-override
+            PUT /api/mcp-servers/{id}
+            PUT /api/printers/default
+            PUT /api/prompts/{id}
+            PUT /api/skills/{name}/rename
+            WS /api/voice""".split("\n")));
+
+        assertEquals(expected, callableSurface(),
+                "The jclaw_api callable surface changed. Anything listed here can be invoked by "
+                        + "an agent through the tool. If the new route writes privilege — config, "
+                        + "grants, workspace files, instance lifecycle — it belongs behind "
+                        + "@ChatHidden instead of on this list.");
+    }
+
+    /** What {@code discover} actually advertises, which is what an agent can act on. */
+    private static SortedSet<String> callableSurface() {
+        var found = new TreeSet<String>();
+        for (var line : tool.execute("{\"action\":\"discover\"}", null).split("\n")) {
+            var trimmed = line.strip();
+            if (!trimmed.startsWith("- ")) continue;
+            var cols = trimmed.substring(2).strip().split("\\s+");
+            if (cols.length >= 2) found.add(cols[0] + " " + cols[1]);
+        }
+        return found;
+    }
+
 }
