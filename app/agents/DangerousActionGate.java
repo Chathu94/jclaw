@@ -135,8 +135,48 @@ public final class DangerousActionGate {
      *  which the unbound (no fire at all) state must not be confused with. */
     private record FireScope(String channel) {}
 
+    /**
+     * True while this thread is serving a turn the channel's own access policy proved came
+     * from the binding owner (JCLAW-1061). Inheritable for the same reason as {@link #FIRE},
+     * and that inheritance is also what keeps it a floor: only an inbound dispatch ever sets
+     * it, so a subagent forked from a guest's turn inherits {@code false} and has no way to
+     * reach {@code true}.
+     */
+    private static final InheritableThreadLocal<Boolean> OWNER_INITIATED = new InheritableThreadLocal<>();
+
     /** The gate's verdict for a single dispatch. */
     public enum Decision { PROCEED, ABORT }
+
+    /**
+     * Run {@code body} as a turn whose sender is (or is not) the binding owner.
+     *
+     * <p>Telegram and Slack already establish this at the door —
+     * {@code TelegramAccessPolicy} serves a DM only to the owner, {@code SlackAccessPolicy}
+     * only to the owner once one is configured — and then drop it, leaving the gate to
+     * re-ask the operator to confirm an identity that was already proven. Binding it here
+     * carries that answer to the gate rather than deriving a new one.
+     *
+     * <p>Unbound means <em>not</em> the owner: a channel that cannot identify its sender
+     * (WhatsApp has no owner concept yet) keeps prompting, which is the safe polarity.
+     */
+    public static <T> T withOwnerInitiated(boolean ownerInitiated, Supplier<T> body) {
+        var previous = OWNER_INITIATED.get();
+        OWNER_INITIATED.set(ownerInitiated);
+        try {
+            return body.get();
+        } finally {
+            if (previous == null) {
+                OWNER_INITIATED.remove();
+            } else {
+                OWNER_INITIATED.set(previous);
+            }
+        }
+    }
+
+    /** Whether this turn was proven to come from the binding owner. */
+    private static boolean ownerInitiated() {
+        return Boolean.TRUE.equals(OWNER_INITIATED.get());
+    }
 
     /**
      * Run {@code body} inside the dynamic extent of a task fire whose Task recorded
@@ -231,6 +271,17 @@ public final class DangerousActionGate {
         // every other channel (web, or no origin at all) has no surface and must NOT
         // silently route to a bound chat — it falls through to the off-channel policy.
         var channelType = effectiveOrigin(conversationId);
+
+        // JCLAW-1061: the prompt exists to ask "is this really you?". When the channel's own
+        // access policy already answered that at the door, asking again is noise — so an
+        // owner-initiated turn skips the prompt and resolves as the operator surface, which
+        // means an operator who set the policy to ask/deny still gets that. A guest on the
+        // very same binding carries false and takes the branch below.
+        if (ownerInitiated()) {
+            return offChannelDecision(agent, toolName, argsJson, channelType,
+                    ChannelOriginTrust.Trust.OPERATOR);
+        }
+
         if (CHANNEL_NAME.equals(channelType)) {
             var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
             if (binding != null && binding.enabled) {
@@ -252,7 +303,8 @@ public final class DangerousActionGate {
             }
         }
 
-        return offChannelDecision(agent, toolName, argsJson, channelType);
+        return offChannelDecision(agent, toolName, argsJson, channelType,
+                ChannelOriginTrust.classify(channelType));
     }
 
     /**
@@ -274,14 +326,14 @@ public final class DangerousActionGate {
      * {@code ask} routes a confirmation to the agent's bound Telegram DM (fail-closed
      * if there is none).
      */
-    private static Decision offChannelDecision(Agent agent, String toolName, String argsJson, String channelType) {
+    private static Decision offChannelDecision(Agent agent, String toolName, String argsJson,
+                                              String channelType, ChannelOriginTrust.Trust trust) {
         var chan = channelType == null ? "none" : channelType;
         var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
 
         // Only a trusted operator origin gets the permissive "allow" default. An external
         // peer — and an origin nobody recorded, which is missing provenance rather than
         // operator authority — may still reach the DM via "ask"; else it is fail-closed.
-        var trust = ChannelOriginTrust.classify(channelType);
         if (trust != ChannelOriginTrust.Trust.OPERATOR) {
             if ("ask".equalsIgnoreCase(policy)) {
                 return askViaTelegram(agent, toolName, argsJson, chan);

@@ -1,6 +1,7 @@
 package controllers;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import channels.InboundCallback;
 import channels.InboundMessage;
 import channels.TelegramAccessPolicy;
@@ -374,14 +375,21 @@ public class WebhookTelegramController extends Controller {
             // non-topic / unmapped messages. peerId + sink are unchanged — only
             // which agent runs the turn changes.
             final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, message.messageThreadId(), sendAgent);
+            // JCLAW-1061: same comparison the access policy made, recomputed on the thread that
+            // actually runs the turn. All three coalescing lanes key per sender, so `message`
+            // is one person's and its fromId is the value that was checked at the door.
+            final boolean ownerInitiated = ctx.telegramUserId().equals(message.fromId());
             // JCLAW-387 B4 follow-up: pass the Telegram chat.type so the new
             // conversation is stamped with it (plain DM vs group history caps).
-            AgentRunner.processInboundForAgentStreaming(
-                    runAgent, CHANNEL_TELEGRAM, peerId, attributedText,
-                    convId -> new TelegramStreamingSink(
-                            sendToken, sendChatId, sendAgent, convId, sendChatType,
-                            message.messageId(), message.messageThreadId()),
-                    inputs, sendChatType);
+            DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+                AgentRunner.processInboundForAgentStreaming(
+                        runAgent, CHANNEL_TELEGRAM, peerId, attributedText,
+                        convId -> new TelegramStreamingSink(
+                                sendToken, sendChatId, sendAgent, convId, sendChatType,
+                                message.messageId(), message.messageThreadId()),
+                        inputs, sendChatType);
+                return null;
+            });
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, ctx.agent() != null ? ctx.agent().name : null, CHANNEL_TELEGRAM,
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));

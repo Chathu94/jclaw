@@ -1,6 +1,7 @@
 package channels;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import com.google.gson.JsonObject;
 import models.SlackBinding;
 import services.AttachmentService;
@@ -73,7 +74,17 @@ public final class SlackInbound {
         // Process async. The bot token (immutable) crosses the thread boundary; the
         // lazy agent association is re-resolved inside a fresh tx on that thread.
         var botToken = binding.botToken;
-        Thread.ofVirtual().name("slack-inbound").start(() -> processMessage(bindingId, botToken, message));
+        // JCLAW-1061: the access policy above already established whether this is the owner —
+        // with an owner configured it serves nobody else. Carry that answer to the dangerous-
+        // action gate instead of letting it re-ask the operator to confirm their own identity.
+        // Bound around the whole virtual thread, which is where the turn actually runs.
+        final boolean ownerInitiated = binding.ownerUserId != null
+                && binding.ownerUserId.equals(message.userId());
+        Thread.ofVirtual().name("slack-inbound").start(() ->
+                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+                    processMessage(bindingId, botToken, message);
+                    return null;
+                }));
     }
 
     /**

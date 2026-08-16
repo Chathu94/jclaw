@@ -593,4 +593,72 @@ class DangerousActionGateTest extends UnitTest {
             @Override public String execute(String argsJson, Agent agent) { return "ran " + toolName; }
         };
     }
+
+    // ── JCLAW-1061: the prompt asks "is this really you?"; skip it when the channel
+    //    already answered. ──
+
+    @Test
+    void ownerInitiatedTurnSkipsThePromptEntirely() {
+        // TelegramAccessPolicy serves a DM only to the binding owner, so by the time a turn
+        // reaches the gate that question is settled. Asking again is noise, not defence.
+        var agent = boundAgent("gate-owner-initiated");
+        var convId = telegramConvId(agent);
+
+        var decision = DangerousActionGate.withOwnerInitiated(true,
+                () -> DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL,
+                        "{\"command\":\"echo mine\"}"));
+
+        assertEquals(Decision.PROCEED, decision);
+        assertEquals(0, server.countRequests("sendMessage"),
+                "the operator's own request must not raise a prompt at them");
+    }
+
+    @Test
+    void aGuestOnTheSameBindingStillPrompts() throws Exception {
+        // The other half, and the reason this is not a blanket switch: a mention-gated guest
+        // in a Telegram group reaches the same agent and binding, and must still be gated.
+        var agent = boundAgent("gate-guest-initiated");
+        var convId = telegramConvId(agent);
+
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"echo theirs\"}");
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.APPROVE_ONCE, TG_USER);
+
+        assertEquals(Decision.PROCEED, verdict.get(2, TimeUnit.SECONDS));
+        assertTrue(server.countRequests("sendMessage") >= 1,
+                "a non-owner turn must still raise the prompt");
+    }
+
+    @Test
+    void unboundMeansNotTheOwner() throws Exception {
+        // Fail-closed polarity: a channel that cannot identify its sender binds nothing, so it
+        // keeps prompting. This is why WhatsApp needs no owner check for this to be safe.
+        var agent = boundAgent("gate-owner-unbound");
+        var convId = telegramConvId(agent);
+
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"echo unknown\"}");
+        assertNotNull(awaitPromptAndExtractId(),
+                "with nothing bound the turn is not the owner's and must prompt");
+        verdict.cancel(true);
+    }
+
+    @Test
+    void ownerInitiatedStillHonoursAnExplicitDenyPolicy() {
+        // Owner-initiated resolves AS the operator surface rather than bypassing the gate, so
+        // an operator who set the policy to deny still gets deny — the setting keeps meaning
+        // what the Tool Approvals panel says it means.
+        var agent = boundAgent("gate-owner-deny");
+        var convId = telegramConvId(agent);
+        ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "deny");
+        try {
+            var decision = DangerousActionGate.withOwnerInitiated(true,
+                    () -> DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL,
+                            "{\"command\":\"echo mine\"}"));
+            assertEquals(Decision.ABORT, decision);
+        }
+        finally {
+            ConfigService.set(DangerousActionGate.CFG_OFF_CHANNEL_POLICY, "allow");
+        }
+    }
+
 }

@@ -1,6 +1,7 @@
 package channels;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import models.Agent;
 import models.TelegramBinding;
 import org.telegram.telegrambots.longpolling.BotSession;
@@ -591,14 +592,22 @@ public final class TelegramPollingRunner {
                 // non-topic / unmapped messages. peerId + sink are unchanged — only
                 // which agent runs the turn changes.
                 final Agent runAgent = resolveTopicAgent(sendToken, sendChatId, merged.messageThreadId(), sendAgent);
+                // JCLAW-1061: bound HERE, not at the access check — the turn runs on this
+                // virtual thread, which the check's thread had already left. Recomputed rather
+                // than carried: every coalescing lane keys its bucket per sender, so `merged`
+                // is one person's messages and its fromId is the same value the check compared.
+                final boolean ownerInitiated = ownerKey.equals(merged.fromId());
                 // JCLAW-387 B4 follow-up: pass the Telegram chat.type so the new
                 // conversation is stamped with it (plain DM vs group history caps).
-                AgentRunner.processInboundForAgentStreaming(
-                        runAgent, LOG_SOURCE, peerId, attributedText,
-                        convId -> new TelegramStreamingSink(
-                                sendToken, sendChatId, sendAgent, convId, sendChatType,
-                                merged.messageId(), merged.messageThreadId()),
-                        inputs, sendChatType);
+                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+                    AgentRunner.processInboundForAgentStreaming(
+                            runAgent, LOG_SOURCE, peerId, attributedText,
+                            convId -> new TelegramStreamingSink(
+                                    sendToken, sendChatId, sendAgent, convId, sendChatType,
+                                    merged.messageId(), merged.messageThreadId()),
+                            inputs, sendChatType);
+                    return null;
+                });
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, Agent.nameOf(sendAgent),
                         LOG_SOURCE, "Polling dispatch error: %s".formatted(e.getMessage()));
