@@ -49,6 +49,8 @@ public class ApiSkillsController extends Controller {
     // Canonical tool name used both as an alias target and a body-text heuristic.
     private static final String TOOL_FILESYSTEM = "filesystem";
 
+    private static final String OPERATOR_ONLY = "operator_only";
+
     // JSON request/response payload keys.
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_NEW_NAME = "newName";
@@ -374,6 +376,17 @@ public class ApiSkillsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    /** Reject the agent principal on the two writes that move shell-allowlist grants. Gated on
+     *  how the request authenticated, not on self-reference: agent A widening agent B's allowlist
+     *  escalates just as well. */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, OPERATOR_ONLY,
+                    "Skill configuration is operator-only; an agent cannot install or enable a skill "
+                            + "for itself or for another agent.");
+        }
+    }
+
     /** PUT /api/agents/{id}/skills/{name} — Enable or disable a skill for an agent.
      *  Toggle-only: the skill must already be installed in the agent's workspace
      *  (SKILL.md present under {@code workspace/<agent>/skills/<name>/}). Use
@@ -383,7 +396,10 @@ public class ApiSkillsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SkillToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillToggleResponse.class)))
     @Operation(summary = "Enable or disable an already-installed skill on an agent")
+    @ChatHidden("re-admits a skill's shell-allowlist rows -- privilege escalation")
     public static void updateForAgent(Long id, String name) {
+        requireOperator();
+
         Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 
@@ -430,7 +446,10 @@ public class ApiSkillsController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillCopyResponse.class)))
     @Operation(summary = "Install (copy) a global skill into an agent's workspace and enable it (use this to add a skill an agent lacks)")
+    @ChatHidden("syncs the skill's shell allowlist onto the agent -- privilege escalation")
     public static void copyToAgent(Long id, String name) {
+        requireOperator();
+
         Agent agent = AgentService.findById(id);
         if (agent == null) notFound();
 

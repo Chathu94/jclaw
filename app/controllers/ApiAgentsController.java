@@ -43,6 +43,7 @@ public class ApiAgentsController extends Controller {
     private static final Gson gson = GSON;
 
     // JCLAW-682: canonical error codes for the ApiResponses envelope.
+    private static final String OPERATOR_ONLY = "operator_only";
 
     // JSON body keys reused across create/update/serve paths.
     private static final String KEY_MODEL_PROVIDER = "modelProvider";
@@ -385,6 +386,10 @@ public class ApiAgentsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
+        // Checked before any field is applied: `agent` is managed, so a 403 thrown after a
+        // partial apply would still flush the earlier fields on the request's commit.
+        requireOperatorForAcpChange(agent, body);
+
         var name = optStringOr(body, "name", agent.name);
         validateRenameRules(agent, name);
 
@@ -427,6 +432,19 @@ public class ApiAgentsController extends Controller {
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);
         renderJSON(gson.toJson(AgentView.of(agent)));
+    }
+
+    /** Refuse an agent-originated flip of {@code acpAllowed}: {@code SubagentAcpRunner}
+     *  treats that flag as its entire security boundary, and the harness subprocess it unlocks
+     *  runs commands outside the shell allowlist. An unchanged echo is not a grant, so a
+     *  read-modify-write of the whole agent JSON keeps working for both principals. */
+    private static void requireOperatorForAcpChange(Agent agent, JsonObject body) {
+        if (!body.has(KEY_ACP_ALLOWED) || body.get(KEY_ACP_ALLOWED).isJsonNull()) return;
+        if (body.get(KEY_ACP_ALLOWED).getAsBoolean() == agent.acpAllowed) return;
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, OPERATOR_ONLY,
+                    "acpAllowed is operator-only; an agent cannot grant itself or another agent the ACP runtime.");
+        }
     }
 
     /**

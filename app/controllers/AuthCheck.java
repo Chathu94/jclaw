@@ -155,5 +155,9 @@ public class AuthCheck extends Controller {
         // everywhere.
         session.put("authenticated", "true");
         session.put("username", ownerUsername);
+        // JCLAW-1023: record HOW this request authenticated, not just as whom. The two lines
+        // above make a bearer call indistinguishable from an operator login downstream, which
+        // is what let an agent reach operator-only writes. See RequestPrincipal.
+        session.put(RequestPrincipal.PRINCIPAL_KEY, RequestPrincipal.AGENT);
     }
 }
