@@ -317,7 +317,9 @@ This setting is a **fallback, not a replacement for the approval prompt**. When 
 :::gotcha
 `allow` only ever loosens the **web UI** path. An external channel fails closed under both `allow` and `deny`, so raising the setting cannot weaken it — only `ask` gives an external origin any route through, and only by asking you first.
 
-Separately, an agent you have granted **always allow** for a tool runs it with no prompt on any origin. That standing grant is checked before this policy and overrides it; revoke it on the agent's page rather than here.
+Separately, an agent you have granted **always allow** for a tool runs it with no prompt on any origin. That standing grant is checked before this policy and overrides it — so if an agent stopped asking, a grant is why, not this setting.
+
+Note that a standing grant is currently one-way: it is created when you tap **always allow** on an approval prompt, and there is no interface to list or withdraw it. Tap it only for a tool you are content for that agent to run unattended from any channel, indefinitely.
 :::
 
 ## Shell Execution
