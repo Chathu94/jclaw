@@ -71,6 +71,7 @@ public class ApiSystemController extends Controller {
      * This JVM keeps serving for a couple more seconds so this very response
      * can reach the browser, then the helper stops it.
      */
+    @ChatHidden("stops and relaunches the instance -- availability")
     public static void restart() {
         // The success render stays OUT of the try. Play signals results by
         // throwing, and RenderJson is a RuntimeException — inside the try below
@@ -153,6 +154,7 @@ public class ApiSystemController extends Controller {
      * @param version optional release to install (defaults to the newest);
      *                also the way to re-install or step back to an earlier one
      */
+    @ChatHidden("replaces the install and restarts; stepping back reopens fixed holes")
     public static void upgrade(String version) {
         // Success render stays OUT of the try — RenderJson is a RuntimeException,
         // so a catch-all around it would swallow its own 202 and answer 500.

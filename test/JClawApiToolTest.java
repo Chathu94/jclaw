@@ -185,6 +185,12 @@ class JClawApiToolTest extends UnitTest {
                 "refresh-prices is callable (real route, not hidden/floored)");
         assertTrue(JClawApiTool.isCallable("GET", "/api/providers/openrouter/models"),
                 "concrete path resolves against the route pattern");
+        // JCLAW-1020: the read-only halves of the two hidden system actions share their
+        // paths, so hiding by verb is what keeps "what version am I on?" answerable.
+        assertTrue(JClawApiTool.isCallable("GET", "/api/system/upgrade"),
+                "the upgrade preflight is read-only and stays callable");
+        assertTrue(JClawApiTool.isCallable("GET", "/api/system/restart"),
+                "the restart preflight is read-only and stays callable");
     }
 
     @Test
@@ -206,6 +212,14 @@ class JClawApiToolTest extends UnitTest {
                 "recall for an arbitrary agentId is deny-floored");
         assertFalse(JClawApiTool.isCallable("GET", "/api/logs"),
                 "logs is deny-floored");
+        // JCLAW-1020: the semver gate stopped the download leaving the pinned repo, but a
+        // legitimate older release is still an attacker's goal — v0.17.77 predates this
+        // sprint's fixes, so an agent that could reinstall it would reopen them and then
+        // walk back through. Restart is the availability twin.
+        assertFalse(JClawApiTool.isCallable("POST", "/api/system/upgrade"),
+                "upgrade replaces the install and restarts -- @ChatHidden");
+        assertFalse(JClawApiTool.isCallable("POST", "/api/system/restart"),
+                "restart stops the instance -- @ChatHidden");
         assertFalse(JClawApiTool.isCallable("GET", "/api/no-such-endpoint-xyz"),
                 "nonexistent path matches only the @ChatHidden catch-all -> refused");
     }
