@@ -299,6 +299,27 @@ Restricted to local providers for the same reason embeddings are: the reranker r
 | `memory.rerank.provider` | (unset) | Local provider serving the rerank call. |
 | `memory.rerank.model` | (unset) | Model id paired with the above. |
 
+## Tool Approvals
+
+What a dangerous action does when it can't reach you for approval. It covers the shell tool and the launch of a coding-harness subagent, and it is instance-wide — there is no per-agent override.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` — see below. |
+
+This setting is a **fallback, not a replacement for the approval prompt**. When a turn comes from Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. The policy only decides what happens when there is nobody to ask:
+
+| Origin | `allow` | `ask` | `deny` |
+|--------|---------|-------|--------|
+| Web UI | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
+| External channel, or an origin nothing recorded | Refused. | Sends a confirmation to the bound Telegram DM; refused if there is none. | Refused. |
+
+:::gotcha
+`allow` only ever loosens the **web UI** path. An external channel fails closed under both `allow` and `deny`, so raising the setting cannot weaken it — only `ask` gives an external origin any route through, and only by asking you first.
+
+Separately, an agent you have granted **always allow** for a tool runs it with no prompt on any origin. That standing grant is checked before this policy and overrides it; revoke it on the agent's page rather than here.
+:::
+
 ## Shell Execution
 
 Allowlist and timeout for the shell tool. Per-agent enable/disable lives on the [Tools](/tools) page; this section configures the shared execution policy.

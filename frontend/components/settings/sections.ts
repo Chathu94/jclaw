@@ -30,6 +30,7 @@ import {
   DocumentTextIcon,
   EyeIcon,
   FilmIcon,
+  HandRaisedIcon,
   MagnifyingGlassIcon,
   MicrophoneIcon,
   PhotoIcon,
@@ -41,6 +42,7 @@ import {
   WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
 
+import SettingsApprovalsPanel from './SettingsApprovalsPanel.vue'
 import SettingsChatPanel from './SettingsChatPanel.vue'
 import SettingsTimezonePanel from './SettingsTimezonePanel.vue'
 import SettingsImageCaptionPanel from './SettingsImageCaptionPanel.vue'
@@ -155,6 +157,10 @@ export const sectionGroups: SettingsSectionGroup[] = [
   {
     label: 'Security',
     sections: [
+      // First in the group: it governs every dangerous action, where the two below are
+      // each one mechanism. Shell Execution configures what exec may run; this decides
+      // whether a dangerous action runs at all when nobody can be asked (JCLAW-1022).
+      { id: 'approvals', title: 'Tool Approvals', icon: HandRaisedIcon, component: SettingsApprovalsPanel },
       { id: 'shell', title: 'Shell Execution', icon: CommandLineIcon, component: SettingsShellPanel },
       { id: 'malware', title: 'Malware Scanners', icon: ShieldCheckIcon, component: SettingsMalwarePanel },
     ],
