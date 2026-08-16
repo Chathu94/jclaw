@@ -46,6 +46,8 @@ public class ApiConfigController extends Controller {
      *  "token"/"secret"/"key" would otherwise get its level value masked. */
     private static final String LOGGING_KEY_PREFIX = LoggerLevelService.PREFIX;
 
+    private static final String OPERATOR_ONLY = "operator_only";
+
     public record ConfigEntry(String key, String value, String updatedAt) {}
 
     public record ConfigListResponse(List<ConfigEntry> entries) {}
@@ -100,11 +102,24 @@ public class ApiConfigController extends Controller {
                 config.updatedAt.toString())));
     }
 
+    /** Reject the agent principal on the two config writes. The table holds the instance's own
+     *  security controls -- the shell allowlist, the approval policy, the funnel switch -- so a
+     *  caller able to write it can widen every other gate rather than defeat one (JCLAW-1022). */
+    private static void requireOperator() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, OPERATOR_ONLY,
+                    "Configuration is operator-only; an agent cannot write or delete config values.");
+        }
+    }
+
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ConfigSaveRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigSaveResponse.class)))
     @Operation(summary = "Write a config value")
+    @ChatHidden("writes the instance's own security controls -- privilege escalation")
     public static void save() {
+        requireOperator();
+
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("key") || !body.has("value")) {
             badRequest();
@@ -130,7 +145,10 @@ public class ApiConfigController extends Controller {
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigDeleteResponse.class)))
     @Operation(summary = "Delete a config value by key")
+    @ChatHidden("deletes a config row, reverting a control to its code default -- privilege escalation")
     public static void delete(String key) {
+        requireOperator();
+
         if (isReservedKey(key)) {
             ApiResponses.error(409, "reserved_key", "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));

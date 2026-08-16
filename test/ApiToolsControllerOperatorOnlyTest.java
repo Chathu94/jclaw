@@ -2,12 +2,14 @@ import models.Agent;
 import models.AgentSkillConfig;
 import models.AgentToolConfig;
 import models.ApiToken;
+import models.Config;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.FunctionalTest;
 import services.AgentService;
+import services.ConfigService;
 import services.Tx;
 import utils.TokenHasher;
 
@@ -19,11 +21,16 @@ import java.util.function.Supplier;
  *
  * <p>An agent reaches the API through the {@code jclaw_api} tool, which authenticates with the
  * internal bearer token; {@code AuthCheck} then stamps the session with the agent principal.
- * Four writes across three controllers grant capability and are gated on that principal:
+ * Seven writes across four controllers grant capability and are gated on that principal:
  * the per-agent tool grant and MCP-group grant ({@code ApiToolsController}), the
  * {@code acpAllowed} flag that is {@code SubagentAcpRunner}'s entire security boundary
- * ({@code ApiAgentsController}), and the skill install/toggle that moves shell-allowlist rows
- * ({@code ApiSkillsController}).
+ * ({@code ApiAgentsController}), the skill install and the skill toggle that move
+ * shell-allowlist rows ({@code ApiSkillsController}), and the config write and delete
+ * ({@code ApiConfigController}, JCLAW-1022).
+ *
+ * <p>Config is the widest of them and the reason the others are not sufficient alone: the table
+ * holds the values the gates above read, so a caller able to write it widens every control
+ * rather than defeating one.
  *
  * <p>Tests marked CONTROL pass with the guards reverted. They are here to pin that the guards
  * did not over-reach — reads and non-privileged writes must keep working for both principals.
@@ -374,5 +381,70 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/tools/meta")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/agents/" + id + "/tools")));
         assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/agents/" + id + "/skills")));
+    }
+
+    // --- JCLAW-1022: the config table holds the controls the gates above read ---
+
+    /** An inert key: the guard runs before any key inspection, so which key is written does not
+     *  matter to what is under test — and play1 runs test classes concurrently, so naming a real
+     *  control here would reconfigure a sibling class mid-run. */
+    private static final String PROBE_KEY = "jclaw1022.probe.inert";
+
+    private static String configValueOf(String key) {
+        return fetchInFreshTx(() -> {
+            var row = Config.findByKey(key);
+            return row == null ? null : row.value;
+        });
+    }
+
+    @Test
+    void agentPrincipalCannotWriteConfig() {
+        var resp = asAgent(() -> POST(agentRequest(), "/api/config", "application/json",
+                "{\"key\":\"" + PROBE_KEY + "\",\"value\":\"written-by-agent\"}"));
+
+        assertStatus(403, resp);
+        assertTrue(getContent(resp).contains("operator_only"),
+                "expected the operator_only error code; got: " + getContent(resp));
+        assertNull(configValueOf(PROBE_KEY),
+                "the rejected POST must not have written a config row");
+    }
+
+    @Test
+    void agentPrincipalCannotDeleteConfig() {
+        // Deleting is as good as writing: dropping a row reverts the control to its code
+        // default, which for a tightened setting is the looser value.
+        var key = PROBE_KEY + ".delete";
+        fetchInFreshTx(() -> {
+            ConfigService.set(key, "seeded");
+            return null;
+        });
+
+        var resp = asAgent(() -> DELETE(agentRequest(), "/api/config/" + key));
+
+        assertStatus(403, resp);
+        assertEquals("seeded", configValueOf(key),
+                "the rejected DELETE must have left the row in place");
+    }
+
+    /** CONTROL — passes with the guard reverted; pins that the operator path still writes. */
+    @Test
+    void operatorSessionCanStillWriteConfig() {
+        login();
+        var key = PROBE_KEY + ".operator";
+
+        var resp = POST("/api/config", "application/json",
+                "{\"key\":\"" + key + "\",\"value\":\"written-by-operator\"}");
+
+        assertIsOk(resp);
+        assertEquals("written-by-operator", configValueOf(key),
+                "the operator's config write must persist");
+    }
+
+    /** CONTROL — config reads are masked already, so they stay open to both principals. */
+    @Test
+    void agentPrincipalCanStillReadConfig() {
+        var token = AuthFixture.seedBearerToken();
+
+        assertIsOk(asAgent(() -> GET(requestWithToken(token), "/api/config")));
     }
 }

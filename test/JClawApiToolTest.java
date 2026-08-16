@@ -220,6 +220,13 @@ class JClawApiToolTest extends UnitTest {
                 "upgrade replaces the install and restarts -- @ChatHidden");
         assertFalse(JClawApiTool.isCallable("POST", "/api/system/restart"),
                 "restart stops the instance -- @ChatHidden");
+        // JCLAW-1022: the config table holds the instance's own security controls -- the shell
+        // allowlist, the approval policy, the funnel switch -- so a caller able to write it
+        // widens every other gate rather than defeating one. Reads stay callable and masked.
+        assertFalse(JClawApiTool.isCallable("POST", "/api/config"),
+                "writing config is @ChatHidden");
+        assertFalse(JClawApiTool.isCallable("DELETE", "/api/config/shell.allowlist"),
+                "deleting a config row is @ChatHidden");
         assertFalse(JClawApiTool.isCallable("GET", "/api/no-such-endpoint-xyz"),
                 "nonexistent path matches only the @ChatHidden catch-all -> refused");
     }
@@ -238,8 +245,11 @@ class JClawApiToolTest extends UnitTest {
         assertTrue(out.contains("/api/agents"), "agents endpoint missing: " + out);
         assertTrue(out.toLowerCase().contains("list agents"), "@Operation summary missing: " + out);
         assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing: " + out);
-        // body hint mined from the Swagger @RequestBody record (ConfigSaveRequest -> "key, value")
-        assertTrue(out.contains("key, value"), "config-save body hint from @RequestBody record missing: " + out);
+        // Body hint mined from the Swagger @RequestBody record. Read off AgentRequest since
+        // JCLAW-1022 hid config-save, which this previously sampled -- a @ChatHidden endpoint
+        // contributes no hint because it is not in the catalog at all.
+        assertTrue(out.contains("name, modelProvider"),
+                "agent-write body hint from @RequestBody record missing: " + out);
     }
 
     @Test
