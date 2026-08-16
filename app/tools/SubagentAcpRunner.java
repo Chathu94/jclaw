@@ -123,9 +123,17 @@ final class SubagentAcpRunner {
      * arbitrary code execution. Web spawns pass untouched (the pi -p / claude -p
      * uninterrupted contract); Telegram/Slack route through DangerousActionGate;
      * other channels follow tool.approval.offChannelPolicy. Throws on denial.
+     *
+     * <p>JCLAW-1021: a run with no parent conversation is unrecorded, not trusted, so it
+     * goes through the gate as well — which resolves it against the task-fire origin
+     * bound by {@link agents.DangerousActionGate#withFireOrigin} when there is one.
      */
     private static void enforceChannelApproval(Long runId, Agent childAgent, String task) {
-        var originChannel = parentChannelType(runId);
+        // effectiveOrigin, not parentChannelType: the parent conversation is picked by recency
+        // (SubagentChildBootstrap.resolveParentConversation), so inside an untrusted fire it is
+        // typically the operator's own web row — reading it directly would hand a spawned run
+        // operator trust one hop out of the fire that must have floored it.
+        var originChannel = agents.DangerousActionGate.effectiveOrigin(parentConversationId(runId));
         if (ChannelOriginTrust.isOperatorOrigin(originChannel)) return;
         var decision = agents.DangerousActionGate.guardHarnessPermission(
                 childAgent, parentConversationId(runId), "coding_harness_run", task);
@@ -600,14 +608,14 @@ final class SubagentAcpRunner {
         });
     }
 
-    /** JCLAW-709: a coding run is "trusted" for sandbox purposes when its origin is
-     *  the operator's own web chat (or has no channel origin) — the same web-vs-
-     *  unsafe boundary {@link #enforceChannelApproval} uses. The untrusted-only
-     *  sandbox mode ({@code subagent.acp.sandbox=untrusted}) confines exactly the
-     *  runs this returns {@code false} for. */
+    /** JCLAW-709: a coding run is "trusted" for sandbox purposes only when its origin is
+     *  the operator's own web chat — the same boundary {@link #enforceChannelApproval}
+     *  uses. JCLAW-1021: a parentless run records no origin, and an unrecorded origin is
+     *  not the operator, so the untrusted-only sandbox mode
+     *  ({@code subagent.acp.sandbox=untrusted}) now confines it too. */
     private static boolean sandboxTrustedOrigin(Long runId) {
-        var origin = parentChannelType(runId);
-        return ChannelOriginTrust.isOperatorOrigin(origin);
+        return ChannelOriginTrust.isOperatorOrigin(
+                agents.DangerousActionGate.effectiveOrigin(parentConversationId(runId)));
     }
 
     /**

@@ -8,6 +8,7 @@ import memory.MemoryAutoCapture;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
+import models.TaskRun;
 import services.AttachmentService;
 import services.ConfigService;
 import services.ConversationQueue;
@@ -470,14 +471,36 @@ public class AgentRunner {
         // mid-run; hand the TaskRun id to the loop so its checkpoints can poll
         // the cancel flag. null for any non-task sink (no-op checkpoint).
         Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
-        var outcome = ToolCallLoopRunner.callWithToolLoop(
-                agent, stubConv, null, messages, tools, primary, secondary,
-                new ArrayList<>(), new ArrayList<>(), sink, taskRunId); // task fire carries no attachments
+        // JCLAW-1021: the loop below runs with no conversation id, so the dangerous-tool
+        // gate has nothing to read an origin from. Hand it the channel recorded on the
+        // Task at creation; an unrecorded one stays null and the gate fails closed.
+        final var loopMessages = messages;
+        var outcome = DangerousActionGate.withFireOrigin(taskFireOrigin(taskRunId), () ->
+                ToolCallLoopRunner.callWithToolLoop(
+                        agent, stubConv, null, loopMessages, tools, primary, secondary,
+                        new ArrayList<>(), new ArrayList<>(), sink, taskRunId)); // fires carry no attachments
 
         final var response = outcome.content();
         final var truncated = outcome.truncated();
         Tx.run(() -> sink.appendAssistantMessage(response, null, null, null, truncated));
         return outcome;
+    }
+
+    /**
+     * JCLAW-1021: the origin channel recorded on the Task behind {@code taskRunId}, or
+     * {@code null} for a non-task run and for a Task written before the column existed.
+     * Null is untrusted, so an unresolvable origin fails closed rather than inheriting
+     * the operator's trust. Public so a test in the default package can pin the
+     * resolution the fire's trust decision rests on.
+     */
+    public static String taskFireOrigin(Long taskRunId) {
+        if (taskRunId == null) {
+            return null;
+        }
+        return Tx.run(() -> {
+            TaskRun run = TaskRun.findById(taskRunId);
+            return run == null || run.task == null ? null : run.task.originChannel;
+        });
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,

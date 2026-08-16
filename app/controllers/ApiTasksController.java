@@ -27,6 +27,7 @@ import services.TaskWriteService;
 import services.TimezoneResolver;
 import services.Tx;
 import utils.ApiResponses;
+import utils.ChannelOriginTrust;
 
 import java.time.DateTimeException;
 import java.time.Instant;
@@ -238,7 +239,8 @@ public class ApiTasksController extends Controller {
         // validate it — after the duplicate-recurring 409, before the persist.
         rejectInvalidTimezone(body);
 
-        var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec));
+        var origin = creationOrigin();
+        var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec, origin));
 
         TaskSchedulingService.register(saved);
 
@@ -247,6 +249,17 @@ public class ApiTasksController extends Controller {
                         .formatted(saved.name, saved.id, saved.type));
 
         renderJSON(gson.toJson(TaskView.of(saved)));
+    }
+
+    /**
+     * The origin to record on a task created here, for the dangerous-tool gate to judge a
+     * fire of it by (JCLAW-1021): the operator's web UI, or nothing when an agent is driving
+     * this endpoint through the {@code jclaw_api} tool. Stamping {@code web} unconditionally
+     * would hand every agent-created task operator trust at fire time — the same hole one
+     * door over; an unrecorded origin classifies as UNKNOWN and fails closed.
+     */
+    private static String creationOrigin() {
+        return RequestPrincipal.isAgentOriginated() ? null : ChannelOriginTrust.WEB;
     }
 
     /**
@@ -393,6 +406,15 @@ public class ApiTasksController extends Controller {
 
         if (!anyChange) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "No patchable fields in body");
+        }
+
+        // The patch rewrites `description`, which IS the prompt a fire runs. An agent repointing
+        // an operator-created task would otherwise leave origin_channel="web" and have the fire
+        // execute an attacker-chosen prompt at operator trust. Trust may fall on mutation, never
+        // rise — the mirror of TaskTool.applyPatch's downgrade, at the REST door (JCLAW-1021).
+        if (RequestPrincipal.isAgentOriginated()
+                && utils.ChannelOriginTrust.isOperatorOrigin(task.originChannel)) {
+            task.originChannel = null;
         }
 
         task.save();

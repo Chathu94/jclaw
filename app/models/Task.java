@@ -333,6 +333,18 @@ public class Task extends TimestampedModel {
     public String timezone;
 
     /**
+     * JCLAW-1021: the {@code channelType} of the conversation the task was created
+     * from ({@code "web"}, {@code "telegram"}, …). A fire drives the tool loop with a
+     * stub, unpersisted Conversation, so this column is the fire's only provenance for
+     * {@link utils.ChannelOriginTrust}. Null on rows written before the column existed
+     * and on headless creation, and null classifies as
+     * {@link utils.ChannelOriginTrust.Trust#UNKNOWN} — untrusted, never the operator.
+     * Nullable on purpose: a NOT NULL column could not be added to a populated table.
+     */
+    @Column(name = "origin_channel", length = 50)
+    public String originChannel;
+
+    /**
      * JCLAW-304: mirror this row into the Lucene full-text index under
      * {@link services.search.LuceneIndexer.Scope#TASK} as a virtual
      * document combining {@link #name} and {@link #description}. Same

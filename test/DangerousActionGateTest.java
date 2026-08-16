@@ -323,15 +323,15 @@ class DangerousActionGateTest extends UnitTest {
     }
 
     @Test
-    void nullConversationOriginProceedsUngated() {
-        // Task / scheduled runs (AgentRunner.runForTask) drive the tool loop with a
-        // null conversationId — a trusted internal origin, not an external peer. A
-        // dangerous tool must still proceed ungated so operator-configured automation
-        // that uses exec keeps working (the JCLAW-777 fix treats null as trusted,
-        // matching ChannelOriginTrust and SubagentAcpRunner.sandboxTrustedOrigin).
+    void nullConversationOriginFailsClosed() {
+        // JCLAW-1021 inverts the JCLAW-777 reading of a null conversationId. Task /
+        // scheduled runs drive the tool loop with no conversation, so "no origin" is
+        // missing provenance, not the operator — an untrusted peer that fired a task
+        // would otherwise reach the permissive branch. A fire that DID record its
+        // origin gets it back through DangerousActionGate.withFireOrigin.
         var agent = unboundAgent("gate-null-origin");
 
-        assertEquals(Decision.PROCEED,
+        assertEquals(Decision.ABORT,
                 DangerousActionGate.guard(agent, null, DANGEROUS_TOOL, "{\"command\":\"echo task\"}"));
         assertEquals(0, server.countRequests("sendMessage"),
                 "a context-less (task) origin must not raise a prompt");

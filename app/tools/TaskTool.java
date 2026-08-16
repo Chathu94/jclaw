@@ -1,6 +1,8 @@
 package tools;
 
+import agents.DangerousActionGate;
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -15,6 +17,7 @@ import services.ScheduleShorthandParser;
 import services.TaskSchedulingService;
 import services.Tx;
 import services.search.LuceneIndexer;
+import utils.ChannelOriginTrust;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -502,9 +505,36 @@ public class TaskTool implements ToolRegistry.Tool {
         // an invalid value surfaces as a tool error to the LLM rather than
         // landing in the DB and silently falling through at fire time.
         task.timezone = TaskScheduleSupport.parseTimezone(optStr(args, KEY_TIMEZONE));
+        // JCLAW-1021: a fire has no conversation, so the channel that asked for the task
+        // is the only provenance its dangerous-tool gate will ever have. Record it now.
+        task.originChannel = callerOrigin();
 
         task.save();
         return task;
+    }
+
+    /**
+     * The origin of the turn making this tool call — its conversation's channel, floored by
+     * any task fire it is running inside. Shared with the gate ({@link
+     * DangerousActionGate#effectiveOrigin}) so a task is recorded with exactly the origin
+     * the gate will later judge its fire by. Null for a headless call with neither.
+     */
+    private static String callerOrigin() {
+        return DangerousActionGate.effectiveOrigin(ToolContext.conversationId());
+    }
+
+    /**
+     * JCLAW-1021: a patch rewrites the description — which IS the fire's user prompt — plus
+     * its workdir, tools and model, so a turn weaker than the recorded origin repoints the
+     * task's provenance at itself. Trust may fall on mutation; it must never rise, and only
+     * the operator origin is permissive, so that is the only fall worth recording.
+     */
+    private static void downgradeOrigin(Task task) {
+        var patchOrigin = callerOrigin();
+        if (ChannelOriginTrust.isOperatorOrigin(task.originChannel)
+                && !ChannelOriginTrust.isOperatorOrigin(patchOrigin)) {
+            task.originChannel = patchOrigin;
+        }
     }
 
     /** Parse the optional {@code schedule} shorthand into a spec, or null when absent. Throws
@@ -622,7 +652,10 @@ public class TaskTool implements ToolRegistry.Tool {
         anyChange |= applyStringPatches(args, task);
         anyChange |= applyFlagPatches(args, task);
 
-        if (anyChange) task.save();
+        if (anyChange) {
+            downgradeOrigin(task);
+            task.save();
+        }
         return new PatchResult(anyChange, scheduleChanged, task);
     }
 

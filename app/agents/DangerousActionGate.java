@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 /**
  * JCLAW-382: gate dangerous tool/exec actions behind the Telegram
@@ -55,13 +56,21 @@ import java.util.concurrent.ConcurrentHashMap;
  * gate — it returns {@link Decision#PROCEED} before any I/O.
  *
  * <p>JCLAW-777 / VULN-001: the permissive {@code allow} default applies only to a
- * <em>trusted operator origin</em> — the web UI or a context-less internal turn
- * ({@link utils.ChannelOriginTrust}). An <em>untrusted external channel peer</em>
- * (whatsapp, or a telegram/slack turn that fell through with no usable approval
- * binding) has no interactive surface and no authenticated caller, so it fails
- * <em>closed</em> at the off-channel fallback rather than running ungated — an
- * external peer could otherwise prompt-inject the agent into unsandboxed shell.
- * An explicit {@code ask} still lets the operator confirm such a turn on the bound DM.
+ * <em>trusted operator origin</em> — the web UI ({@link utils.ChannelOriginTrust}).
+ * An <em>untrusted external channel peer</em> (whatsapp, or a telegram/slack turn
+ * that fell through with no usable approval binding) has no interactive surface and
+ * no authenticated caller, so it fails <em>closed</em> at the off-channel fallback
+ * rather than running ungated — an external peer could otherwise prompt-inject the
+ * agent into unsandboxed shell. An explicit {@code ask} still lets the operator
+ * confirm such a turn on the bound DM.
+ *
+ * <p>JCLAW-1021: a dispatch with no conversation is <em>not</em> thereby the operator.
+ * A task fire drives the tool loop on a stub, unpersisted Conversation, so its origin
+ * comes from {@link #withFireOrigin} — the channel recorded on the Task when it was
+ * created. With nothing bound the origin stays unknown and fails closed. That origin is
+ * a <em>floor</em> for everything the fire reaches, including a dispatch that does carry
+ * a conversation: {@code agent_spawn} picks the child's conversation by recency, so an
+ * untrusted fire would otherwise borrow the operator's web trust one hop out.
  *
  * <h2>Session / always scope</h2>
  * <p>An {@code APPROVED_SESSION} or {@code APPROVED_ALWAYS} tap records a
@@ -96,8 +105,8 @@ public final class DangerousActionGate {
     /**
      * JCLAW-423: policy for a dangerous tool dispatched on a channel with no
      * interactive approval surface (anything but Telegram). {@code allow}
-     * (default) runs it ungated on a <em>trusted operator origin</em> (web UI /
-     * no conversation), preserving the pre-423 behavior; {@code deny} fails closed;
+     * (default) runs it ungated on a <em>trusted operator origin</em> (the web UI),
+     * preserving the pre-423 behavior; {@code deny} fails closed;
      * JCLAW-709 {@code ask} routes the confirmation to the agent's bound Telegram
      * DM (fail-closed if there is none). An explicit standing grant still proceeds
      * under any policy. JCLAW-777: {@code allow} does <em>not</em> apply to an
@@ -115,8 +124,40 @@ public final class DangerousActionGate {
      */
     private static final Set<String> GRANTS = ConcurrentHashMap.newKeySet();
 
+    /**
+     * The task fire running on this thread, if any (JCLAW-1021). Inheritable because every
+     * fork on the fire path ({@link ParallelToolExecutor}, the subagent runners) starts a
+     * fresh virtual thread from the loop's thread.
+     */
+    private static final InheritableThreadLocal<FireScope> FIRE = new InheritableThreadLocal<>();
+
+    /** A fire in progress. Bound-with-null-channel is a fire whose Task recorded no origin —
+     *  which the unbound (no fire at all) state must not be confused with. */
+    private record FireScope(String channel) {}
+
     /** The gate's verdict for a single dispatch. */
     public enum Decision { PROCEED, ABORT }
+
+    /**
+     * Run {@code body} inside the dynamic extent of a task fire whose Task recorded
+     * {@code origin} — the task-fire path, whose Conversation is a stub that was never
+     * persisted. The origin bounds the trust of every dispatch in {@code body}
+     * ({@link #effectiveOrigin}); a null {@code origin} classifies as {@code UNKNOWN} and
+     * the off-channel fallback fails closed on it.
+     */
+    public static <T> T withFireOrigin(String origin, Supplier<T> body) {
+        var previous = FIRE.get();
+        FIRE.set(new FireScope(origin));
+        try {
+            return body.get();
+        } finally {
+            if (previous == null) {
+                FIRE.remove();
+            } else {
+                FIRE.set(previous);
+            }
+        }
+    }
 
     /**
      * Decide whether {@code toolName} may run for {@code agent} on the
@@ -184,12 +225,12 @@ public final class DangerousActionGate {
             return Decision.PROCEED;
         }
 
-        // JCLAW-423/350: the interactive approve/deny prompt reaches the operator
-        // only when THIS conversation is on a channel that has an approval surface
+        // JCLAW-423/350: the interactive approve/deny prompt reaches the operator only
+        // when THIS turn's effective origin is a channel that has an approval surface
         // (Telegram or Slack) AND has a usable binding. Route the prompt only there;
-        // every other channel (web, or no conversation) has no surface and must NOT
+        // every other channel (web, or no origin at all) has no surface and must NOT
         // silently route to a bound chat — it falls through to the off-channel policy.
-        var channelType = resolveChannelType(conversationId);
+        var channelType = effectiveOrigin(conversationId);
         if (CHANNEL_NAME.equals(channelType)) {
             var binding = Tx.run(() -> TelegramBinding.findByAgentOrAncestor(agent));
             if (binding != null && binding.enabled) {
@@ -225,9 +266,10 @@ public final class DangerousActionGate {
      * dangerous tool ungated, so its floor is fail-closed ({@link Decision#ABORT});
      * the operator can still opt into {@code ask} to route a confirmation to the
      * bound Telegram DM, and a standing grant has already short-circuited before this
-     * point. The permissive {@code allow} default applies only to the
-     * <em>trusted operator origin</em> (the web UI, or a context-less internal turn —
-     * see {@link ChannelOriginTrust#isOperatorOrigin}), where it preserves the
+     * point. JCLAW-1021 puts an <em>unknown</em> origin on that same floor: no
+     * recorded provenance is a gap, not operator authority. The permissive
+     * {@code allow} default applies only to the <em>trusted operator origin</em> (the
+     * web UI — see {@link ChannelOriginTrust#classify}), where it preserves the
      * pre-JCLAW-423 behavior. {@code deny} fails closed on any origin; JCLAW-709
      * {@code ask} routes a confirmation to the agent's bound Telegram DM (fail-closed
      * if there is none).
@@ -236,21 +278,22 @@ public final class DangerousActionGate {
         var chan = channelType == null ? "none" : channelType;
         var policy = ConfigService.get(CFG_OFF_CHANNEL_POLICY, DEFAULT_OFF_CHANNEL_POLICY);
 
-        // An untrusted external channel peer must not run a dangerous tool ungated: the
-        // permissive "allow" default is only for the trusted operator origin. "ask" may
-        // still reach the operator's DM; anything else is fail-closed.
-        if (!ChannelOriginTrust.isOperatorOrigin(channelType)) {
+        // Only a trusted operator origin gets the permissive "allow" default. An external
+        // peer — and an origin nobody recorded, which is missing provenance rather than
+        // operator authority — may still reach the DM via "ask"; else it is fail-closed.
+        var trust = ChannelOriginTrust.classify(channelType);
+        if (trust != ChannelOriginTrust.Trust.OPERATOR) {
             if ("ask".equalsIgnoreCase(policy)) {
                 return askViaTelegram(agent, toolName, argsJson, chan);
             }
             EventLogger.warn(LOG_CATEGORY, agent.name, chan,
-                    "Dangerous tool '%s' from untrusted origin '%s' has no approval surface — denying (fail-closed)"
-                            .formatted(toolName, chan));
+                    "Dangerous tool '%s' from %s origin '%s' has no approval surface — denying (fail-closed)"
+                            .formatted(toolName, trust, chan));
             return Decision.ABORT;
         }
 
-        // Trusted operator origin (web UI, or no conversation context): honor the
-        // configured policy — the default "allow" preserves the pre-JCLAW-423 behavior.
+        // Trusted operator origin (the web UI): honor the configured policy — the
+        // default "allow" preserves the pre-JCLAW-423 behavior.
         if ("deny".equalsIgnoreCase(policy)) {
             EventLogger.warn(LOG_CATEGORY, agent.name, chan,
                     "Dangerous tool '%s' on trusted origin '%s' has no approval surface — denying (%s=deny)"
@@ -299,8 +342,33 @@ public final class DangerousActionGate {
                 || Tx.run(() -> ToolApprovalGrant.exists(agent.id, toolName));
     }
 
-    /** The conversation's {@code channelType}, or {@code null} when unknown. */
-    private static String resolveChannelType(Long conversationId) {
+    /**
+     * The origin a turn on this thread is attributed to: the conversation's
+     * {@code channelType}, floored by the origin of the task fire it runs inside.
+     * {@code null} when neither is available, which classifies as untrusted.
+     *
+     * <p>The fire's origin is a floor rather than a fallback because
+     * {@code SubagentChildBootstrap} picks a spawned child's conversation by recency —
+     * typically the operator's {@code web} one. Honoring a present conversation outright
+     * let an untrusted fire abort a direct {@code exec}, call {@code agent_spawn}, and run
+     * the same {@code exec} ungated in the child on borrowed operator trust (JCLAW-1021).
+     *
+     * <p>Public so the task-write path can record the same provenance the gate will later
+     * judge a fire of that task by.
+     */
+    public static String effectiveOrigin(Long conversationId) {
+        var fire = FIRE.get();
+        if (fire == null) {
+            return conversationChannel(conversationId);
+        }
+        if (!ChannelOriginTrust.isOperatorOrigin(fire.channel())) {
+            return fire.channel();
+        }
+        return conversationId == null ? fire.channel() : conversationChannel(conversationId);
+    }
+
+    /** The conversation's {@code channelType}, or {@code null} when it has none / is gone. */
+    private static String conversationChannel(Long conversationId) {
         if (conversationId == null) {
             return null;
         }

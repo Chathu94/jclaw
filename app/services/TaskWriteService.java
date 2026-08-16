@@ -44,9 +44,15 @@ public final class TaskWriteService {
      * Map a validated create body onto a fresh {@link Task} and persist it. The
      * caller has already validated agent/name/schedule/delivery/timezone and
      * rejected duplicate recurring names, so this is pure field-mapping + save.
+     *
+     * @param originChannel the origin to record for the dangerous-tool gate to judge a fire
+     *                      of this task by (JCLAW-1021). Decided by the caller, which is the
+     *                      only layer that can tell an operator request from an agent's
+     *                      {@code jclaw_api} call; {@code null} records no provenance and
+     *                      fails closed at fire time.
      */
     public static Task persistNewTask(JsonObject body, Agent agent, String name,
-                                      ScheduleShorthandParser.ScheduleSpec spec) {
+                                      ScheduleShorthandParser.ScheduleSpec spec, String originChannel) {
         var t = new Task();
         t.agent = agent;
         t.name = name;
@@ -96,6 +102,10 @@ public final class TaskWriteService {
         // all types since the column is cheap and the UI may surface it.
         var tzRaw = readOptionalString(body, KEY_TIMEZONE);
         t.timezone = tzRaw != null ? tzRaw.trim() : null;
+
+        // A fire runs with no conversation, so this is the only provenance the
+        // dangerous-tool gate will ever have for the task (JCLAW-1021).
+        t.originChannel = originChannel;
 
         t.save();
         return t;
