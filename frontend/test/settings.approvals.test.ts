@@ -70,14 +70,16 @@ describe('Settings page — Tool Approvals', () => {
     expect(values).toEqual(['allow', 'ask', 'deny'])
   })
 
-  it('says the setting is a fallback, not a replacement for the channel prompt', async () => {
+  it('says a prompt still reaches you when someone else asks', async () => {
     // The question this panel most has to answer: does allow switch off Telegram's
-    // approval panel? It does not, and the copy has to say so.
+    // approval panel? Not for anyone but you — JCLAW-1061 skips the prompt only for a
+    // sender the channel proved is the owner, and the copy has to draw that line.
     baseEndpoints()
     const component = await mountSettingsSection('approvals')
 
     const text = component.text()
     expect(text).toContain('cannot reach you for approval')
-    expect(text).toMatch(/Telegram or Slack and that agent has a working binding/)
+    expect(text).toMatch(/someone else messages the agent on Telegram or Slack/)
+    expect(text).toMatch(/asked there regardless of this setting/)
   })
 })

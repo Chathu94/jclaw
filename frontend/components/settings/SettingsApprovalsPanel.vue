@@ -12,7 +12,7 @@ const POLICIES = [
   {
     value: 'allow',
     label: 'Allow',
-    detail: 'Run it. Applies to the web UI only — an external channel still fails closed.',
+    detail: 'Run it. Applies to your own turns only — an origin that cannot ask you still fails closed.',
   },
   {
     value: 'ask',
@@ -65,9 +65,9 @@ async function save(value: string) {
     </h2>
     <p class="text-xs text-fg-muted">
       What a dangerous action does when it cannot reach you for approval — the shell
-      tool, and launching a coding-harness subagent. This is the fallback only: when a
-      turn comes from Telegram or Slack and that agent has a working binding, you are
-      asked there regardless of this setting.
+      tool, and launching a coding-harness subagent. This decides your own turns: when
+      someone else messages the agent on Telegram or Slack and that agent has a working
+      binding, you are asked there regardless of this setting.
     </p>
 
     <div class="space-y-2">

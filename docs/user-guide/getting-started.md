@@ -31,6 +31,12 @@ Read in that order if it's your first time. Skim if you're hunting for a specifi
 
 That's the minimum loop. Everything else in this guide is how to do more with it.
 
+### Staying signed in
+
+Your session lasts an hour of **inactivity**, not an hour in total — every request pushes the window out, so a tab you keep working in never signs you out. Leave it alone for an hour and you'll log in again.
+
+Changing or resetting the admin password signs out every other session immediately. That is deliberate: it is what makes a password change a way to revoke access you did not intend to give, rather than only a way to change what you type. Upgrading to v0.17.80 or later also asks everyone to sign in once more, because sessions issued before that release predate the check.
+
 ## The sidebar at a glance
 
 The left sidebar is grouped by intent:

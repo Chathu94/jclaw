@@ -307,15 +307,16 @@ What a dangerous action does when it can't reach you for approval. It covers the
 |-----|---------|---------|
 | `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` — see below. |
 
-This setting is a **fallback, not a replacement for the approval prompt**. When a turn comes from Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. The policy only decides what happens when there is nobody to ask:
+This setting is a **fallback, not a replacement for the approval prompt**. When *someone else* messages the agent on Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. Your own messages are not prompted — the channel already established that the sender was you — so this policy is what decides them:
 
-| Origin | `allow` | `ask` | `deny` |
+| Who sent the turn | `allow` | `ask` | `deny` |
 |--------|---------|-------|--------|
-| Web UI | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
-| External channel, or an origin nothing recorded | Refused. | Sends a confirmation to the bound Telegram DM; refused if there is none. | Refused. |
+| You — the web UI, or a Telegram/Slack message the channel proves is yours | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
+| Someone else, on a channel that can reach you | Prompted in that chat. | Prompted in that chat. | Prompted in that chat. |
+| Someone else with no way to ask — WhatsApp, a binding that cannot prompt, or a task whose origin was never recorded | Refused. | Sends a confirmation to the bound Telegram DM; refused if there is none. | Refused. |
 
 :::gotcha
-`allow` only ever loosens the **web UI** path. An external channel fails closed under both `allow` and `deny`, so raising the setting cannot weaken it — only `ask` gives an external origin any route through, and only by asking you first.
+`allow` only ever loosens **your own** turns. Someone else on a channel that can reach you is prompted either way, and one that cannot fails closed under both `allow` and `deny` — so raising the setting cannot weaken it. Only `ask` gives an unaskable origin any route through, and only by confirming with you first.
 
 Separately, an agent you have granted **always allow** for a tool runs it with no prompt on any origin. That standing grant is checked before this policy and overrides it — so if an agent stopped asking, a grant is why, not this setting.
 
