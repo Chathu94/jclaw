@@ -83,6 +83,7 @@ class SlackWebApiResolveTest extends UnitTest {
 
     @BeforeEach
     void setup() throws Exception {
+        SlackWebApiTestSync.acquire();
         originalLister = LISTER_FIELD.get(null);
         originalProber = PROBER_FIELD.get(null);
         originalDmOpener = DM_OPENER_FIELD.get(null);
@@ -100,6 +101,7 @@ class SlackWebApiResolveTest extends UnitTest {
         LISTER_FIELD.set(null, originalLister);
         PROBER_FIELD.set(null, originalProber);
         DM_OPENER_FIELD.set(null, originalDmOpener);
+        SlackWebApiTestSync.release();
     }
 
     @Test
