@@ -36,6 +36,44 @@ public class ApiAuthController extends Controller {
     private static final Gson gson = GSON;
     public static final String PASSWORD_HASH_KEY = "auth.admin.passwordHash";
 
+    /**
+     * Generation counter for the admin credential (JCLAW-1034). A session cookie carries the
+     * generation it was minted under and {@link AuthCheck} refuses one from an older
+     * generation, which is what makes a password reset revoke sessions that already exist —
+     * Play's cookies are stateless and otherwise stay valid forever.
+     *
+     * <p>Under the reserved {@code auth.} prefix, so it is neither readable nor writable
+     * through the config API.
+     */
+    static final String CREDENTIAL_VERSION_KEY = "auth.credentialVersion";
+
+    /** Session key holding the generation a cookie was minted under. */
+    static final String SESSION_CREDENTIAL_VERSION = "cv";
+
+    /** The current credential generation; {@code "0"} before one has ever been recorded. */
+    static String credentialVersion() {
+        return ConfigService.get(CREDENTIAL_VERSION_KEY, "0");
+    }
+
+    /**
+     * Advance the generation, invalidating every existing session cookie.
+     *
+     * <p>Called on first setup and on reset — the two points the credential actually changes.
+     * Deliberately NOT called from the rehash-on-login path: that re-derives the same password
+     * at a stronger work factor, and treating it as a change would sign the operator out on the
+     * very login that performed it.
+     */
+    private static void bumpCredentialVersion() {
+        long next;
+        try {
+            next = Long.parseLong(credentialVersion()) + 1;
+        }
+        catch (NumberFormatException _) {
+            next = 1;
+        }
+        ConfigService.set(CREDENTIAL_VERSION_KEY, String.valueOf(next));
+    }
+
     // JCLAW-741: password policy (length over complexity, NIST 800-63B) — a
     // minimum length and a sane maximum that bounds per-attempt PBKDF2 cost,
     // no composition rules. The floor is enforced here (authoritative); the
@@ -139,6 +177,7 @@ public class ApiAuthController extends Controller {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             ApiResponses.error(409, "already_set", "Password is already set");
         }
+        bumpCredentialVersion();
         LoginRateLimiter.recordSuccess(clientIp);
         EventLogger.info("auth", "Admin password set for the first time");
         renderJSON(gson.toJson(new SetupOkResponse("ok")));
@@ -187,6 +226,7 @@ public class ApiAuthController extends Controller {
             LoginRateLimiter.recordSuccess(clientIp);
             session.put("authenticated", "true");
             session.put("username", username);
+            session.put(SESSION_CREDENTIAL_VERSION, credentialVersion());
             // JCLAW-731: transparent rehash-on-login. We hold the plaintext and
             // the verify just succeeded, so upgrade a hash written at an older,
             // weaker PBKDF2 work factor to the current one. Best-effort — a
@@ -257,8 +297,9 @@ public class ApiAuthController extends Controller {
             ApiResponses.error(401, "authentication_required", "Authentication required");
         }
         ConfigService.delete(PASSWORD_HASH_KEY);
+        bumpCredentialVersion();
         session.clear();
-        EventLogger.info("auth", "Admin password reset — user signed out");
+        EventLogger.info("auth", "Admin password reset — every other session signed out too");
         renderJSON(gson.toJson(new ResetPasswordResponse("ok")));
     }
 

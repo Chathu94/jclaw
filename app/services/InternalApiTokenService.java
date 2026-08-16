@@ -82,14 +82,22 @@ public final class InternalApiTokenService {
     private static String ensureToken() {
         var stored = ConfigService.get(INTERNAL_TOKEN_CONFIG_KEY);
         if (stored != null && !stored.isBlank()) {
-            // Verify the row still exists. A stored plaintext whose ApiToken
-            // row was revoked, deleted or restored away authenticates against
-            // nothing, so treat it as stale and re-mint rather than hand back a
-            // credential that will only ever produce 401s.
-            var row = ApiToken.findActiveByPlaintext(stored);
-            if (row != null) return stored;
+            if (ApiToken.findActiveByPlaintext(stored) != null) return stored;
+
+            // JCLAW-1034: "missing" and "revoked" used to be one branch, and re-minting on
+            // both made revoking this token impossible — withdraw it and the next call
+            // minted a replacement. Only an absent row is self-healing now. A revoked one
+            // is handed back as-is so every call 401s, which is what revocation means; an
+            // expired one is a rotation signal and does re-mint.
+            var row = ApiToken.findAnyByPlaintext(stored);
+            if (row != null && row.revokedAt != null) {
+                EventLogger.warn("auth",
+                        "Internal jclaw_api token is revoked — not re-minting; the tool stays "
+                                + "unauthenticated until an operator clears the revocation");
+                return stored;
+            }
             EventLogger.info("auth",
-                    "Internal jclaw_api token row missing or revoked — re-minting");
+                    "Internal jclaw_api token row missing or expired — re-minting");
         }
         return mintAndStore();
     }

@@ -60,9 +60,31 @@ public class ApiToken extends Model {
     @Column(name = "last_used_at")
     public Instant lastUsedAt;
 
+    /**
+     * When this token stops being accepted, or null for one that never expires
+     * (JCLAW-1034). Nullable on purpose: a NOT NULL column cannot be added to a
+     * populated table, and rows minted before this existed are legitimately open-ended.
+     */
+    @Column(name = "expires_at")
+    public Instant expiresAt;
+
+    /**
+     * When an operator withdrew this token, or null while it stands (JCLAW-1034).
+     * Recorded rather than deleted so revocation survives {@code ensureToken}, which
+     * re-mints a <em>missing</em> internal row — deleting was self-defeating.
+     */
+    @Column(name = "revoked_at")
+    public Instant revokedAt;
+
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
+    }
+
+    /** True when this row may still authenticate a request. */
+    public boolean isActive() {
+        var now = Instant.now();
+        return revokedAt == null && (expiresAt == null || expiresAt.isAfter(now));
     }
 
     /** Threshold for the throttle in {@link #markUsed}. Bearer auth fires
@@ -105,15 +127,30 @@ public class ApiToken extends Model {
      *  <p>Does NOT update {@link #lastUsedAt} on its own — that's the
      *  bearer-auth filter's job after it's decided to admit the request,
      *  so an unrelated 4xx (bad input) doesn't fake a usage record. */
+    /** The row for {@code plaintext} whatever its state, or null if none exists. Lets a caller
+     *  tell a <em>missing</em> row (safe to re-mint) from a <em>revoked</em> one (must not be),
+     *  a distinction {@link #findActiveByPlaintext} collapses by design (JCLAW-1034). */
+    public static ApiToken findAnyByPlaintext(String plaintext) {
+        if (plaintext == null || plaintext.isBlank()) return null;
+        return ApiToken.find("secretHash = ?1", TokenHasher.hash(plaintext)).first();
+    }
+
     public static ApiToken findActiveByPlaintext(String plaintext) {
         if (plaintext == null || plaintext.isBlank()) return null;
         var hash = TokenHasher.hash(plaintext);
+        // JCLAW-1034: the name promised "active" and the predicate did not deliver it — a
+        // revoked or expired row still authenticated. Revocation is a static predicate and
+        // stays in the query; expiry is checked in Java on the row deliberately, because
+        // binding a :now parameter would give every call its own L2 query-cache key and
+        // discard the cache this lookup exists on the hot path to use.
         var query = JPA.em().createQuery(
-                "SELECT t FROM ApiToken t WHERE t.secretHash = :hash",
+                "SELECT t FROM ApiToken t WHERE t.secretHash = :hash AND t.revokedAt IS NULL",
                 ApiToken.class);
         query.setParameter("hash", hash);
         query.setHint("org.hibernate.cacheable", true);
         var results = query.getResultList();
-        return results.isEmpty() ? null : results.getFirst();
+        if (results.isEmpty()) return null;
+        var token = results.getFirst();
+        return token.isActive() ? token : null;
     }
 }
