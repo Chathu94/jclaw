@@ -48,7 +48,12 @@ public class ConfigService {
         // hand-rolled merge()-based reconciliation.
         return cache.get(key, k -> {
             var config = Tx.run(() -> Config.findByKey(k));
-            return Optional.ofNullable(config != null ? config.value : null);
+            // JCLAW-1022: privileged keys are capped by application.conf, which the config table
+            // cannot reach. Applied inside the loader so the cost lands once per key rather than
+            // per read, and here rather than at each sink because provider.*.baseUrl alone has
+            // nine of them.
+            return Optional.ofNullable(
+                    PrivilegedConfig.reconcile(k, config != null ? config.value : null));
         }).orElse(null);
     }
 
@@ -101,7 +106,9 @@ public class ConfigService {
         // Read-your-writes: seed the cache immediately so a later reader on a
         // different connection sees the value before the surrounding transaction
         // commits — the FunctionalTest suite and real request flows depend on this.
-        cache.put(key, Optional.ofNullable(value));
+        // Reconciled, not raw: the read path caps privileged keys, and seeding the cache with
+        // the stored value would hand the next reader an uncapped one until the TTL (JCLAW-1022).
+        cache.put(key, Optional.ofNullable(PrivilegedConfig.reconcile(key, value)));
         // JCLAW-832: when set() joined an ambient (outer) transaction the upsert is
         // not durable yet. If that transaction rolls back, drop the eagerly-cached
         // entry so it can't serve a value the DB never kept for the 60s TTL. On the
@@ -164,7 +171,9 @@ public class ConfigService {
         if (inserted) {
             // Mirror set(): seed the cache for read-your-writes, evicting the entry
             // if the surrounding (not-yet-committed) transaction rolls back (JCLAW-832).
-            cache.put(key, Optional.ofNullable(value));
+            // Reconciled, not raw: the read path caps privileged keys, and seeding the cache with
+        // the stored value would hand the next reader an uncapped one until the TTL (JCLAW-1022).
+        cache.put(key, Optional.ofNullable(PrivilegedConfig.reconcile(key, value)));
             if (JPA.isInsideTransaction()) {
                 scheduleRollbackEviction(JPA.em().unwrap(Session.class), key);
             }
@@ -180,6 +189,14 @@ public class ConfigService {
      * @return an error message if the key is rejected, or {@code null} on success
      */
     public static String setWithSideEffects(String key, String value) {
+        // JCLAW-1022: a row that would loosen a conf-capped key is already inert at the read.
+        // Refusing it here is for the operator: a save that cannot take effect would otherwise
+        // answer 200 and then read back as something else.
+        var capped = PrivilegedConfig.rejectionFor(key, value);
+        if (capped != null) {
+            return capped;
+        }
+
         // Shell exec privileges are restricted to the main agent
         if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
             var agentName = key.split("\\.")[1];
