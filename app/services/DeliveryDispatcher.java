@@ -233,6 +233,11 @@ public final class DeliveryDispatcher {
             case "missing_scope" -> " The bot token can't look up channels by name (missing the "
                     + "channels:read / groups:read scope). Add it under Bot Token Scopes and reinstall the "
                     + "app, or set the delivery to the channel id (slack:C…).";
+            // JCLAW-1018: the target was a user id, so the fault is the DM, not channel membership.
+            case "dm_missing_scope" -> " The bot token can't open a DM with that user (missing the "
+                    + "im:write scope). Add it under Bot Token Scopes and reinstall the app.";
+            case "dm_open_failed" -> " The bot couldn't open a DM with that user — check the owner user "
+                    + "id on the agent's Slack binding (a bot or deactivated user can't be DM'd).";
             case "is_archived" -> " The channel is archived.";
             case "msg_too_long" -> " The message exceeds Slack's length limit.";
             case "not_authed", "invalid_auth", "token_revoked", "account_inactive" ->

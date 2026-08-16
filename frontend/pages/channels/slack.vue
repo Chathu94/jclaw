@@ -310,7 +310,8 @@ async function copyText(text: string) {
 // (post/edit replies + the off-thread draft loop), assistant:write (native
 // chat.startStream + the "is typing…" status), files:read (download inbound
 // shared files, JCLAW-344), files:write + im:write (upload generated files,
-// JCLAW-345; im:write opens a DM channel for the upload), and each *:history so
+// JCLAW-345; im:write opens a DM channel for the upload, and for a proactive send
+// that falls back to the owner user id, JCLAW-1018), and each *:history so
 // the matching message.* event is delivered. No app_mention: parseEvent handles
 // only `message` events, so the bot reacts to messages in the channels it's
 // invited to (via message.channels), not to app_mention events.

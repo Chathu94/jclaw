@@ -34,8 +34,20 @@ public final class SlackWebApi {
 
     /** A literal Slack channel/group/DM id ({@code C}/{@code G}/{@code D}…) — passes through resolution unchanged. */
     private static final Pattern CHANNEL_ID = Pattern.compile("^[CGD][A-Z0-9]{6,}$");
+    /** A Slack <em>user</em> id — not addressable by {@code chat.postMessage}, so it resolves through
+     *  {@code conversations.open} to a {@code D}-channel (JCLAW-1018). Shares {@link #CHANNEL_ID}'s
+     *  shape, and with it the ambiguity that an all-caps bare name of the same form (e.g. {@code GENERAL},
+     *  {@code UPDATES}) reads as an id; prefix with {@code #} to force the name path. */
+    private static final Pattern USER_ID = Pattern.compile("^U[A-Z0-9]{6,}$");
+    /** {@code conversations.open} was refused for want of {@code im:write} — distinct from the
+     *  {@code missing_scope} the name path reports, which is about {@code channels:read}. */
+    private static final String DM_MISSING_SCOPE = "dm_missing_scope";
+    /** {@code conversations.open} failed for any other reason (unknown user, a bot user, API error). */
+    private static final String DM_OPEN_FAILED = "dm_open_failed";
     private static final int CHANNEL_CACHE_MAX = 2048;
-    /** name→id cache keyed by (token-hash, lowercased name); bounded LRU. Mirrors {@link SlackFileUploader}'s DM cache. */
+    /** name→id and user→DM cache keyed by (token-hash, lowercased name | {@code U…} id); bounded LRU.
+     *  The two key spaces can't collide — names are lowercased, user ids are upper-case {@code U}-prefixed.
+     *  Mirrors {@link SlackFileUploader}'s DM cache. */
     private static final Map<String, String> CHANNEL_ID_CACHE = Collections.synchronizedMap(
             new LinkedHashMap<>(64, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, String> e) {
@@ -73,18 +85,30 @@ public final class SlackWebApi {
      *  when the bot can't list channels, else {@code channel_not_found}). */
     public record ChannelResolution(String channelId, String error) {}
 
+    /** Test seam (JCLAW-1018): the {@code conversations.open} user→DM lookup, swappable so unit tests
+     *  resolve DMs without the network — mirrors {@link ChannelLister}. */
+    @FunctionalInterface
+    public interface DmOpener {
+        ChannelResolution open(String botToken, String userId);
+    }
+
+    static DmOpener dmOpener = SlackWebApi::openDmLive;
+
     /**
-     * JCLAW-454/458: resolve a Slack delivery {@code target} to a channel id, surfacing the failure
-     * reason. A literal id ({@code C}/{@code G}/{@code D}…) passes through; a {@code #name}/bare name
-     * is looked up via {@code conversations.list} (cached per token+name on success). On failure the
-     * {@code error} is the Slack code — {@code missing_scope} when the bot can't list channels (needs
-     * {@code channels:read}/{@code groups:read}), else {@code channel_not_found}. Never throws.
+     * JCLAW-454/458/1018: resolve a Slack delivery {@code target} to a channel id, surfacing the failure
+     * reason. A literal id ({@code C}/{@code G}/{@code D}…) passes through; a {@code U…} user id opens
+     * (and caches) a DM channel; a {@code #name}/bare name is looked up via {@code conversations.list}
+     * (cached per token+name on success). On failure the {@code error} is the Slack code —
+     * {@code missing_scope} when the bot can't list channels (needs {@code channels:read}/{@code
+     * groups:read}), {@code dm_missing_scope}/{@code dm_open_failed} when a DM can't be opened, else
+     * {@code channel_not_found}. Never throws.
      */
     public static ChannelResolution resolveChannel(String botToken, String target) {
         if (botToken == null || botToken.isBlank() || target == null) return new ChannelResolution(null, null);
         String t = target.trim();
         if (t.isEmpty()) return new ChannelResolution(null, null);
         if (CHANNEL_ID.matcher(t).matches()) return new ChannelResolution(t, null);
+        if (USER_ID.matcher(t).matches()) return resolveDm(botToken, t);
         String name = (t.startsWith("#") ? t.substring(1) : t).toLowerCase(Locale.ROOT);
         if (name.isEmpty()) return new ChannelResolution(null, null);
         String key = Integer.toHexString(botToken.hashCode()) + ":" + name;
@@ -101,6 +125,37 @@ public final class SlackWebApi {
     /** JCLAW-454: id-only convenience over {@link #resolveChannel} — the channel id, or null. */
     public static String resolveChannelId(String botToken, String target) {
         return resolveChannel(botToken, target).channelId();
+    }
+
+    /** JCLAW-1018: the {@code D}-channel for a {@code U…} user, cached per (token, user) like the
+     *  name path — a DM channel id is stable, so a repeat send never re-opens. */
+    private static ChannelResolution resolveDm(String botToken, String userId) {
+        String key = Integer.toHexString(botToken.hashCode()) + ":" + userId;
+        var cached = CHANNEL_ID_CACHE.get(key);
+        if (cached != null) return new ChannelResolution(cached, null);
+        var opened = dmOpener.open(botToken, userId);
+        if (opened.channelId() != null) CHANNEL_ID_CACHE.put(key, opened.channelId());
+        return opened;
+    }
+
+    /** Live {@link DmOpener}: {@code conversations.open} on a single user. Needs the {@code im:write}
+     *  scope; without it Slack answers {@code missing_scope}, which maps to {@link #DM_MISSING_SCOPE} so
+     *  callers don't confuse it with the name path's {@code channels:read} gap. Never throws. */
+    private static ChannelResolution openDmLive(String botToken, String userId) {
+        try {
+            var resp = slack.methods(botToken).conversationsOpen(r -> r.users(List.of(userId)));
+            if (resp.isOk() && resp.getChannel() != null) {
+                return new ChannelResolution(resp.getChannel().getId(), null);
+            }
+            EventLogger.warn("channel", null, "slack",
+                    "conversations.open error: %s".formatted(resp.getError()));
+            return new ChannelResolution(null,
+                    "missing_scope".equals(resp.getError()) ? DM_MISSING_SCOPE : DM_OPEN_FAILED);
+        } catch (IOException | SlackApiException e) {
+            EventLogger.warn("channel", null, "slack",
+                    "conversations.open failed: %s".formatted(e.getMessage()));
+            return new ChannelResolution(null, DM_OPEN_FAILED);
+        }
     }
 
     /** Live {@link ChannelLister}: page {@code conversations.list} and match by name. Returns the
@@ -240,7 +295,9 @@ public final class SlackWebApi {
             return new SlackReachability(SlackReach.UNKNOWN, target, null);
         }
         String t = target.trim();
-        if (t.isEmpty() || CHANNEL_ID.matcher(t).matches()) {
+        // JCLAW-1018: a U… target is a DM, not a channel — probing it as a name yields a
+        // "can't find #u…, invite the bot" advisory that names the wrong problem entirely.
+        if (t.isEmpty() || CHANNEL_ID.matcher(t).matches() || USER_ID.matcher(t).matches()) {
             return new SlackReachability(SlackReach.UNKNOWN, t, null);
         }
         String name = (t.startsWith("#") ? t.substring(1) : t).toLowerCase(Locale.ROOT);

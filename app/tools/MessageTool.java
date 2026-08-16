@@ -493,7 +493,8 @@ public class MessageTool implements ToolRegistry.Tool {
      * conversation peer is available, so a proactive send from an agent with no
      * chat history on that channel still reaches the owner:
      * <ul>
-     *   <li>{@code slack} → {@link SlackBinding#ownerUserId}.</li>
+     *   <li>{@code slack} → {@link SlackBinding#ownerUserId}; a user id, which the send path
+     *       resolves to the owner's DM channel via {@code conversations.open} (JCLAW-1018).</li>
      *   <li>{@code whatsapp} → {@link WhatsAppBinding#ownerJid} for the WhatsApp-Web
      *       transport (the paired user), {@link WhatsAppBinding#defaultTarget} for
      *       Cloud-API (the operator-configured recipient — a Cloud-API business
