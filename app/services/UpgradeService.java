@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * Installs a newer JClaw release over this one on operator request (the
@@ -56,6 +57,15 @@ public final class UpgradeService {
      * want a fresh answer get one via {@code refresh=true}.
      */
     private static final Duration CHECK_TTL = Duration.ofHours(1);
+
+    /**
+     * The only shape a release version may have. The pinned {@code tsukhani/jclaw}
+     * release path is the sole anchor the download has — the SHA256SUMS manifest is
+     * fetched from the same prefix as the asset, so it cannot vouch for it — and a
+     * literal of this shape cannot carry the slash or dot-segment that would move
+     * that prefix.
+     */
+    private static final Pattern RELEASE_VERSION = Pattern.compile("v?\\d+\\.\\d+\\.\\d+");
 
     /** Test seam: when non-null, {@link #requestUpgrade(String)} hands the plan here instead of spawning it. */
     public static Consumer<Plan> spawnerForTest;
@@ -223,11 +233,31 @@ public final class UpgradeService {
     }
 
     /**
+     * Gate for every version that reaches the helper argv. Rejects rather than
+     * rewrites: a value that is not a release version is an attempt at something
+     * else, and quietly sanitising one hides it from the operator and the log.
+     *
+     * @param version a release version, or null/blank for "the newest release"
+     * @throws IllegalArgumentException if {@code version} is present and is not
+     *         {@code MAJOR.MINOR.PATCH}, optionally {@code v}-prefixed
+     */
+    private static void requireReleaseVersion(String version) {
+        if (version == null || version.isBlank()) return;
+        if (!RELEASE_VERSION.matcher(version).matches()) {
+            throw new IllegalArgumentException(
+                    "Not a release version: '" + version + "' — expected MAJOR.MINOR.PATCH, for example 0.17.78.");
+        }
+    }
+
+    /**
      * Resolve what an upgrade would run, without running it. The target version
      * is pinned into the argv so the helper installs exactly what the operator
      * was shown, even if a new release lands between the preflight and the POST.
+     *
+     * @throws IllegalArgumentException if {@code targetVersion} is not a release version
      */
     public static Plan plan(String targetVersion) {
+        requireReleaseVersion(targetVersion);
         var args = new ArrayList<String>();
         args.add(script().getAbsolutePath());
         args.add("upgrade");
@@ -245,12 +275,15 @@ public final class UpgradeService {
      * keeps serving through the download and only goes down when the helper
      * reaches its stop step, minutes later.
      *
+     * @throws IllegalArgumentException if {@code targetVersion} is not a release version
      * @throws IllegalStateException if this install cannot be upgraded, or if
      *         there is no newer release, both checked <em>before</em> anything
      *         is spawned so a refusal leaves the app untouched
      * @throws IOException if the helper process cannot be started
      */
     public static Plan requestUpgrade(String targetVersion) throws IOException {
+        requireReleaseVersion(targetVersion);
+
         var unavailable = unavailableReason();
         if (unavailable != null) {
             throw new IllegalStateException("Cannot upgrade: " + unavailable);

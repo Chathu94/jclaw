@@ -162,6 +162,12 @@ public class ApiSystemController extends Controller {
         } catch (IllegalStateException e) {
             ApiResponses.error(409, ApiResponses.CONFLICT, e.getMessage());
             return;
+        } catch (IllegalArgumentException e) {
+            // A refused version never reaches the helper, so reporting it as a launch
+            // failure would be untrue and would let any authenticated caller drive
+            // ERROR-level log writes with a value they chose (JCLAW-1020).
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, e.getMessage());
+            return;
         } catch (Exception e) {
             ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR,
                     "Failed to launch the upgrade helper: " + e.getMessage());

@@ -4308,6 +4308,17 @@ do_upgrade() {
     fi
     case "$target" in v*) ;; *) target="v$target" ;; esac
 
+    # $target is interpolated straight into the release URL below, and both ways in are
+    # untrusted: --version comes from the caller, and upgrade_latest_tag echoes whatever
+    # the API returned. A release tag is structurally incapable of carrying a dot-segment,
+    # so anything that is not one is refused here rather than hardened downstream —
+    # --path-as-is does NOT help, because GitHub collapses ../ server-side either way
+    # (measured: with and without the flag both return the traversed resource).
+    if ! [[ "$target" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "Error: '$target' is not a release tag (expected vMAJOR.MINOR.PATCH)." >&2
+        exit 1
+    fi
+
     echo "    Installed: $current  ($kind install)"
     echo "    Latest:    ${target#v}"
 
