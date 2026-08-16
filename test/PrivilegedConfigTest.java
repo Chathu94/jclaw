@@ -5,11 +5,6 @@ import services.PrivilegedConfig;
 import services.PrivilegedConfig.Tightening;
 import services.Tx;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-1022: application.conf caps the config keys that carry privilege, and a stored row may
  * only tighten that cap.

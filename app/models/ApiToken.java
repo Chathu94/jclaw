@@ -113,6 +113,14 @@ public class ApiToken extends Model {
         }
     }
 
+    /** The row for {@code plaintext} whatever its state, or null if none exists. Lets a caller
+     *  tell a <em>missing</em> row (safe to re-mint) from a <em>revoked</em> one (must not be),
+     *  a distinction {@link #findActiveByPlaintext} collapses by design (JCLAW-1034). */
+    public static ApiToken findAnyByPlaintext(String plaintext) {
+        if (plaintext == null || plaintext.isBlank()) return null;
+        return ApiToken.find("secretHash = ?1", TokenHasher.hash(plaintext)).first();
+    }
+
     /** Resolve a plaintext bearer token to its row. Returns null if no
      *  row matches. The 64-char {@code secret_hash} unique index makes
      *  this an O(1) hit even with many tokens (we only ever expect one
@@ -127,14 +135,6 @@ public class ApiToken extends Model {
      *  <p>Does NOT update {@link #lastUsedAt} on its own — that's the
      *  bearer-auth filter's job after it's decided to admit the request,
      *  so an unrelated 4xx (bad input) doesn't fake a usage record. */
-    /** The row for {@code plaintext} whatever its state, or null if none exists. Lets a caller
-     *  tell a <em>missing</em> row (safe to re-mint) from a <em>revoked</em> one (must not be),
-     *  a distinction {@link #findActiveByPlaintext} collapses by design (JCLAW-1034). */
-    public static ApiToken findAnyByPlaintext(String plaintext) {
-        if (plaintext == null || plaintext.isBlank()) return null;
-        return ApiToken.find("secretHash = ?1", TokenHasher.hash(plaintext)).first();
-    }
-
     public static ApiToken findActiveByPlaintext(String plaintext) {
         if (plaintext == null || plaintext.isBlank()) return null;
         var hash = TokenHasher.hash(plaintext);

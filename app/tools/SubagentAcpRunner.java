@@ -129,7 +129,7 @@ final class SubagentAcpRunner {
      * bound by {@link agents.DangerousActionGate#withFireOrigin} when there is one.
      */
     private static void enforceChannelApproval(Long runId, Agent childAgent, String task) {
-        // effectiveOrigin, not parentChannelType: the parent conversation is picked by recency
+        // effectiveOrigin, not the parent conversation's channelType directly: it is picked by recency
         // (SubagentChildBootstrap.resolveParentConversation), so inside an untrusted fire it is
         // typically the operator's own web row — reading it directly would hand a spawned run
         // operator trust one hop out of the fire that must have floored it.
@@ -586,18 +586,6 @@ final class SubagentAcpRunner {
             throw new IllegalStateException(ACP_EXIT_MSG.formatted(exit, detail));
         }
         return new AgentRunner.RunResult(out.strip(), null);
-    }
-
-    /** JCLAW-665: the operator-facing (parent) conversation's channelType for a
-     *  run, used to decide whether a coding run needs channel approval. Null when
-     *  the run has no parent-conversation context. */
-    private static String parentChannelType(Long runId) {
-        if (runId == null) return null;
-        return Tx.run(() -> {
-            SubagentRun run = SubagentRun.findById(runId);
-            return run != null && run.parentConversation != null
-                    ? run.parentConversation.channelType : null;
-        });
     }
 
     private static Long parentConversationId(Long runId) {

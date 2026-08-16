@@ -41,6 +41,13 @@ public final class SlackWebApi {
     private static final Pattern USER_ID = Pattern.compile("^U[A-Z0-9]{6,}$");
     /** {@code conversations.open} was refused for want of {@code im:write} — distinct from the
      *  {@code missing_scope} the name path reports, which is about {@code channels:read}. */
+    /** EventLogger category/source for this class, spelled as in SlackInbound. */
+    private static final String CATEGORY_CHANNEL = "channel";
+    private static final String CHANNEL_SLACK = "slack";
+
+    /** Slack's error code when the bot token lacks a scope the call needs. */
+    private static final String ERR_MISSING_SCOPE = "missing_scope";
+
     private static final String DM_MISSING_SCOPE = "dm_missing_scope";
     /** {@code conversations.open} failed for any other reason (unknown user, a bot user, API error). */
     private static final String DM_OPEN_FAILED = "dm_open_failed";
@@ -147,12 +154,12 @@ public final class SlackWebApi {
             if (resp.isOk() && resp.getChannel() != null) {
                 return new ChannelResolution(resp.getChannel().getId(), null);
             }
-            EventLogger.warn("channel", null, "slack",
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "conversations.open error: %s".formatted(resp.getError()));
             return new ChannelResolution(null,
-                    "missing_scope".equals(resp.getError()) ? DM_MISSING_SCOPE : DM_OPEN_FAILED);
+                    ERR_MISSING_SCOPE.equals(resp.getError()) ? DM_MISSING_SCOPE : DM_OPEN_FAILED);
         } catch (IOException | SlackApiException e) {
-            EventLogger.warn("channel", null, "slack",
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "conversations.open failed: %s".formatted(e.getMessage()));
             return new ChannelResolution(null, DM_OPEN_FAILED);
         }
@@ -174,7 +181,7 @@ public final class SlackWebApi {
                         .limit(1000)
                         .cursor(c));
                 if (!resp.isOk()) {
-                    EventLogger.warn("channel", null, "slack",
+                    EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                             "conversations.list error: %s".formatted(resp.getError()));
                     return ChannelLookup.failed(resp.getError());
                 }
@@ -185,7 +192,7 @@ public final class SlackWebApi {
             } while (cursor != null && !cursor.isBlank());
             return ChannelLookup.NOT_FOUND;
         } catch (IOException | SlackApiException e) {
-            EventLogger.warn("channel", null, "slack",
+            EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_SLACK,
                     "conversations.list failed: %s".formatted(e.getMessage()));
             return ChannelLookup.failed("io_error");
         }
@@ -241,7 +248,7 @@ public final class SlackWebApi {
         } catch (RuntimeException _) {
             return null;
         }
-        if (!"missing_scope".equals(err)) return null;
+        if (!ERR_MISSING_SCOPE.equals(err)) return null;
         return "This bot token can't look up channels by name (missing the channels:read / groups:read "
                 + "scope), so name-based delivery (e.g. slack:#daily-briefings) will fail with "
                 + "channel_not_found. Add the scope under Bot Token Scopes and reinstall the app, or "
@@ -319,7 +326,7 @@ public final class SlackWebApi {
             return new SlackReachability(SlackReach.UNKNOWN, display, null);
         }
         // JCLAW-458: a scope gap masquerades as "not found" — name it precisely.
-        if ("missing_scope".equals(lk.error())) {
+        if (ERR_MISSING_SCOPE.equals(lk.error())) {
             return new SlackReachability(SlackReach.MISSING_SCOPE, display,
                     "JClaw can't look up Slack channel " + display + " by name — the bot token is missing the "
                             + "channels:read / groups:read scope. Add it (Bot Token Scopes) and reinstall the app, "

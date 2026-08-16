@@ -8,11 +8,6 @@ import utils.TokenHasher;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JCLAW-1034: the internal bearer has a lifecycle — it can expire, it can be revoked, and
  * revoking it sticks.
