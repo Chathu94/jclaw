@@ -93,8 +93,18 @@ public class ApiAuthController extends Controller {
         if (AppOriginGate.isBlocked()) {
             ApiResponses.error(403, APP_SCOPE_CODE, "App-originated request may not set up the password");
         }
+        // JCLAW-1025: the credential bootstrap binds to whoever arrives first, so an attacker
+        // racing a fresh instance only needs to keep trying. Share the login throttle, keyed on
+        // the socket peer, and count each rejected attempt below — an unset instance is the one
+        // state where repetition is worth anything.
+        String clientIp = request.remoteAddress != null ? request.remoteAddress : "unknown";
+        if (!LoginRateLimiter.allow(clientIp, loginMaxFailures(), loginWindowSeconds())) {
+            EventLogger.warn("auth", "Setup throttled for %s (too many recent attempts)".formatted(clientIp));
+            ApiResponses.error(429, "too_many_attempts", "Too many setup attempts. Try again later.");
+        }
         var existing = ConfigService.get(PASSWORD_HASH_KEY);
         if (existing != null && !existing.isBlank()) {
+            LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             ApiResponses.error(409, "already_set", "Password is already set");
         }
         // JCLAW-674: parse via the shared JsonBodyReader so ONLY a malformed
@@ -126,8 +136,10 @@ public class ApiAuthController extends Controller {
         // land a hash (last-writer-wins). setIfAbsent inserts only if the key is
         // still absent, so a losing concurrent bootstrap gets the same 409.
         if (!ConfigService.setIfAbsent(PASSWORD_HASH_KEY, PasswordHasher.hash(password))) {
+            LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             ApiResponses.error(409, "already_set", "Password is already set");
         }
+        LoginRateLimiter.recordSuccess(clientIp);
         EventLogger.info("auth", "Admin password set for the first time");
         renderJSON(gson.toJson(new SetupOkResponse("ok")));
     }
