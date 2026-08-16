@@ -582,9 +582,24 @@ public class ApiAgentsController extends Controller {
         renderBinary(file);
     }
 
+    /** Reject the agent principal on the workspace routes. {@code id} is an arbitrary path
+     *  parameter, so these reach <em>any</em> agent's workspace, while the {@code filesystem}
+     *  tool an agent is meant to use is scoped to its own — leaving this open would make
+     *  jclaw_api a way around a withheld filesystem tool as well as a cross-agent one. */
+    private static void requireOperatorForWorkspace() {
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, OPERATOR_ONLY,
+                    "Workspace files are operator-only through this API; an agent must use its "
+                            + "filesystem tool, which is scoped to its own workspace.");
+        }
+    }
+
     @SuppressWarnings("java:S2259")
     @Operation(summary = "Read a text workspace file's contents by filename")
+    @ChatHidden("reads any agent's workspace, including another agent's persona files")
     public static void getWorkspaceFile(Long id, String filename) {
+        requireOperatorForWorkspace();
+
         var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
         if (content == null) notFound();
@@ -594,7 +609,10 @@ public class ApiAgentsController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = WorkspaceFileRequest.class)))
     @Operation(summary = "Write a text workspace file's contents by filename")
+    @ChatHidden("workspace files are injected as authoritative standing instructions")
     public static void saveWorkspaceFile(Long id, String filename) {
+        requireOperatorForWorkspace();
+
         var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has(KEY_CONTENT) || body.get(KEY_CONTENT).isJsonNull()) {

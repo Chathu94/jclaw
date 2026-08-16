@@ -383,7 +383,6 @@ class JClawApiToolTest extends UnitTest {
             GET /api/agents/{id}/skills/{name}/files
             GET /api/agents/{id}/skills/{name}/files/{<.+>filePath}
             GET /api/agents/{id}/tools
-            GET /api/agents/{id}/workspace/{filename}
             GET /api/apps
             GET /api/apps/{slug}/files/{uuid}
             GET /api/attachments/{uuid}
@@ -494,7 +493,6 @@ class JClawApiToolTest extends UnitTest {
             POST /api/tasks/{id}/run
             POST /api/tts/reference-voice
             PUT /api/agents/{id}
-            PUT /api/agents/{id}/workspace/{filename}
             PUT /api/channels/whatsapp/bindings/{id}
             PUT /api/conversations/{id}/model-override
             PUT /api/mcp-servers/{id}
