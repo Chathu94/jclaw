@@ -266,6 +266,8 @@ public class ApiConversationsController extends Controller {
     private static List<Long> ftsConversationIds(String q) {
         if (q == null || q.isBlank()) return null;
         try {
+            // A term matching more than 500 messages truncates silently, so a common
+            // word under-reports conversations rather than erroring (JCLAW-1064).
             var messageIds = MessageSearch.searchIds(
                     LuceneIndexer.Scope.CONVERSATION_MESSAGE, q, 500);
             if (messageIds.isEmpty()) return List.of();
