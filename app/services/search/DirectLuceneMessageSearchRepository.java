@@ -108,14 +108,28 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         // Either way, the right move is to backfill from the JPA store
         // — slow on a huge transcript history, but JClaw at pre-v1 has
         // hundreds-to-low-thousands of rows.
-        // JCLAW-1052: an analyzer change re-tokenizes every document, and needsBackfill
-        // compares counts — which do not move. Without this the old index keeps answering
+        // JCLAW-1052: an analyzer change re-tokenizes every document, and the count
+        // comparison below does not move. Without this the old index keeps answering
         // with the previous tokenization, so the new query terms match nothing and search
         // degrades silently instead of failing.
         boolean analyzerChanged = !LuceneIndexer.ANALYZER_GENERATION
                 .equals(ConfigService.get(ANALYZER_GENERATION_KEY, null));
+        // JCLAW-961: a deficit rebuilds rather than gating on an empty index — a hard kill
+        // loses up to one commit interval of writes, and those rows would otherwise sit in
+        // the database and on the UI while being permanently invisible to search. Re-running
+        // over already-indexed rows is harmless: upsert keys on the id term.
         for (var b : BACKFILLERS) {
-            if (!analyzerChanged && !needsBackfill(b)) continue;
+            long docs = LuceneIndexer.docCount(b.scope());
+            long rows = rowCount(b);
+            // JCLAW-1064: a surplus is rows deleted without their doc evicted, because a
+            // cascade delete never fires @PostRemove. upsert only adds, so those docs
+            // survive a backfill and go on answering queries — clear and rebuild instead.
+            // MEMORY is exempt from the trigger, not just the clear: its rebuild restores
+            // text but not KNN vectors, and an upsert-only pass can never settle a surplus,
+            // so including it would drop the vector leg and re-prompt on every boot.
+            boolean purgeSurplus = docs > rows && b.scope() != LuceneIndexer.Scope.MEMORY;
+            if (!analyzerChanged && docs >= rows && !purgeSurplus) continue;
+            if (purgeSurplus) LuceneIndexer.clear(b.scope());
             backfill(b);
             if (b.scope() == LuceneIndexer.Scope.MEMORY) {
                 MemoryReembedService.invalidateBackfillMarker();
@@ -131,19 +145,6 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** Records which analyzer the on-disk index was written with. */
     private static final String ANALYZER_GENERATION_KEY = "search.lucene.analyzerGeneration";
-
-    /**
-     * Whether a scope's index has to be rebuilt from the database.
-     *
-     * <p>JCLAW-961: fewer documents than rows, not merely zero. A hard kill loses up to one
-     * commit interval of index writes, and the old {@code docCount() == 0} gate then
-     * guaranteed those rows were never rebuilt — present in the database and on the UI,
-     * permanently invisible to search. Re-running over already-indexed rows is harmless:
-     * {@code upsert} keys on the id term, so the pass is idempotent.
-     */
-    private static boolean needsBackfill(Backfiller b) {
-        return LuceneIndexer.docCount(b.scope()) < rowCount(b);
-    }
 
     private static long rowCount(Backfiller b) {
         return Tx.run(() -> (Long) JPA.em().createQuery(b.countJpql()).getSingleResult());

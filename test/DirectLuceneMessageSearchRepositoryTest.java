@@ -309,6 +309,28 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
         assertEquals(trmId, trmHits.getFirst().id);
     }
 
+    @Test
+    void backfillPurgesOrphanedDocsWhenTheIndexHoldsMoreDocsThanRows() throws Exception {
+        // JCLAW-1064: the reconciliation only ever rebuilt on a deficit, so docs left
+        // behind by a cascade delete (which never fires @PostRemove) stayed searchable
+        // forever — 97.8% of the live CONVERSATION_MESSAGE index by the time it was
+        // found, capping recall for common terms at a few percent.
+        var liveId = seedConversationMessage("orphanlivetoken");
+
+        // An id no row owns: the exact shape a cascade-deleted message leaves behind.
+        LuceneIndexer.upsert(LuceneIndexer.Scope.CONVERSATION_MESSAGE, 999_000_001L, "orphandeadtoken");
+        LuceneIndexer.commit(LuceneIndexer.Scope.CONVERSATION_MESSAGE);
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "orphandeadtoken", 10).size(),
+                "orphan doc must be searchable before init() — otherwise this proves nothing");
+
+        repo.init();
+
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "orphandeadtoken", 10).isEmpty(),
+                "init() must purge docs whose row no longer exists");
+        assertEquals(List.of(liveId), repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, "orphanlivetoken", 10),
+                "the surviving row's doc must be rebuilt, not lost with the orphans");
+    }
+
     // ── JCLAW-328: per-scope coverage ─────────────────────────────────
 
     /**

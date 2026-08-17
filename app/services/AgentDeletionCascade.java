@@ -120,11 +120,16 @@ public final class AgentDeletionCascade {
         List<Long> taskRunMessageIds = em.createQuery(
                 "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.agent.id IN :ids", Long.class)
                 .setParameter("ids", subtreeIds).getResultList();
+        List<Long> conversationMessageIds = em.createQuery(
+                "SELECT m.id FROM Message m WHERE m.conversation.agent.id IN :ids", Long.class)
+                .setParameter("ids", subtreeIds).getResultList();
         evictAfterCommit(LuceneIndexer.Scope.SUBAGENT_RUN, subagentRunIds);
         evictAfterCommit(LuceneIndexer.Scope.TASK, taskIds);
         // TASK_RUN_MESSAGE docs orphan too: an agent delete cascades
         // Task -> TaskRun -> TaskRunMessage, and none of those fire @PostRemove.
         evictAfterCommit(LuceneIndexer.Scope.TASK_RUN_MESSAGE, taskRunMessageIds);
+        // And CONVERSATION_MESSAGE, down Agent -> Conversation -> Message.
+        evictAfterCommit(LuceneIndexer.Scope.CONVERSATION_MESSAGE, conversationMessageIds);
     }
 
     /**

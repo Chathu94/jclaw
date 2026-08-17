@@ -139,6 +139,31 @@ class CascadeLuceneCleanupTest extends UnitTest {
                 "agent delete must evict the subtree tasks' TASK_RUN_MESSAGE docs");
     }
 
+    // ── CONVERSATION_MESSAGE via AgentService.delete ──────────────────────
+
+    @Test
+    void agentDeleteEvictsConversationMessageDocs() throws Exception {
+        var msgToken = "convmsgagentonlytoken";
+        long agentId = commitInFreshTx(() -> {
+            var agent = newAgent("cl-convmsg");
+            agent.save();
+            var convo = ConversationService.create(agent, "web", "c-" + System.nanoTime());
+            ConversationService.appendUserMessage(convo, msgToken);
+            return agent.id;
+        });
+
+        assertEquals(1, repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, msgToken, 10).size(),
+                "conversation message must be indexed before delete");
+
+        commitInFreshTx(() -> {
+            AgentService.delete(Agent.findById(agentId));
+            return null;
+        });
+
+        assertTrue(repo.searchIds(LuceneIndexer.Scope.CONVERSATION_MESSAGE, msgToken, 10).isEmpty(),
+                "agent delete must evict the subtree conversations' CONVERSATION_MESSAGE docs");
+    }
+
     // ── SUBAGENT_RUN via ConversationService.deleteByIds ──────────────────
 
     @Test
