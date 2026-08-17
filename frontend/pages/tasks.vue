@@ -1348,6 +1348,8 @@ function zoneForTaskRender(task: Task): string | undefined {
                     <TaskPermissions
                       :enabled-tool-names="task.enabledToolNames"
                       :origin-channel="task.originChannel"
+                      :model-provider="task.modelProvider"
+                      :model-id="task.modelId"
                     />
 
                     <!-- Instructions: the JCLAW-260 step list, read-only by

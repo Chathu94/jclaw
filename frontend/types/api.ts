@@ -628,6 +628,12 @@ export interface Task {
    * tools. Read-only — trust may fall on mutation, never rise (JCLAW-1021).
    */
   originChannel?: string | null
+  /**
+   * Per-task model pin. Null on both means the fire uses the agent's current
+   * model, so an edit to the agent re-points the task with it.
+   */
+  modelProvider?: string | null
+  modelId?: string | null
   [key: string]: unknown
 }
 

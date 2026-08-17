@@ -9,8 +9,15 @@ import TaskPermissions from '~/components/TaskPermissions.vue'
  * services.TaskToolPolicy.parse, and if the two disagree the page shows a fence the
  * gate will not enforce. Each case here has a counterpart in TaskToolPolicyTest.
  */
-async function mount(enabledToolNames: string | null, originChannel: string | null = 'web') {
-  return mountSuspended(TaskPermissions, { props: { enabledToolNames, originChannel } })
+async function mount(
+  enabledToolNames: string | null,
+  originChannel: string | null = 'web',
+  modelProvider: string | null = null,
+  modelId: string | null = null,
+) {
+  return mountSuspended(TaskPermissions, {
+    props: { enabledToolNames, originChannel, modelProvider, modelId },
+  })
 }
 
 describe('TaskPermissions', () => {
@@ -64,5 +71,31 @@ describe('TaskPermissions', () => {
     const pill = c.find('[data-testid="task-origin-pill"]')
     expect(pill.text()).toBe('telegram')
     expect(pill.attributes('title')).toMatch(/untrusted/i)
+  })
+
+  it('shows a pinned model as provider and id', async () => {
+    const c = await mount(null, 'web', 'ollama-cloud', 'kimi-k2.6')
+    expect(c.find('[data-testid="task-model-pill"]').text()).toBe('ollama-cloud / kimi-k2.6')
+    expect(c.find('[data-testid="task-model-unpinned"]').exists()).toBe(false)
+  })
+
+  it('says the model follows the agent when nothing is pinned', async () => {
+    const c = await mount(null)
+    const pill = c.find('[data-testid="task-model-unpinned"]')
+    expect(pill.text()).toBe('follows the agent')
+    expect(pill.attributes('title')).toMatch(/follows any change/i)
+    expect(c.find('[data-testid="task-model-pill"]').exists()).toBe(false)
+  })
+
+  it('treats a provider without a model id as unpinned', async () => {
+    // A provider alone names no model, so the fire still resolves through the
+    // agent — reporting it as pinned would assert a stability that is not there.
+    const c = await mount(null, 'web', 'ollama-cloud', null)
+    expect(c.find('[data-testid="task-model-unpinned"]').exists()).toBe(true)
+  })
+
+  it('shows a bare model id when no provider is recorded', async () => {
+    const c = await mount(null, 'web', null, 'kimi-k2.6')
+    expect(c.find('[data-testid="task-model-pill"]').text()).toBe('kimi-k2.6')
   })
 })

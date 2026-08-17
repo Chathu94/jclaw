@@ -1,14 +1,16 @@
 <script setup lang="ts">
 /**
- * JCLAW-1062/1068: what a task fire is permitted to do — its tool allow-list and the
- * origin that decides fire-time trust.
+ * JCLAW-1062/1068: what a task fire is permitted to do — its tool allow-list, the
+ * origin that decides fire-time trust, and the model it fires on.
  *
- * Both are read-only here. The allow-list is set through the task API; origin is
- * recorded at creation and deliberately cannot be raised (JCLAW-1021).
+ * All read-only here. The allow-list and model pin are set through the task API;
+ * origin is recorded at creation and deliberately cannot be raised (JCLAW-1021).
  */
 const props = defineProps<{
   enabledToolNames?: string | null
   originChannel?: string | null
+  modelProvider?: string | null
+  modelId?: string | null
 }>()
 
 /**
@@ -61,6 +63,15 @@ const origin = computed(() => {
     title: `Inbound channel origin — untrusted, so dangerous tools fail closed unless the policy is "ask".`,
   }
 })
+
+/** Unpinned fires on the agent's current model, so an agent edit silently re-points
+ *  the task — the reason the absent pin is shown rather than left blank. */
+const model = computed(() => {
+  const id = props.modelId?.trim()
+  const provider = props.modelProvider?.trim()
+  if (!id) return null
+  return provider ? `${provider} / ${id}` : id
+})
 </script>
 
 <template>
@@ -77,6 +88,22 @@ const origin = computed(() => {
         :title="origin.title"
         data-testid="task-origin-pill"
       >{{ origin.label }}</span>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-1.5 mb-2">
+      <span class="text-[11px] text-fg-muted">Model</span>
+      <span
+        v-if="model"
+        class="text-[11px] px-1.5 py-0.5 border border-border text-fg-strong font-mono"
+        title="Pinned — this task always fires on this model, whatever its agent is set to."
+        data-testid="task-model-pill"
+      >{{ model }}</span>
+      <span
+        v-else
+        class="text-[11px] px-1.5 py-0.5 border border-border text-fg-muted"
+        title="Not pinned — this task fires on its agent's current model, and follows any change to it."
+        data-testid="task-model-unpinned"
+      >follows the agent</span>
     </div>
 
     <div class="flex flex-wrap items-center gap-1.5">
