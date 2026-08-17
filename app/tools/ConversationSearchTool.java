@@ -1,16 +1,20 @@
 package tools;
 
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Message;
 import play.db.jpa.JPA;
+import services.TimezoneResolver;
 import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 
 import java.io.IOException;
+import java.time.Instant;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -46,6 +50,10 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
      */
     private static final int LUCENE_WINDOW = 500;
 
+    /** Result timestamps, rendered in the operator's zone. */
+    private static final DateTimeFormatter STAMP_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
     /** Characters of message body returned per hit. */
     private static final int SNIPPET_CHARS = 300;
 
@@ -79,8 +87,9 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
                 conversation_history for the full transcript. \
                 Required: `query` (keywords; matching is whole-word, not substring). \
                 Optional: `limit` (1-%d, default %d). \
-                Scope: your own conversations and those of any subagent beneath you. This \
-                does not reach conversations belonging to any other agent."""
+                Scope: your own conversations and those of any subagent beneath you, \
+                excluding the one you are in — this finds earlier conversations, not the \
+                current one. It does not reach conversations belonging to any other agent."""
                 .formatted(MAX_LIMIT, DEFAULT_LIMIT);
     }
 
@@ -144,13 +153,23 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
      * never is.
      */
     private static List<Message> readable(List<Long> hitIds, Long agentId) {
-        @SuppressWarnings("unchecked")
-        List<Message> rows = JPA.em().createQuery(
-                        "SELECT m FROM Message m "
-                                + "WHERE m.id IN :ids AND m.conversation.agent.id IN :agentIds")
+        // The caller's own question is already in this conversation and was indexed
+        // before the tool ran, so without this the top hit is always the turn that
+        // asked — "which conversation discussed X" answers "this one". Excluding the
+        // whole conversation, not just that message, keeps a long thread from
+        // crowding out the older ones the caller is actually looking for.
+        var currentConversationId = ToolContext.conversationId();
+        var jpql = "SELECT m FROM Message m "
+                + "WHERE m.id IN :ids AND m.conversation.agent.id IN :agentIds"
+                + (currentConversationId != null ? " AND m.conversation.id <> :currentId" : "");
+        var query = JPA.em().createQuery(jpql)
                 .setParameter("ids", hitIds)
-                .setParameter("agentIds", subtreeIds(agentId))
-                .getResultList();
+                .setParameter("agentIds", subtreeIds(agentId));
+        if (currentConversationId != null) {
+            query.setParameter("currentId", currentConversationId);
+        }
+        @SuppressWarnings("unchecked")
+        List<Message> rows = query.getResultList();
         return rows;
     }
 
@@ -185,10 +204,20 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
             var m = byId.get(id);
             if (m == null) continue;
             out.add("- conversation %d | %s | %s: %s".formatted(
-                    m.conversation.id, m.createdAt, m.role, snippet(m.content)));
+                    m.conversation.id, stamp(m.createdAt), m.role, snippet(m.content)));
             if (out.size() == limit) break;
         }
         return "%d match(es) for \"%s\":%n%s".formatted(out.size(), query, String.join("\n", out));
+    }
+
+    /**
+     * Wall-clock time in the operator's zone. {@code Instant.toString()} renders UTC,
+     * which reads as hours adrift from the clock the operator and the assistant both
+     * treat as now.
+     */
+    private static String stamp(Instant createdAt) {
+        if (createdAt == null) return "unknown time";
+        return STAMP_FMT.format(createdAt.atZone(TimezoneResolver.appZone()));
     }
 
     private static String snippet(String content) {

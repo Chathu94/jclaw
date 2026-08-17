@@ -1,3 +1,4 @@
+import agents.ToolContext;
 import agents.ToolRegistry;
 import models.Agent;
 import models.SubagentRun;
@@ -7,12 +8,15 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConversationService;
+import services.TimezoneResolver;
 import services.Tx;
 import services.search.DirectLuceneMessageSearchRepository;
 import services.search.MessageSearchTestHooks;
 import tools.ConversationSearchTool;
 
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * JCLAW-1065: the tool's permission boundary is the point of the story, so these lean
@@ -189,6 +193,50 @@ class ConversationSearchToolTest extends UnitTest {
         assertTrue(out.contains(BODY),
                 "the subtree is transitive: a grandchild's conversation is still the "
                         + "caller's own work, got: " + out);
+    }
+
+    @Test
+    void excludesTheConversationTheCallerIsCurrentlyIn() {
+        // The caller's own question lands in this conversation and is indexed before the
+        // tool runs, so without the exclusion "which conversation discussed X" answers
+        // "the one you are in".
+        var token = "convsearchcurrenttoken";
+        var ids = commitInFreshTx(() -> {
+            var agent = newAgent("cs-cur", null);
+            var older = ConversationService.create(agent, "web", "old-" + System.nanoTime());
+            ConversationService.appendUserMessage(older, BODY + " " + token);
+            var current = ConversationService.create(agent, "web", "cur-" + System.nanoTime());
+            ConversationService.appendUserMessage(current, "asking about " + token);
+            return List.of(agent.id, current.id, older.id);
+        });
+        var caller = Agent.<Agent>findById(ids.get(0));
+
+        var out = ToolContext.withConversation(ids.get(1), () -> search(tool, caller, token));
+
+        assertFalse(out.contains("conversation " + ids.get(1)),
+                "the current conversation must not be returned to itself, got: " + out);
+        assertTrue(out.contains("conversation " + ids.get(2)),
+                "the earlier conversation is what the caller is looking for, got: " + out);
+    }
+
+    @Test
+    void rendersTimestampsInTheOperatorsZoneNotUtc() {
+        var token = "convsearchclocktoken";
+        long agentId = commitInFreshTx(() -> {
+            var agent = newAgent("cs-clock", null);
+            var convo = ConversationService.create(agent, "web", "c-" + System.nanoTime());
+            ConversationService.appendUserMessage(convo, BODY + " " + token);
+            return agent.id;
+        });
+
+        var out = search(tool, Agent.findById(agentId), token);
+
+        var expected = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                .format(Instant.now().atZone(TimezoneResolver.appZone()));
+        assertTrue(out.contains(expected),
+                "timestamp must read as the operator's wall clock (" + expected + "), got: " + out);
+        assertFalse(out.contains("T") && out.contains("Z"),
+                "a raw UTC instant must not leak into the result line, got: " + out);
     }
 
     @Test
