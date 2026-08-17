@@ -97,7 +97,10 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
                 excluding the one you are in — this finds earlier conversations, not the \
                 current one. It does not reach conversations belonging to any other agent. \
                 Timestamps are already the user's local wall-clock time in the named zone: \
-                repeat them as given, and do not convert or re-express them in UTC."""
+                repeat them as given, and do not convert or re-express them in UTC. The \
+                timestamp beside a result is when that message was written; any time \
+                mentioned inside the snippet text is quoted conversation content and may \
+                be stale, so prefer the timestamp when the two disagree."""
                 .formatted(MAX_LIMIT, DEFAULT_LIMIT);
     }
 
