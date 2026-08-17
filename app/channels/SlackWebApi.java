@@ -39,8 +39,6 @@ public final class SlackWebApi {
      *  shape, and with it the ambiguity that an all-caps bare name of the same form (e.g. {@code GENERAL},
      *  {@code UPDATES}) reads as an id; prefix with {@code #} to force the name path. */
     private static final Pattern USER_ID = Pattern.compile("^U[A-Z0-9]{6,}$");
-    /** {@code conversations.open} was refused for want of {@code im:write} — distinct from the
-     *  {@code missing_scope} the name path reports, which is about {@code channels:read}. */
     /** EventLogger category/source for this class, spelled as in SlackInbound. */
     private static final String CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_SLACK = "slack";
@@ -48,6 +46,8 @@ public final class SlackWebApi {
     /** Slack's error code when the bot token lacks a scope the call needs. */
     private static final String ERR_MISSING_SCOPE = "missing_scope";
 
+    /** {@code conversations.open} was refused for want of {@code im:write} — distinct from the
+     *  {@code missing_scope} the name path reports, which is about {@code channels:read}. */
     private static final String DM_MISSING_SCOPE = "dm_missing_scope";
     /** {@code conversations.open} failed for any other reason (unknown user, a bot user, API error). */
     private static final String DM_OPEN_FAILED = "dm_open_failed";
