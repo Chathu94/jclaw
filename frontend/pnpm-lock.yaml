@@ -109,8 +109,8 @@ importers:
         specifier: ^40.0.0
         version: 40.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3))
       stylelint-config-standard-vue:
-        specifier: ^1.0.0
-        version: 1.0.0(postcss-html@2.0.0(postcss@8.5.26))(stylelint-config-recommended@18.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3))
+        specifier: ^2.0.0
+        version: 2.0.0(postcss-html@1.8.1)(stylelint-config-html@2.0.0(postcss-html@1.8.1)(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-recommended-vue@2.0.0(postcss-html@1.8.1)(stylelint-config-html@2.0.0(postcss-html@1.8.1)(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-recommended@18.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-standard@40.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3))
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
@@ -4528,12 +4528,19 @@ packages:
     peerDependencies:
       stylelint: ^17.0.0
 
-  stylelint-config-standard-vue@1.0.0:
-    resolution: {integrity: sha512-wAzU7p6DSlo04pWfCbOcaMq09Nojt0FEsbdxhCBTdC7IguD9ZVl7FP/bvyA0HAHjZGC4JkW7m6WiQaoVMDSuFw==}
-    engines: {node: ^12 || >=14}
+  stylelint-config-standard-vue@2.0.0:
+    resolution: {integrity: sha512-JXHJVpIKusIS9AVJ7z82lN//2BG7N5dVs5+gzbGj51YLcJBp/B921XS2ymsrHNrQaBIiEo3oDK3gloAz0PMMeg==}
+    engines: {node: ^22.12 || >=24}
     peerDependencies:
-      postcss-html: ^1.0.0
-      stylelint: '>=14.0.0'
+      postcss-html: ^2.0.0
+      stylelint: '>=16.0.0'
+      stylelint-config-html: '>=2.0.0'
+      stylelint-config-recommended-vue: '>=2.0.0'
+      stylelint-config-standard: '>=36.0.0'
+      stylelint-config-standard-scss: '>=13.0.0'
+    peerDependenciesMeta:
+      stylelint-config-standard-scss:
+        optional: true
 
   stylelint-config-standard@40.0.0:
     resolution: {integrity: sha512-EznGJxOUhtWck2r6dJpbgAdPATIzvpLdK9+i5qPd4Lx70es66TkBPljSg4wN3Qnc6c4h2n+WbUrUynQ3fanjHw==}
@@ -10010,16 +10017,13 @@ snapshots:
     dependencies:
       stylelint: 17.14.1(supports-color@10.2.2)(typescript@6.0.3)
 
-  stylelint-config-standard-vue@1.0.0(postcss-html@2.0.0(postcss@8.5.26))(stylelint-config-recommended@18.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)):
+  stylelint-config-standard-vue@2.0.0(postcss-html@1.8.1)(stylelint-config-html@2.0.0(postcss-html@1.8.1)(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-recommended-vue@2.0.0(postcss-html@1.8.1)(stylelint-config-html@2.0.0(postcss-html@1.8.1)(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-recommended@18.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-standard@40.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)):
     dependencies:
       postcss-html: 2.0.0(postcss@8.5.26)
       stylelint: 17.14.1(supports-color@10.2.2)(typescript@6.0.3)
       stylelint-config-html: 2.0.0(postcss-html@2.0.0(postcss@8.5.26))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3))
       stylelint-config-recommended-vue: 2.0.0(postcss-html@2.0.0(postcss@8.5.26))(stylelint-config-html@2.0.0(postcss-html@2.0.0(postcss@8.5.26))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint-config-recommended@18.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)))(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3))
       stylelint-config-standard: 40.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3))
-    transitivePeerDependencies:
-      - stylelint-config-recommended
-      - stylelint-config-recommended-scss
 
   stylelint-config-standard@40.0.0(stylelint@17.14.1(supports-color@10.2.2)(typescript@6.0.3)):
     dependencies:
