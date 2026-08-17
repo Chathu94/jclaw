@@ -11,6 +11,7 @@ import tools.CcrRetrieveTool;
 import tools.CheckListTool;
 import tools.ConversationHistoryTool;
 import tools.ConversationListTool;
+import tools.ConversationSearchTool;
 import tools.ConversationSendTool;
 import tools.DateTimeTool;
 import tools.DiarizeAudioTool;
@@ -110,6 +111,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // conversation transcript (role, content, tool calls/results,
         // timestamps). Parent-owned access only.
         toolList.add(new ConversationHistoryTool());
+        toolList.add(new ConversationSearchTool());
         // JCLAW-326: conversation_send. Bidirectional parent↔child message
         // delivery. Parent→child appends a USER message on the child's
         // conversation; child→parent appends back to the parent's

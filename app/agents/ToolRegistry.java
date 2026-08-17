@@ -694,6 +694,10 @@ public class ToolRegistry {
      *  purpose-built agent stays a single click. */
     private static final String JCLAW_API_TOOL = "jclaw_api";
 
+    /** JCLAW-1065: reads conversation history beyond the current turn, so it sits
+     *  with the other cross-turn-reach tools rather than defaulting on. */
+    private static final String CONVERSATION_SEARCH_TOOL = "conversation_search";
+
     private static Set<String> computeDisabledTools(Agent agent) {
         var configs = AgentToolConfig.findByAgent(agent);
         var explicitState = new HashMap<String, Boolean>();
@@ -739,7 +743,7 @@ public class ToolRegistry {
      * API, one into stored memory — and main is the operator's own agent.
      */
     private static final List<String> OPT_IN_FOR_NON_MAIN_AGENTS = List.of(
-            MEMORY_TOOL, JCLAW_API_TOOL);
+            MEMORY_TOOL, JCLAW_API_TOOL, CONVERSATION_SEARCH_TOOL);
 
     /** Disables each named tool that carries no explicit enable row — the opt-in default. */
     private static void disableUnlessGranted(Set<String> disabled,
