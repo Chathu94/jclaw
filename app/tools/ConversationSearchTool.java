@@ -15,11 +15,11 @@ import services.search.MessageSearch;
 import java.io.IOException;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * JCLAW-1065: keyword search over conversation history, on the BM25 index the
@@ -39,6 +39,26 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
     /** Public so the default-package tests can name it without a literal. */
     public static final String TOOL_NAME = "conversation_search";
     private static final String PARAM_QUERY = "query";
+    private static final String PARAM_LIMIT = "limit";
+
+    /**
+     * Stands in for "no current conversation" — the tool also runs outside a chat turn,
+     * from a task fire. No row carries a negative id, so the exclusion matches nothing
+     * and the query stays one static string rather than two assembled at runtime.
+     */
+    private static final long NO_CONVERSATION = -1L;
+
+    /**
+     * The permission boundary and the self-exclusion, as one query. Every value is bound;
+     * nothing is concatenated at runtime, so there is no shape here for a reader — or a
+     * scanner — to mistake for an injection site.
+     */
+    private static final String READABLE_JPQL = """
+            SELECT m FROM Message m
+             WHERE m.id IN :ids
+               AND m.conversation.agent.id IN :agentIds
+               AND m.conversation.id <> :excludedId
+            """;
     static final int DEFAULT_LIMIT = 20;
     static final int MAX_LIMIT = 50;
 
@@ -114,7 +134,7 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
         var props = new LinkedHashMap<String, Object>();
         props.put(PARAM_QUERY, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Keywords to search for (required)."));
-        props.put("limit", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+        props.put(PARAM_LIMIT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Maximum messages to return (1-" + MAX_LIMIT + ", default " + DEFAULT_LIMIT + ")."));
         return Map.of(
@@ -136,9 +156,9 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
         }
         var query = args.get(PARAM_QUERY).getAsString().strip();
         int limit = DEFAULT_LIMIT;
-        if (args.has("limit") && !args.get("limit").isJsonNull()) {
+        if (args.has(PARAM_LIMIT) && !args.get(PARAM_LIMIT).isJsonNull()) {
             try {
-                limit = Math.clamp(args.get("limit").getAsInt(), 1, MAX_LIMIT);
+                limit = Math.clamp(args.get(PARAM_LIMIT).getAsInt(), 1, MAX_LIMIT);
             } catch (NumberFormatException _) {
                 return "Error: 'limit' must be an integer.";
             }
@@ -169,18 +189,13 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
         // asked — "which conversation discussed X" answers "this one". Excluding the
         // whole conversation, not just that message, keeps a long thread from
         // crowding out the older ones the caller is actually looking for.
-        var currentConversationId = ToolContext.conversationId();
-        var jpql = "SELECT m FROM Message m "
-                + "WHERE m.id IN :ids AND m.conversation.agent.id IN :agentIds"
-                + (currentConversationId != null ? " AND m.conversation.id <> :currentId" : "");
-        var query = JPA.em().createQuery(jpql)
-                .setParameter("ids", hitIds)
-                .setParameter("agentIds", subtreeIds(agentId));
-        if (currentConversationId != null) {
-            query.setParameter("currentId", currentConversationId);
-        }
+        var current = ToolContext.conversationId();
         @SuppressWarnings("unchecked")
-        List<Message> rows = query.getResultList();
+        List<Message> rows = JPA.em().createQuery(READABLE_JPQL)
+                .setParameter("ids", hitIds)
+                .setParameter("agentIds", subtreeIds(agentId))
+                .setParameter("excludedId", current != null ? current : NO_CONVERSATION)
+                .getResultList();
         return rows;
     }
 
@@ -210,14 +225,14 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
         var byId = new LinkedHashMap<Long, Message>();
         for (var m : rows) byId.put(m.id, m);
 
-        var out = new ArrayList<String>();
-        for (var id : order) {
-            var m = byId.get(id);
-            if (m == null) continue;
-            out.add("- conversation %d | %s | %s: %s".formatted(
-                    m.conversation.id, stamp(m.createdAt), m.role, snippet(m.content)));
-            if (out.size() == limit) break;
-        }
+        // Walk the ranked ids, keep the ones the boundary let through, stop at the cap.
+        var out = order.stream()
+                .map(byId::get)
+                .filter(Objects::nonNull)
+                .limit(limit)
+                .map(m -> "- conversation %d | %s | %s: %s".formatted(
+                        m.conversation.id, stamp(m.createdAt), m.role, snippet(m.content)))
+                .toList();
         return "%d match(es) for \"%s\":%n%s".formatted(out.size(), query, String.join("\n", out));
     }
 
