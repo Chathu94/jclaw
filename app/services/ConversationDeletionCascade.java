@@ -1,5 +1,6 @@
 package services;
 
+import models.Agent;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
 
@@ -78,6 +79,14 @@ public final class ConversationDeletionCascade {
         //    cleanup would have removed. JCLAW-673: collect the ids first so
         //    their SUBAGENT_RUN full-text docs can be evicted after the bulk
         //    JPQL DELETE, which never fires SubagentRun.@PostRemove.
+        // JCLAW-1066: capture the spawned agents before their run rows go. Once the
+        // run is deleted nothing references them, so they would survive as rows no
+        // code path can reach again.
+        List<Long> childAgentIds = em.createQuery(
+                "SELECT sr.childAgent.id FROM SubagentRun sr "
+                        + "WHERE sr.parentConversation.id IN :ids "
+                        + "   OR sr.childConversation.id IN :ids", Long.class)
+                .setParameter("ids", ids).getResultList();
         List<Long> subagentRunIds = em.createQuery(
                 "SELECT sr.id FROM SubagentRun sr "
                         + "WHERE sr.parentConversation.id IN :ids "
@@ -117,6 +126,13 @@ public final class ConversationDeletionCascade {
         evictAndCommit(LuceneIndexer.Scope.CONVERSATION_MESSAGE, messageIds);
         // JCLAW-673: evict the SUBAGENT_RUN docs for the rows swept in step 2.
         evictAndCommit(LuceneIndexer.Scope.SUBAGENT_RUN, subagentRunIds);
+        // Delete through AgentService so each agent's own cascade still runs — its
+        // workspace directory, memories and full-text docs sit outside the FK graph.
+        // Null-guarded because two runs in one chunk can name the same child agent.
+        for (var agentId : childAgentIds) {
+            Agent childAgent = Agent.findById(agentId);
+            if (childAgent != null) AgentService.delete(childAgent);
+        }
         return deleted;
     }
 

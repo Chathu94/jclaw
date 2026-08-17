@@ -203,6 +203,53 @@ class CascadeLuceneCleanupTest extends UnitTest {
                 "deleting the parent conversation must evict the swept SUBAGENT_RUN docs");
     }
 
+    // ── JCLAW-1066: the child Agent row itself ────────────────────────────
+
+    @Test
+    void conversationDeleteRemovesTheSubagentsItCreated() {
+        var ids = commitInFreshTx(() -> {
+            var parent = newAgent("cl-aparent");
+            parent.save();
+            var child = newAgent("cl-achild");
+            child.parentAgent = parent;
+            child.save();
+
+            var pc = ConversationService.create(parent, "web", "p-" + System.nanoTime());
+            var cc = ConversationService.create(child, "subagent", null);
+            cc.parentConversation = pc;
+            cc.save();
+
+            var run = new SubagentRun();
+            run.parentAgent = parent;
+            run.childAgent = child;
+            run.parentConversation = pc;
+            run.childConversation = cc;
+            run.label = "run-label";
+            run.outcome = "subrunagentrowtoken";
+            run.status = SubagentRun.Status.COMPLETED;
+            run.endedAt = Instant.now();
+            run.save();
+            return List.of(pc.id, child.id, parent.id);
+        });
+        long parentConvoId = ids.get(0);
+        long childAgentId = ids.get(1);
+        long parentAgentId = ids.get(2);
+
+        // Read through fresh transactions on both sides. A findById on the test's own
+        // thread would seed its persistence context, and the post-delete lookup would
+        // then be answered from that first-level cache instead of the database — the
+        // row is gone but the assertion still sees the cached copy.
+        assertNotNull(commitInFreshTx(() -> Agent.<Agent>findById(childAgentId)),
+                "child agent must exist before the delete");
+
+        commitInFreshTx(() -> ConversationService.deleteByIds(List.of(parentConvoId)));
+
+        assertNull(commitInFreshTx(() -> Agent.<Agent>findById(childAgentId)),
+                "deleting the conversation must delete the subagent it spawned, not just its run row");
+        assertNotNull(commitInFreshTx(() -> Agent.<Agent>findById(parentAgentId)),
+                "the parent agent owns the conversation but must survive its deletion");
+    }
+
     // ── TASK_RUN_MESSAGE via TaskExecutor.pruneRunHistory ─────────────────
 
     @Test
