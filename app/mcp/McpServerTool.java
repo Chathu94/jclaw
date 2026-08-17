@@ -183,11 +183,38 @@ public final class McpServerTool implements ToolRegistry.Tool {
             // fix, dragging time-to-first-token into the minute range.
             return ToolRegistry.ToolResult.text(
                     "MCP server '" + serverName + "' has no action named '" + actionName + "'. "
+                            + envelopeHint(actionName, args)
                             + "Available actions: " + enumerateActionNames()
                             + ". Call mcp_" + serverName + " with empty arguments to "
                             + "retrieve the full input schemas if needed.");
         }
         return adapter.executeRich(actionArgs, agent);
+    }
+
+    /**
+     * A bare action list does not correct a model that read {@code tool} as
+     * "which server" and re-nested the real call under {@code args} — it
+     * re-sends the same wrong shape until the round budget runs out.
+     *
+     * @return a corrective sentence ending in a space, empty for a plain
+     *         unknown action (typo, stale tool list).
+     */
+    private String envelopeHint(String actionName, JsonObject args) {
+        if (args.has("args") && args.get("args").isJsonObject()) {
+            var inner = args.getAsJsonObject("args");
+            if (inner.has("tool") && inner.get("tool").isJsonPrimitive()) {
+                var nested = inner.get("tool").getAsString();
+                if (ToolRegistry.lookupTool(McpServer.toolName(serverName, nested)) != null) {
+                    return "The envelope is nested one level too deep — '" + nested
+                            + "' is the action. Call {\"tool\": \"" + nested
+                            + "\", \"args\": {...}} with the action's own arguments at the top of `args`. ";
+                }
+            }
+        }
+        if (actionName.equals(serverName) || actionName.equals(name())) {
+            return "That is this server's own name, not an action — `tool` takes the action name. ";
+        }
+        return "";
     }
 
     private ToolRegistry.ToolResult enumerateActions() {

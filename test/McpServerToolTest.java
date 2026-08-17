@@ -332,6 +332,70 @@ class McpServerToolTest extends UnitTest {
                         + result.text());
     }
 
+    // ==================== envelope-misuse hints ====================
+
+    @Test
+    void nestedEnvelopeNamesTheRealActionAndTheCorrectedShape() {
+        // The exact payload a weaker model emitted against google-workspace-mcp:
+        // server name in the `tool` slot, real call re-nested under `args`. The
+        // bare 119-name list left it looping the same shape until the round
+        // budget ran out, so the hint has to name the mistake, not just deny it.
+        var serverName = "google-workspace-mcp";
+        var adapter = recordingAdapter("mcp_" + serverName + "_search_gmail_messages");
+        ToolRegistry.publish(List.of(adapter));
+
+        var result = new McpServerTool(serverName).executeRich(
+                "{\"tool\":\"google-workspace-mcp\",\"args\":{\"tool\":\"search_gmail_messages\","
+                        + "\"tool_args\":{\"q\":\"is:unread\"}}}", null);
+
+        assertTrue(result.text().contains("nested one level too deep"),
+                "hint must name the nesting, not just deny the action: " + result.text());
+        assertTrue(result.text().contains("search_gmail_messages"),
+                "hint must surface the action the model already supplied: " + result.text());
+        assertNull(adapter.lastArgs,
+                "the hint corrects the model — it must not silently dispatch a "
+                        + "malformed envelope, which would mask the defect");
+    }
+
+    @Test
+    void serverNameInTheActionSlotIsCalledOutAsSuch() {
+        var serverName = "github";
+        var result = new McpServerTool(serverName).executeRich(
+                "{\"tool\":\"github\",\"args\":{}}", null);
+        assertTrue(result.text().contains("server's own name"),
+                "the server name is the least visible wrong answer in a long "
+                        + "action list, so it gets named explicitly: " + result.text());
+    }
+
+    @Test
+    void prefixedHandleNameInTheActionSlotIsCalledOutAsSuch() {
+        // Models also echo the function-calling name itself, `mcp_<server>`.
+        var result = new McpServerTool("github").executeRich(
+                "{\"tool\":\"mcp_github\",\"args\":{}}", null);
+        assertTrue(result.text().contains("server's own name"), result.text());
+    }
+
+    @Test
+    void plainUnknownActionGetsNoEnvelopeHint() {
+        // A typo or a stale tool name is not an envelope mistake; adding a hint
+        // there would teach the model to restructure a call that was well-formed.
+        var result = new McpServerTool("absent-" + System.nanoTime()).executeRich(
+                "{\"tool\":\"create_issue\",\"args\":{}}", null);
+        assertFalse(result.text().contains("nested one level too deep"), result.text());
+        assertFalse(result.text().contains("server's own name"), result.text());
+    }
+
+    @Test
+    void unregisteredInnerToolValueIsNotMistakenForNesting() {
+        // `args.tool` only means nesting when it resolves to a real action —
+        // otherwise an action that legitimately takes a `tool` argument would
+        // be told to restructure a correct call.
+        var result = new McpServerTool("github").executeRich(
+                "{\"tool\":\"github\",\"args\":{\"tool\":\"not_a_real_action\"}}", null);
+        assertFalse(result.text().contains("nested one level too deep"), result.text());
+        assertTrue(result.text().contains("server's own name"), result.text());
+    }
+
     // ==================== helpers ====================
 
     /** Test double that records the last argsJson it received and returns a
