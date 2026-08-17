@@ -231,10 +231,11 @@ class ConversationSearchToolTest extends UnitTest {
 
         var out = search(tool, Agent.findById(agentId), token);
 
-        var expected = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        var expected = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm XXX")
                 .format(Instant.now().atZone(TimezoneResolver.appZone()));
         assertTrue(out.contains(expected),
-                "timestamp must read as the operator's wall clock (" + expected + "), got: " + out);
+                "timestamp must read as the operator's wall clock with its offset ("
+                        + expected + "), got: " + out);
         assertFalse(out.contains("T") && out.contains("Z"),
                 "a raw UTC instant must not leak into the result line, got: " + out);
     }

@@ -50,9 +50,15 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
      */
     private static final int LUCENE_WINDOW = 500;
 
-    /** Result timestamps, rendered in the operator's zone. */
+    /**
+     * Result timestamps, in the operator's zone. The offset is part of the format on
+     * purpose: an unlabelled wall-clock time is indistinguishable from UTC, and a
+     * reader that finds a conflicting time in a snippet has no grounds to prefer this
+     * one. Per line rather than once in the header because the compression pipeline
+     * can summarise away whole lines, the header among them.
+     */
     private static final DateTimeFormatter STAMP_FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm XXX");
 
     /** Characters of message body returned per hit. */
     private static final int SNIPPET_CHARS = 300;
