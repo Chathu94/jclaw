@@ -78,7 +78,7 @@ public final class TaskWriteService {
         t.payloadType = readOptionalString(body, KEY_PAYLOAD_TYPE);
         t.modelProvider = readOptionalString(body, KEY_MODEL_PROVIDER);
         t.modelId = readOptionalString(body, KEY_MODEL_ID);
-        t.enabledToolNames = readOptionalString(body, KEY_ENABLED_TOOL_NAMES);
+        t.enabledToolNames = readToolNameList(body, KEY_ENABLED_TOOL_NAMES);
         t.workdir = readOptionalString(body, KEY_WORKDIR);
         t.preCheck = readOptionalString(body, KEY_PRE_CHECK);
         t.script = readOptionalString(body, KEY_SCRIPT);
@@ -109,6 +109,21 @@ public final class TaskWriteService {
 
         t.save();
         return t;
+    }
+
+    /**
+     * JCLAW-1068: {@code enabledToolNames} is stored as a JSON array string but arrives
+     * either way — {@code ApiTasksController.TaskRequest} declares it {@code List<String>}
+     * while {@code TaskTool} sends the already-encoded string. {@link #readOptionalString}
+     * cannot take the array form: {@code JsonArray.getAsString()} throws for any size but
+     * one, so a two-tool allow-list 500'd instead of persisting.
+     */
+    public static String readToolNameList(JsonObject body, String key) {
+        if (!body.has(key)) return null;
+        var el = body.get(key);
+        if (el.isJsonNull()) return null;
+        if (el.isJsonArray()) return el.getAsJsonArray().isEmpty() ? null : el.toString();
+        return readOptionalString(body, key);
     }
 
     public static String readOptionalString(JsonObject body, String key) {
@@ -152,7 +167,7 @@ public final class TaskWriteService {
         if (body.has(KEY_PAYLOAD_TYPE))        { task.payloadType       = readOptionalString(body, KEY_PAYLOAD_TYPE);        changed = true; }
         if (body.has(KEY_MODEL_PROVIDER))      { task.modelProvider     = readOptionalString(body, KEY_MODEL_PROVIDER);      changed = true; }
         if (body.has(KEY_MODEL_ID))            { task.modelId           = readOptionalString(body, KEY_MODEL_ID);            changed = true; }
-        if (body.has(KEY_ENABLED_TOOL_NAMES))  { task.enabledToolNames  = readOptionalString(body, KEY_ENABLED_TOOL_NAMES);  changed = true; }
+        if (body.has(KEY_ENABLED_TOOL_NAMES))  { task.enabledToolNames  = readToolNameList(body, KEY_ENABLED_TOOL_NAMES);  changed = true; }
         if (body.has(KEY_WORKDIR))             { task.workdir           = readOptionalString(body, KEY_WORKDIR);             changed = true; }
         if (body.has(KEY_PRE_CHECK))           { task.preCheck          = readOptionalString(body, KEY_PRE_CHECK);           changed = true; }
         if (body.has(KEY_SCRIPT))              { task.script            = readOptionalString(body, KEY_SCRIPT);              changed = true; }

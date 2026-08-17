@@ -14,6 +14,7 @@ import services.TaskExecutor;
 import services.Tx;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -58,6 +59,8 @@ class TaskExecutorTest extends UnitTest {
 
     private com.sun.net.httpserver.HttpServer llmServer;
     private int port;
+    /** Last chat-completions request body, so a test can assert on the tool schema sent. */
+    private final AtomicReference<String> lastLlmRequest = new AtomicReference<>();
 
     @BeforeEach
     void setup() throws Exception {
@@ -408,6 +411,57 @@ class TaskExecutorTest extends UnitTest {
         return agent;
     }
 
+    // === JCLAW-1068: per-task toolset restriction ===
+
+    @Test
+    void enabledToolNamesNarrowsTheToolSchemaSentToTheModel() throws Exception {
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+
+        var agent = createAgent("restricted-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "restricted", "Do it.", Task.Type.IMMEDIATE);
+        task.enabledToolNames = "[\"filesystem\"]";
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        fireOnVirtualThread(task);
+
+        assertEquals(List.of("filesystem"), toolNamesSentToModel(),
+                "only the allow-listed tool may be advertised to the model");
+    }
+
+    @Test
+    void withoutAnAllowlistTheAgentsFullToolsetIsOffered() throws Exception {
+        startLlmServer(simpleResponse("done"));
+        configureProvider();
+
+        var agent = createAgent("open-agent", "test-provider", "test-model");
+        var task = persistTask(agent, "unrestricted", "Do it.", Task.Type.IMMEDIATE);
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        fireOnVirtualThread(task);
+
+        var names = toolNamesSentToModel();
+        assertTrue(names.size() > 1,
+                "a null allow-list must leave the agent's toolset intact, got: " + names);
+        assertTrue(names.contains("filesystem"),
+                "baseline for the restricted case: filesystem is offered when unrestricted");
+    }
+
+    /** Tool names in the {@code tools} array of the captured chat-completions request. */
+    private List<String> toolNamesSentToModel() {
+        var body = lastLlmRequest.get();
+        assertNotNull(body, "no chat-completions request was captured");
+        var root = com.google.gson.JsonParser.parseString(body).getAsJsonObject();
+        if (!root.has("tools")) return List.of();
+        return root.getAsJsonArray("tools").asList().stream()
+                .map(t -> t.getAsJsonObject().getAsJsonObject("function").get("name").getAsString())
+                .sorted()
+                .toList();
+    }
+
     private Task persistTask(Agent agent, String name, String description, Task.Type type) {
         var task = new Task();
         task.agent = agent;
@@ -425,6 +479,8 @@ class TaskExecutorTest extends UnitTest {
         llmServer = com.sun.net.httpserver.HttpServer.create(
                 new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         llmServer.createContext("/chat/completions", exchange -> {
+            lastLlmRequest.set(new String(exchange.getRequestBody().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8));
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, staticResponse.getBytes().length);
             exchange.getResponseBody().write(staticResponse.getBytes());

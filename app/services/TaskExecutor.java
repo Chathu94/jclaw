@@ -71,7 +71,7 @@ public final class TaskExecutor {
      * may be a detached entity once the surrounding Tx commits, but
      * those are primitive/String fields that remain accessible.
      */
-    private record PreparedFire(Agent agent, String userPrompt) {}
+    private record PreparedFire(Agent agent, String userPrompt, Set<String> allowedTools, String taskName) {}
 
     /**
      * Run one fire of {@code task} and return the persisted TaskRun.
@@ -319,7 +319,8 @@ public final class TaskExecutor {
             var prep = Tx.run(() -> {
                 var t = (Task) Task.findById(task.id);
                 if (t == null) return null;
-                return new PreparedFire(t.agent, resolveAgentPrompt(t));
+                return new PreparedFire(t.agent, resolveAgentPrompt(t),
+                        TaskToolPolicy.parse(t.enabledToolNames), t.name);
             });
             if (prep == null) {
                 // Task deleted after the TaskRun row was opened. Mark the
@@ -337,7 +338,8 @@ public final class TaskExecutor {
             // SystemPromptAssembler, ToolCallLoopRunner, ParallelToolExecutor —
             // routed entirely through this sink so writes land in
             // task_run_message rather than conversation_message.
-            var outcome = AgentRunner.runForTask(prep.agent(), prep.userPrompt(), sink);
+            var outcome = AgentRunner.runForTask(prep.agent(), prep.userPrompt(), sink,
+                    prep.allowedTools(), prep.taskName());
 
             // The assistant's final reply becomes the outputSummary the
             // monitoring UI surfaces. truncated lives on the TaskRun's

@@ -16,12 +16,14 @@ import services.ConversationService;
 import services.EventLogger;
 import services.SubagentRegistry;
 import services.TaskRunRegistry;
+import services.TaskToolPolicy;
 import services.Tx;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -419,6 +421,21 @@ public class AgentRunner {
      */
     public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
                                                             AgentExecutionSink sink) {
+        return runForTask(agent, userPrompt, sink, null, null);
+    }
+
+    /**
+     * JCLAW-1068 overload: {@code allowedTools} narrows this fire's toolset to a per-task
+     * allow-list ({@code null} = the agent's full toolset). Applied to the {@code ToolDef}
+     * list below, which is also what {@code ToolCallLoopRunner} turns into the JCLAW-883
+     * dispatch guard — so a withheld tool is neither advertised nor executable.
+     *
+     * @param allowedTools parsed {@code Task.enabledToolNames}, or {@code null}
+     * @param taskName     names the task in the audit event; may be {@code null}
+     */
+    public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
+                                                            AgentExecutionSink sink,
+                                                            Set<String> allowedTools, String taskName) {
         Objects.requireNonNull(agent, EVT_CATEGORY_AGENT);
         Objects.requireNonNull(userPrompt, "userPrompt");
         Objects.requireNonNull(sink, "sink");
@@ -441,7 +458,8 @@ public class AgentRunner {
         }
         var prelude = Tx.run(() -> new Prelude(
                 SystemPromptAssembler.assemble(agent, userPrompt, null, null),
-                ToolRegistry.getToolDefsForAgent(agent)));
+                TaskToolPolicy.restrict(ToolRegistry.getToolDefsForAgent(agent),
+                        allowedTools, taskName, agent.name)));
         var assembled = prelude.assembled();
         var tools = prelude.tools();
 
