@@ -72,7 +72,7 @@ public final class TaskToolPolicy {
                 if (name != null && !name.isBlank()) names.add(name.trim());
             }
             return names;
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             return null;
         }
     }
