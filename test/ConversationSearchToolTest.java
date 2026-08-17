@@ -231,8 +231,9 @@ class ConversationSearchToolTest extends UnitTest {
 
         var out = search(tool, Agent.findById(agentId), token);
 
-        var expected = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm XXX")
-                .format(Instant.now().atZone(TimezoneResolver.appZone()));
+        var zone = TimezoneResolver.appZone();
+        var expected = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                .format(Instant.now().atZone(zone)) + " (" + zone.getId() + ")";
         assertTrue(out.contains(expected),
                 "timestamp must read as the operator's wall clock with its offset ("
                         + expected + "), got: " + out);

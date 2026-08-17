@@ -51,14 +51,14 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
     private static final int LUCENE_WINDOW = 500;
 
     /**
-     * Result timestamps, in the operator's zone. The offset is part of the format on
-     * purpose: an unlabelled wall-clock time is indistinguishable from UTC, and a
-     * reader that finds a conflicting time in a snippet has no grounds to prefer this
-     * one. Per line rather than once in the header because the compression pipeline
-     * can summarise away whole lines, the header among them.
+     * Result timestamps, in the operator's zone, labelled with the zone's NAME rather
+     * than its numeric offset. A model reads "11:09 +08:00" as a time it may normalise
+     * and hands back 03:09 — the UTC value — still labelled +08. A named zone cannot be
+     * applied arithmetically, so the value stays put. Per line, not once in a header,
+     * because the compression pipeline can summarise whole lines away.
      */
     private static final DateTimeFormatter STAMP_FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm XXX");
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
     /** Characters of message body returned per hit. */
     private static final int SNIPPET_CHARS = 300;
@@ -95,7 +95,9 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
                 Optional: `limit` (1-%d, default %d). \
                 Scope: your own conversations and those of any subagent beneath you, \
                 excluding the one you are in — this finds earlier conversations, not the \
-                current one. It does not reach conversations belonging to any other agent."""
+                current one. It does not reach conversations belonging to any other agent. \
+                Timestamps are already the user's local wall-clock time in the named zone: \
+                repeat them as given, and do not convert or re-express them in UTC."""
                 .formatted(MAX_LIMIT, DEFAULT_LIMIT);
     }
 
@@ -223,7 +225,8 @@ public class ConversationSearchTool implements ToolRegistry.Tool {
      */
     private static String stamp(Instant createdAt) {
         if (createdAt == null) return "unknown time";
-        return STAMP_FMT.format(createdAt.atZone(TimezoneResolver.appZone()));
+        var zone = TimezoneResolver.appZone();
+        return STAMP_FMT.format(createdAt.atZone(zone)) + " (" + zone.getId() + ")";
     }
 
     private static String snippet(String content) {
