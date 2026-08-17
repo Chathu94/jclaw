@@ -6,6 +6,7 @@ import llm.LlmTypes.ToolDef;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -26,6 +27,11 @@ public final class TaskToolPolicy {
     /** {@code EventLog.message} is {@code length = 500}; oversized text fails the insert. */
     private static final int MESSAGE_LIMIT = 500;
 
+    /** Registered tool names: natives like {@code web_search}, MCP handles like
+     *  {@code mcp_google-workspace-mcp}. Gates the delimited form so stray prose
+     *  cannot pass as a tool list. */
+    private static final Pattern TOOL_NAME = Pattern.compile("[A-Za-z0-9_.-]+");
+
     private TaskToolPolicy() {}
 
     /**
@@ -41,7 +47,8 @@ public final class TaskToolPolicy {
      */
     public static Set<String> parse(String json) {
         if (json == null || json.isBlank()) return null;
-        final var parsed = tryParseArray(json);
+        var parsed = tryParseArray(json);
+        if (parsed == null) parsed = tryParseDelimited(json);
         if (parsed != null && parsed.isEmpty()) return null;
         if (parsed == null) {
             // Fail open, loudly. Failing closed would strand a task with zero tools over a
@@ -68,6 +75,32 @@ public final class TaskToolPolicy {
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * Accept the shapes already in the column. {@code TaskTool} stored whatever the model
+     * wrote — live data holds {@code "a,b,c"} and a bare {@code "a"} alongside JSON arrays,
+     * because nothing read or validated the field before JCLAW-1068. Honouring them matters:
+     * dropping one to "unrestricted" would run a task the operator believed was fenced.
+     *
+     * <p>Anything carrying JSON punctuation was *meant* to be JSON, so a parse failure there
+     * is malformed rather than a name list — otherwise {@code ["exec",} would be read as the
+     * tool {@code "exec"} and silently fence the task down to nothing.
+     *
+     * @return the names, or {@code null} when this is not a plain delimited name list
+     */
+    private static Set<String> tryParseDelimited(String raw) {
+        if (raw.chars().anyMatch(c -> c == '[' || c == ']' || c == '{' || c == '}' || c == '"')) {
+            return null;
+        }
+        var names = new LinkedHashSet<String>();
+        for (var part : raw.split(",")) {
+            var name = part.trim();
+            if (name.isEmpty()) continue;
+            if (!TOOL_NAME.matcher(name).matches()) return null;
+            names.add(name);
+        }
+        return names;
     }
 
     /**

@@ -62,6 +62,28 @@ public class TaskToolPolicyTest extends UnitTest {
     }
 
     @Test
+    public void acceptsTheCommaSeparatedFormAlreadyInTheColumn() {
+        // TaskTool stored whatever the model wrote and nothing validated it, so live rows
+        // hold this shape. Rejecting it would run a task the operator believed was fenced.
+        assertEquals(Set.of("datetime", "web_search", "web_fetch", "mcp_google-workspace-mcp"),
+                TaskToolPolicy.parse("datetime,web_search,web_fetch,mcp_google-workspace-mcp"));
+    }
+
+    @Test
+    public void acceptsABareSingleToolName() {
+        assertEquals(Set.of("mcp_google-workspace-mcp"),
+                TaskToolPolicy.parse("mcp_google-workspace-mcp"));
+    }
+
+    @Test
+    public void truncatedJsonIsMalformedNotASingleToolName() {
+        // The trap the delimited form opens: read as a name list, {@code ["exec",} would
+        // fence the task down to nothing instead of failing open.
+        assertNull(TaskToolPolicy.parse("[\"exec\","));
+        assertNull(TaskToolPolicy.parse("{\"exec\""));
+    }
+
+    @Test
     public void malformedAllowlistFailsOpen() {
         // Fail open rather than strand the task; the parse path logs a warning.
         assertNull(TaskToolPolicy.parse("[\"exec\","));
