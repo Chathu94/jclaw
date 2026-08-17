@@ -12,7 +12,18 @@ import { sectionGroups } from '~/components/settings/sections'
  * reads back what is stored and that a conf-capped save surfaces the backend's reason
  * rather than silently reverting.
  */
-function baseEndpoints(configEntries: Array<{ key: string, value: string }> = []) {
+interface GrantSummary {
+  totalGrants: number
+  agentsWithGrants: number
+  agents: Array<{ agentId: number, agentName: string, tools: string[] }>
+}
+
+const NO_GRANTS: GrantSummary = { totalGrants: 0, agentsWithGrants: 0, agents: [] }
+
+function baseEndpoints(
+  configEntries: Array<{ key: string, value: string }> = [],
+  summary: GrantSummary = NO_GRANTS,
+) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/config', () => ({
@@ -20,6 +31,7 @@ function baseEndpoints(configEntries: Array<{ key: string, value: string }> = []
   }))
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
   registerEndpoint('/api/providers', () => [])
+  registerEndpoint('/api/tool-approvals/summary', () => summary)
 }
 
 async function mountSettingsSection(sectionId: string) {
@@ -68,6 +80,41 @@ describe('Settings page — Tool Approvals', () => {
     const values = component.findAll('[data-testid="approval-off-channel-policy"] option')
       .map(o => (o.element as HTMLOptionElement).value)
     expect(values).toEqual(['allow', 'ask', 'deny'])
+  })
+
+  it('reports when nothing holds a standing grant', async () => {
+    baseEndpoints()
+    const component = await mountSettingsSection('approvals')
+
+    const rollup = component.find('[data-testid="standing-grants-rollup"]')
+    expect(rollup.exists()).toBe(true)
+    expect(rollup.text()).toContain('No standing grants')
+  })
+
+  it('rolls up standing grants across agents and links to each', async () => {
+    // The sweep this panel exists for: grants predating JCLAW-1061 are still in force
+    // and mostly unnecessary, and no per-agent page can tell you whether any remain.
+    baseEndpoints([], {
+      totalGrants: 3,
+      agentsWithGrants: 2,
+      agents: [
+        { agentId: 1, agentName: 'main', tools: ['exec', 'browser'] },
+        { agentId: 2, agentName: 'scout', tools: ['exec'] },
+      ],
+    })
+    const component = await mountSettingsSection('approvals')
+
+    const rollup = component.find('[data-testid="standing-grants-rollup"]')
+    expect(rollup.text()).toContain('3 standing grants across 2 agents')
+    expect(rollup.text()).toContain('main')
+    expect(rollup.text()).toContain('scout')
+    // Revoke is deliberately not here — it belongs on the agent's own page.
+    expect(rollup.text()).toContain('Revoke from the agent')
+    expect(rollup.findAll('button')).toHaveLength(0)
+
+    const links = rollup.findAll('a').map(a => a.attributes('href'))
+    expect(links).toContain('/agents/main')
+    expect(links).toContain('/agents/scout')
   })
 
   it('says a prompt still reaches you when someone else asks', async () => {

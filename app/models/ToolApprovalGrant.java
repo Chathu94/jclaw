@@ -11,6 +11,8 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import play.db.jpa.Model;
 
+import java.util.List;
+
 /**
  * JCLAW-385: a durable, restart-surviving record that a dangerous tool has
  * been approved "always" for an agent. Presence of a {@code (agent, toolName)}
@@ -41,6 +43,30 @@ public class ToolApprovalGrant extends Model {
     /** True when a durable always-grant exists for {@code (agentId, toolName)}. */
     public static boolean exists(Long agentId, String toolName) {
         return count("agent.id = ?1 AND toolName = ?2", agentId, toolName) > 0;
+    }
+
+    /**
+     * JCLAW-1062: drop the always-grant for {@code (agentId, toolName)}. The next
+     * dangerous dispatch for that pair prompts again, because
+     * {@link agents.DangerousActionGate} consults {@link #exists} and nothing else
+     * durable outlives the row — the in-process session set is separate and
+     * deliberately ephemeral.
+     *
+     * @return true if a row was removed; false when no grant existed, which lets the
+     * caller answer 404 rather than report a revoke that revoked nothing
+     */
+    public static boolean revoke(Long agentId, String toolName) {
+        return ToolApprovalGrant.delete("agent.id = ?1 AND toolName = ?2", agentId, toolName) > 0;
+    }
+
+    /** Standing grants for one agent, newest first. */
+    public static List<ToolApprovalGrant> findByAgent(Long agentId) {
+        return ToolApprovalGrant.find("agent.id = ?1 ORDER BY toolName", agentId).fetch();
+    }
+
+    /** Every standing grant, for the instance-wide roll-up. Ordered so the view is stable. */
+    public static List<ToolApprovalGrant> findAllGrants() {
+        return ToolApprovalGrant.find("ORDER BY agent.name, toolName").fetch();
     }
 
     /**

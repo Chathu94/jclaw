@@ -4,7 +4,18 @@
 // of Shell Execution — DangerousActionGate governs the exec tool, but the same policy
 // also decides whether SubagentAcpRunner may launch the coding harness (JCLAW-669), and
 // a reader of a "Shell Execution" panel would not expect to be changing that.
+//
+// JCLAW-1062 adds a read-only roll-up of standing grants below that control. Revoke
+// lives on each agent's page, since a grant is per-agent — but "does anything still
+// hold a standing grant?" is an instance-wide question, and answering it by opening
+// every agent in turn is exactly the gap that ticket exists to close.
 const { configData, saving, refresh } = useSettingsConfig()
+
+interface AgentGrants { agentId: number, agentName: string, tools: string[] }
+interface GrantSummary { totalGrants: number, agentsWithGrants: number, agents: AgentGrants[] }
+
+// No await: a suspending settings panel stalls the whole page on cold boot.
+const { data: summary } = useLazyFetch<GrantSummary>('/api/tool-approvals/summary')
 
 const POLICY_KEY = 'tool.approval.offChannelPolicy'
 
@@ -106,6 +117,46 @@ async function save(value: string) {
         An agent that you have previously granted &ldquo;always allow&rdquo; for a tool
         runs it without a prompt on any origin, independently of this setting.
       </p>
+
+      <!-- JCLAW-1062 roll-up. Read-only by design: revoke belongs on the agent's own
+           page, since a grant is per-agent. This answers the question that page cannot —
+           whether anything still holds one. -->
+      <div
+        v-if="summary"
+        class="pt-2 border-t border-border space-y-2"
+        data-testid="standing-grants-rollup"
+      >
+        <p
+          v-if="!summary.totalGrants"
+          class="text-xs text-fg-muted"
+        >
+          No standing grants. Every dangerous action is prompted.
+        </p>
+        <template v-else>
+          <p class="text-xs text-fg-strong">
+            {{ summary.totalGrants }} standing
+            {{ summary.totalGrants === 1 ? 'grant' : 'grants' }} across
+            {{ summary.agentsWithGrants }}
+            {{ summary.agentsWithGrants === 1 ? 'agent' : 'agents' }}.
+          </p>
+          <ul class="space-y-1">
+            <li
+              v-for="a in summary.agents"
+              :key="a.agentId"
+              class="text-xs text-fg-muted"
+            >
+              <NuxtLink
+                :to="`/agents/${a.agentName}`"
+                class="text-fg-strong underline underline-offset-2 hover:no-underline"
+              >{{ a.agentName }}</NuxtLink>
+              — <span class="font-mono">{{ a.tools.join(', ') }}</span>
+            </li>
+          </ul>
+          <p class="text-xs text-fg-muted">
+            Revoke from the agent&rsquo;s page.
+          </p>
+        </template>
+      </div>
     </div>
   </div>
 </template>

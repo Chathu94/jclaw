@@ -2585,6 +2585,11 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
       </div>
 
+      <!-- Standing tool approvals (JCLAW-1062): sits with Tools and MCP Servers
+           because all three answer "what may this agent do". Grants are per-agent,
+           so revoke lives here; Settings carries only a read-only roll-up. -->
+      <AgentToolApprovals :agent-id="editing?.id ?? null" />
+
       <!-- Workspace editor -->
       <div
         v-if="editing"

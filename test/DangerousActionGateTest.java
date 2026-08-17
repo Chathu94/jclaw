@@ -128,6 +128,40 @@ class DangerousActionGateTest extends UnitTest {
         assertEquals(Decision.ABORT, verdict.get(5, TimeUnit.SECONDS));
     }
 
+    // ── JCLAW-1062: revoking a standing grant restores the prompt ───────
+
+    @Test
+    void revokingAStandingGrantMakesTheNextDispatchPromptAgain() throws Exception {
+        var agent = boundAgent("gate-revoke");
+        var convId = telegramConvId(agent);
+        var agentId = agent.id;
+
+        // Persisted always-grant with the in-process set cleared, so the row alone
+        // is what suppresses the prompt — the JCLAW-385 restart-survival path.
+        commitInFreshTx(() -> {
+            ToolApprovalGrant.upsert(Agent.findById(agentId), DANGEROUS_TOOL);
+            return null;
+        });
+        DangerousActionGate.clearGrantsForTest();
+
+        assertEquals(Decision.PROCEED,
+                DangerousActionGate.guard(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}"),
+                "a standing grant must suppress the prompt");
+        assertEquals(0, server.countRequests("sendMessage"),
+                "no approval prompt may be sent while the grant stands");
+
+        commitInFreshTx(() -> ToolApprovalGrant.revoke(agentId, DANGEROUS_TOOL));
+        DangerousActionGate.clearGrantsForTest();
+
+        // The barrier is back: the dispatch now prompts instead of proceeding, and
+        // a denial aborts it. awaitPromptAndExtractId times out if no prompt is sent.
+        var verdict = runGateAsync(agent, convId, DANGEROUS_TOOL, "{\"command\":\"ls\"}");
+        var approvalId = awaitPromptAndExtractId();
+        TelegramApprovalService.resolve(approvalId, TelegramApprovalCallback.Decision.DENY, TG_USER);
+        assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS),
+                "after revoke the prompt governs again");
+    }
+
     // ── Non-dangerous tool → no gate, no prompt ────────────────────────
 
     @Test
