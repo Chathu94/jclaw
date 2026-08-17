@@ -616,6 +616,18 @@ export interface Task {
    * so the UI doesn't reimplement the fallback chain. Always present.
    */
   effectiveTimezone?: string
+  /**
+   * JCLAW-1068: tool allow-list for this task's fires. A JSON array, a
+   * comma-separated list or a bare name — the shapes TaskTool stored before the
+   * field was read. Null means the agent's full toolset.
+   */
+  enabledToolNames?: string | null
+  /**
+   * JCLAW-1062: recorded provenance, which decides fire-time trust. 'web' is the
+   * operator origin; null classifies as UNKNOWN and fails closed for dangerous
+   * tools. Read-only — trust may fall on mutation, never rise (JCLAW-1021).
+   */
+  originChannel?: string | null
   [key: string]: unknown
 }
 

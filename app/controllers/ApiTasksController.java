@@ -81,7 +81,11 @@ public class ApiTasksController extends Controller {
                             boolean autoDeleteOnComplete,
                             String contextFromTaskIds, Integer repeatLimit,
                             String timezone, String effectiveTimezone,
-                            Long runningRunId) {
+                            Long runningRunId,
+                            // JCLAW-1062: the recorded provenance of this task. Read-only —
+                            // it decides fire-time trust, and a null reads as UNKNOWN and
+                            // fails closed, which the Tasks page surfaces rather than hides.
+                            String originChannel) {
         static TaskView of(Task t) {
             return of(t, null, null);
         }
@@ -127,7 +131,8 @@ public class ApiTasksController extends Controller {
                     // a stable IANA id even when t.timezone is null
                     // (falls back through Config / conf / JVM default).
                     TimezoneResolver.resolve(t).getId(),
-                    runningRunId);
+                    runningRunId,
+                    t.originChannel);
         }
 
     }

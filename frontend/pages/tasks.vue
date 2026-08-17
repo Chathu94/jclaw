@@ -1619,6 +1619,14 @@ function zoneForTaskRender(task: Task): string | undefined {
                       </div>
                     </section>
                   </div>
+                  <!-- JCLAW-1062/1068: what this fire may do — tool allow-list and the
+                       origin that decides fire-time trust. Read-only; both are set
+                       elsewhere and origin cannot be raised. -->
+                  <TaskPermissions
+                    :enabled-tool-names="task.enabledToolNames"
+                    :origin-channel="task.originChannel"
+                  />
+
                   <!-- Run history: lazy-loaded TaskRuns, most-recent first. -->
                   <section>
                     <div class="text-[10px] uppercase tracking-wider font-medium text-fg-muted mb-1.5">
