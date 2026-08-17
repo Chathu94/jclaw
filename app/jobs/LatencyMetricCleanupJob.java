@@ -3,6 +3,7 @@ package jobs;
 import models.LatencyMetric;
 import play.jobs.Every;
 import play.jobs.Job;
+import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
@@ -22,6 +23,9 @@ import java.time.temporal.ChronoUnit;
  * to the default — to govern behavior; out-of-range / non-numeric values fall back
  * to the default with a one-shot warn. Mirrors {@code TaskCleanupJob}'s parsing.
  */
+// JCLAW-1067: @Every alone first fires a full interval after boot, so a 24h period
+// never elapses on an instance restarted more often than daily.
+@OnApplicationStart(async = true)
 @Every("24h")
 public class LatencyMetricCleanupJob extends Job<Void> {
 

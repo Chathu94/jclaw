@@ -4,6 +4,7 @@ import models.Task;
 import play.db.jpa.JPA;
 import play.jobs.Every;
 import play.jobs.Job;
+import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
 import services.TaskSchedulingService;
@@ -46,6 +47,9 @@ import java.util.List;
  * matches). If an operator wants to preserve LOST tasks for forensics
  * past the TTL, they can retry → PENDING → ACTIVE.
  */
+// JCLAW-1067: @Every alone first fires a full interval after boot, so a 24h period
+// never elapses on an instance restarted more often than daily.
+@OnApplicationStart(async = true)
 @Every("24h")
 public class TaskCleanupJob extends Job<Void> {
 

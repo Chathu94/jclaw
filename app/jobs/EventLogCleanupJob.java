@@ -4,11 +4,21 @@ import models.EventLog;
 import play.Play;
 import play.jobs.Every;
 import play.jobs.Job;
+import play.jobs.OnApplicationStart;
 import services.EventLogger;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 
+/**
+ * JCLAW-1067: {@code @Every} first fires one whole interval after boot, so a 24h
+ * period needs 24h of unbroken uptime before this runs even once. On an instance
+ * restarted more often than that it never ran, and the retention window went
+ * unenforced indefinitely — 178,740 rows past a 30-day window when measured.
+ * The startup trigger removes the uptime dependency; {@code async} keeps a bulk
+ * delete off the boot path, where a failure would otherwise abort startup.
+ */
+@OnApplicationStart(async = true)
 @Every("24h")
 public class EventLogCleanupJob extends Job<Void> {
 
