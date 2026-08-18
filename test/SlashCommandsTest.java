@@ -9,6 +9,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConversationService;
+import services.Tx;
 import slash.Commands;
 
 import java.time.Instant;
@@ -1495,6 +1496,38 @@ class SlashCommandsTest extends UnitTest {
 
         assertTrue(result.responseText().contains("Usage: /prompt"), result.responseText());
         assertTrue(result.responseText().contains("Zedusage outline"), result.responseText());
+    }
+
+    @Test
+    void promptRunsFromAThreadWithoutARequestTransaction() throws Exception {
+        // Regression: /prompt reads the library, and the Telegram polling thread
+        // has no request-scoped transaction — the first cut threw "No active
+        // EntityManager for name [default]" there while passing every test,
+        // because UnitTest and the web controller both supply an ambient one.
+        // Same shape as ChannelTest.channelConfigFindByTypeSurvivesCacheMiss...
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var response = new java.util.concurrent.atomic.AtomicReference<String>();
+        var thread = new Thread(() -> {
+            try {
+                // Seeded on this thread, not the test's: off-request Tx.run opens
+                // and commits its own transaction, whereas the test thread's is
+                // never committed — a fresh transaction could not see the row.
+                Tx.run(() -> seedPrompt("Zedbackground", "Body from a background thread.", null));
+                // current == null: the polling path resolves its conversation
+                // separately, and a null one must not be the thing that saves us.
+                response.set(Commands.execute(
+                        Commands.Command.PROMPT, agent, "telegram", "peer-bg", null, "Zedbackground")
+                        .responseText());
+            } catch (Throwable t) {
+                thrown.set(t);
+            }
+        });
+        thread.start();
+        thread.join(5_000);
+
+        assertNull(thrown.get(), () -> "/prompt threw off-request: "
+                + (thrown.get() == null ? "" : thrown.get().toString()));
+        assertTrue(response.get().contains("Body from a background thread."), response.get());
     }
 
     @Test

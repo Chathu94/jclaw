@@ -523,30 +523,28 @@ public final class Commands {
      * prompt costs a model call and a confusing answer.
      */
     private static Result executePrompt(Agent agent, String channelType, Conversation current, String args) {
-        var all = Prompt.findAllOrdered();
-        String response;
-        if (all.isEmpty()) {
-            response = "No saved prompts yet. Add some on the Prompts page.";
-        } else if (args == null) {
-            response = "Usage: /prompt <search words>\n\nSaved prompts:\n" + titleList(all);
-        } else {
-            var matches = matchPrompts(all, args);
-            response = switch (matches.size()) {
-                case 0 -> "No saved prompt matches \"" + args + "\".\n\nSaved prompts:\n" + titleList(all);
-                case 1 -> renderPrompt(matches.getFirst());
-                default -> "Several prompts match \"" + args + "\" — narrow the search:\n" + titleList(matches);
-            };
-        }
-        final String responseFinal = response;
-        if (current != null) {
-            final Long convId = current.id;
-            Tx.run(() -> {
-                var conv = (Conversation) Conversation.findById(convId);
-                if (conv != null) {
-                    ConversationService.appendAssistantMessage(conv, responseFinal, null);
-                }
-            });
-        }
+        // Prompt.findAllOrdered issues a JPQL query and needs an active
+        // EntityManager, so the whole handler is wrapped exactly as /usage is:
+        // the Telegram polling thread has no request-scoped transaction, and
+        // Tx.run joins the web one rather than opening a second.
+        var responseFinal = Tx.run(() -> {
+            var all = Prompt.findAllOrdered();
+            String response;
+            if (all.isEmpty()) {
+                response = "No saved prompts yet. Add some on the Prompts page.";
+            } else if (args == null) {
+                response = "Usage: /prompt <search words>\n\nSaved prompts:\n" + titleList(all);
+            } else {
+                var matches = matchPrompts(all, args);
+                response = switch (matches.size()) {
+                    case 0 -> "No saved prompt matches \"" + args + "\".\n\nSaved prompts:\n" + titleList(all);
+                    case 1 -> renderPrompt(matches.getFirst());
+                    default -> "Several prompts match \"" + args + "\" — narrow the search:\n" + titleList(matches);
+                };
+            }
+            persistCannedResponseInTx(current, response);
+            return response;
+        });
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/prompt " + (args == null ? "(list)" : args)
                         + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
