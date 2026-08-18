@@ -67,6 +67,12 @@ export interface UseComposerCompleter {
   readonly blocksSend: ComputedRef<boolean>
   /** Recompute from the textarea's current value. */
   update: (text: string) => void
+  /**
+   * Re-run the match against the text last passed to {@link update}. For a
+   * source whose options arrive asynchronously: the completer is pull-based,
+   * so without this the popup keeps the snapshot taken at the last keystroke.
+   */
+  refresh: () => void
   close: () => void
   moveHighlight: (direction: 'up' | 'down') => void
   /** Accept the highlighted option; returns the new textarea value, or null. */
@@ -109,6 +115,10 @@ export function useComposerCompleter(sources: CompletionSource[]): UseComposerCo
     close()
   }
 
+  function refresh() {
+    update(currentText.value)
+  }
+
   function close() {
     open.value = false
     options.value = []
@@ -143,6 +153,7 @@ export function useComposerCompleter(sources: CompletionSource[]): UseComposerCo
     activeSourceId,
     blocksSend,
     update,
+    refresh,
     close,
     moveHighlight,
     accept,

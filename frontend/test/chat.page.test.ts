@@ -1595,3 +1595,108 @@ describe('Chat page — input handlers', () => {
     expect(textarea.element.style.height).toBeDefined()
   })
 })
+
+/**
+ * JCLAW-1071 / JCLAW-1072: what the completion popup actually renders.
+ *
+ * The composable suites cover the state machines; these mount the page because
+ * the rows are a template concern. A UAT pass caught the /model popup rendering
+ * 59 blank rows — the row markup had grown a `v-if="opt.label"` and the model
+ * source supplies only `value` — which no composable-level test could see.
+ */
+describe('Chat page — completion popup rendering', () => {
+  const COMMANDS = [
+    { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
+    { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
+  ]
+
+  function setupCompleterApi() {
+    setupBaseChatApi()
+    registerEndpoint('/api/slash-commands', () => COMMANDS)
+    registerEndpoint('/api/prompts', () => [
+      {
+        id: 7,
+        title: 'Code review',
+        content: 'Review this diff for correctness.',
+        tags: 'engineering',
+        category: 'ENGINEERING',
+        categoryLabel: 'Engineering',
+        createdAt: null,
+        updatedAt: null,
+      },
+    ])
+  }
+
+  /**
+   * Mount, type `text` into the composer, and return the popup's rows as their
+   * rendered spans — [label, detail] for a command, [value] for a model,
+   * [detail] for a status row. Per-span rather than row.text(), which
+   * concatenates without the flex gap and would hide an empty label.
+   *
+   * Polled rather than flushed: the prompt source calls ensureLoaded() during
+   * render, so the library fetch only starts once the popup has already
+   * rendered its "Loading prompts…" row. Microtask flushes race it.
+   */
+  async function rowsFor(text: string) {
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    await textarea.setValue(text)
+    await flushPromises()
+    await vi.waitFor(() => {
+      const el = component.find('[data-testid="composer-completer"]')
+      if (el.exists() && el.text().includes('Loading prompts')) throw new Error('still loading')
+    })
+    const popup = component.find('[data-testid="composer-completer"]')
+    return {
+      component,
+      popup,
+      rows: popup.exists()
+        ? popup.findAll('[role="option"]').map(r => r.findAll('span').map(s => s.text()))
+        : [],
+    }
+  }
+
+  it('renders each command with its literal and description', async () => {
+    setupCompleterApi()
+    const { popup, rows } = await rowsFor('/')
+    expect(popup.attributes('aria-label')).toBe('Slash command options')
+    // /prompt is client-side, so it shows alongside the two served commands.
+    expect(rows).toEqual([
+      ['/new', 'Start a fresh conversation'],
+      ['/model', 'Show current model and its capabilities'],
+      ['/prompt', 'Insert a saved prompt'],
+    ])
+  })
+
+  it('renders model rows as provider/model-id, not blank', async () => {
+    setupCompleterApi()
+    const { popup, rows } = await rowsFor('/model ')
+    expect(popup.attributes('aria-label')).toBe('Model completion options')
+    // The model source supplies no separate label, so the row falls back to
+    // `value`. The regression this guards is rows present but rendering empty.
+    expect(rows).toEqual([['ollama-cloud/kimi-k2.5']])
+  })
+
+  it('renders a prompt as title plus category', async () => {
+    setupCompleterApi()
+    const { popup, rows } = await rowsFor('/prompt code')
+    expect(popup.attributes('aria-label')).toBe('Saved prompt options')
+    expect(rows).toEqual([['Code review', 'Engineering']])
+  })
+
+  it('keeps the popup open on a no-match status row and disables send', async () => {
+    setupCompleterApi()
+    const { component, popup, rows } = await rowsFor('/prompt zzz-nothing')
+    expect(popup.exists()).toBe(true)
+    expect(rows).toEqual([['No matching prompts']])
+    expect(popup.find('[role="option"]').attributes('disabled')).toBeDefined()
+    expect(component.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('does not open for ordinary text containing a slash', async () => {
+    setupCompleterApi()
+    const { popup } = await rowsFor('see app/models/Prompt.java')
+    expect(popup.exists()).toBe(false)
+  })
+})

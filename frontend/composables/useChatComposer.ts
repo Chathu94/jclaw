@@ -78,6 +78,13 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
     completer.update(text)
   })
 
+  // The prompt library resolves after the keystroke that opened the picker, and
+  // the completer only recomputes on input — without this the popup sits on its
+  // "Loading prompts…" snapshot until the user happens to type again.
+  watch([prompts, promptsLoading], () => {
+    completer.refresh()
+  })
+
   function onInputKeydown(event: KeyboardEvent) {
     // Only steal keys while the popup is open — when it's closed, the textarea
     // behaves exactly as before (Enter sends, everything else is text input).

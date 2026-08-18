@@ -891,13 +891,15 @@ function exportConversation() {
              rounded borders does not clip the popup. The wrapper uses ARIA
              listbox semantics because no native HTML element covers the WAI ARIA
              combobox plus listbox pattern for typeahead pickers; the label comes
-             from the active source so it names what is actually being picked. -->
+             from the active source so it names what is actually being picked.
+             max-h fits the full command menu (9 rows) without scrolling; the
+             model source runs to dozens of rows and still scrolls. -->
           <div
             v-if="completer.open.value"
             data-testid="composer-completer"
             class="absolute left-4 right-4 bottom-full mb-1 z-10
                  bg-surface-elevated border border-border rounded-md shadow-lg
-                 max-h-60 overflow-y-auto"
+                 max-h-80 overflow-y-auto"
             role="listbox"
             :aria-label="completer.ariaLabel.value"
           >
@@ -919,10 +921,13 @@ function exportConversation() {
               role="option"
               @mousedown.prevent="pickAutocomplete(opt)"
             >
+              <!-- Status rows carry only `detail`; every real option renders its
+                 label, falling back to the raw value (the model source has no
+                 separate label — the provider/model id is the whole row). -->
               <span
-                v-if="opt.label"
+                v-if="!opt.disabled"
                 class="font-mono"
-              >{{ opt.label }}</span>
+              >{{ opt.label ?? opt.value }}</span>
               <!-- Description truncates rather than wrapping: a wrapped row would
                  shift every row below it as the filter narrows. -->
               <span

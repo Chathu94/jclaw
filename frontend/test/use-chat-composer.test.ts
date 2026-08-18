@@ -196,6 +196,26 @@ describe('useChatComposer', () => {
     expect(api.completer.activeSourceId.value).toBe('prompt')
   })
 
+  it('re-renders when the library arrives after the popup opened', async () => {
+    // The completer is pull-based, so a source whose data lands between
+    // keystrokes would otherwise leave the popup on its "Loading" snapshot
+    // until the user typed again. Caught in UAT, not by the unit suites.
+    const input = ref('')
+    const prompts = ref<Prompt[]>([])
+    const promptsLoading = ref(true)
+    const { api } = mountComposer({ input, prompts, promptsLoading })
+
+    input.value = '/prompt code'
+    await nextTick()
+    expect(api.completer.options.value[0]?.detail).toBe('Loading prompts…')
+
+    // Fetch resolves; no further keystroke.
+    prompts.value = PROMPTS
+    promptsLoading.value = false
+    await nextTick()
+    expect(api.completer.options.value.map(o => o.label)).toEqual(['Code review'])
+  })
+
   it('Enter inserts the prompt body rather than sending', async () => {
     const input = ref('')
     const { api, deps } = mountComposer({ input })
