@@ -9,6 +9,7 @@ import models.Agent;
 import models.Conversation;
 import models.EventLog;
 import models.Message;
+import models.Prompt;
 import models.SubagentRun;
 import services.ConfigService;
 import services.ConversationQueue;
@@ -89,7 +90,11 @@ public final class Commands {
         MODEL("/model", "Show current model and its capabilities"),
         USAGE("/usage", "Show context usage for this conversation"),
         STOP("/stop", "Interrupt the current generation"),
-        SUBAGENT("/subagent", "Inspect, kill, or read transcripts of subagent runs");
+        SUBAGENT("/subagent", "Inspect, kill, or read transcripts of subagent runs"),
+        // Deliberately channel-neutral: the web composer inserts the text for
+        // editing, every other channel replies with it to copy — a bot cannot
+        // prefill a message box on Telegram or Slack (JCLAW-1073).
+        PROMPT("/prompt", "Use a saved prompt from your library");
 
         public final String literal;
         public final String shortDescription;
@@ -102,23 +107,6 @@ public final class Commands {
         public String bareName() { return literal.substring(1); }
     }
 
-    /**
-     * A command the web composer implements locally, against the composer
-     * rather than the conversation.
-     *
-     * <p>Deliberately outside {@link Command}: that enum is what
-     * {@code TelegramCommandsRegistrationJob} feeds to {@code setMyCommands} and
-     * what {@link #parse} recognizes, and neither applies here — there is no
-     * composer to insert into off the web, and the text never reaches the
-     * server. Kept backend-side anyway so {@code /help} and the composer's "/"
-     * menu are built from one list instead of disagreeing (JCLAW-1072).
-     */
-    public record WebCommand(String literal, String shortDescription) {}
-
-    /** @see WebCommand */
-    public static final List<WebCommand> WEB_ONLY_COMMANDS = List.of(
-            new WebCommand("/prompt", "Insert a saved prompt from your library"));
-
     /** Canned response text for {@link Command#HELP}. */
     public static final String HELP_TEXT = """
             Available commands:
@@ -129,7 +117,8 @@ public final class Commands {
             • /model — show current model and its capabilities
             • /usage — show context usage for this conversation
             • /stop — interrupt the current generation
-            • /subagent — inspect, kill, or read transcripts (list, info ID, log ID, kill ID, history ID)""";
+            • /subagent — inspect, kill, or read transcripts (list, info ID, log ID, kill ID, history ID)
+            • /prompt — use a saved prompt from your library (/prompt search-words)""";
 
     /**
      * Canned response for {@link Command#NEW}. The leading {@code >} line
@@ -299,6 +288,7 @@ public final class Commands {
             case USAGE -> executeUsage(agent, channelType, current);
             case STOP -> executeStop(agent, channelType, current);
             case SUBAGENT -> executeSubagent(agent, channelType, current, args);
+            case PROMPT -> executePrompt(agent, channelType, current, args);
         };
     }
 
@@ -519,6 +509,76 @@ public final class Commands {
                 "/compact for conversation %d: %s".formatted(convId, outcome));
     }
 
+    /**
+     * {@code /prompt <query>} — reply with a saved prompt's text so the user can
+     * copy, edit and send it (JCLAW-1073).
+     *
+     * <p>Replying rather than running it keeps the property the web picker
+     * protects: the user sees and adjusts the prompt before the model does. The
+     * web composer intercepts {@code /prompt} client-side and inserts the text
+     * directly, so this branch is what every other channel gets — a bot cannot
+     * prefill a message box on Telegram or Slack.
+     *
+     * <p>Ambiguity is reported, never guessed: running the wrong 2000-character
+     * prompt costs a model call and a confusing answer.
+     */
+    private static Result executePrompt(Agent agent, String channelType, Conversation current, String args) {
+        var all = Prompt.findAllOrdered();
+        String response;
+        if (all.isEmpty()) {
+            response = "No saved prompts yet. Add some on the Prompts page.";
+        } else if (args == null) {
+            response = "Usage: /prompt <search words>\n\nSaved prompts:\n" + titleList(all);
+        } else {
+            var matches = matchPrompts(all, args);
+            response = switch (matches.size()) {
+                case 0 -> "No saved prompt matches \"" + args + "\".\n\nSaved prompts:\n" + titleList(all);
+                case 1 -> renderPrompt(matches.getFirst());
+                default -> "Several prompts match \"" + args + "\" — narrow the search:\n" + titleList(matches);
+            };
+        }
+        final String responseFinal = response;
+        if (current != null) {
+            final Long convId = current.id;
+            Tx.run(() -> {
+                var conv = (Conversation) Conversation.findById(convId);
+                if (conv != null) {
+                    ConversationService.appendAssistantMessage(conv, responseFinal, null);
+                }
+            });
+        }
+        EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
+                "/prompt " + (args == null ? "(list)" : args)
+                        + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
+        return new Result(current, responseFinal, Command.PROMPT);
+    }
+
+    /** Title/tag substring match, case-insensitive — the same rule the web picker uses. */
+    private static List<Prompt> matchPrompts(List<Prompt> all, String query) {
+        var q = query.strip().toLowerCase();
+        return all.stream()
+                .filter(p -> p.title.toLowerCase().contains(q)
+                        || (p.tags != null && p.tags.toLowerCase().contains(q)))
+                .toList();
+    }
+
+    private static String titleList(List<Prompt> prompts) {
+        var sb = new StringBuilder();
+        for (var p : prompts) {
+            sb.append("• ").append(p.title).append('\n');
+        }
+        return sb.toString().stripTrailing();
+    }
+
+    /**
+     * Title, then the body inside a fenced block. The fence is what makes this
+     * copyable: Telegram and Slack both render it as a code block with a
+     * one-tap copy control, and the content is a prompt to reuse verbatim.
+     */
+    private static String renderPrompt(Prompt p) {
+        return "**" + p.title + "**\n\n```\n" + p.content + "\n```";
+    }
+
     private static Result executeHelp(Agent agent, String channelType, Conversation current) {
         var helpText = helpTextFor(channelType);
         if (current != null) {
@@ -541,22 +601,8 @@ public final class Commands {
      * the Slack help lists the {@code !} forms; every other channel uses the
      * canonical {@code /} forms ({@link #HELP_TEXT}). The Slack listing is built from
      * {@link Command} so it can't drift from the actual command set.
-     *
-     * <p>Web additionally lists {@link #WEB_ONLY_COMMANDS} — otherwise the composer
-     * offers {@code /prompt} in its "/" menu while {@code /help} denies it exists.
      */
     public static String helpTextFor(String channelType) {
-        if ("web".equals(channelType)) {
-            var sb = new StringBuilder(HELP_TEXT);
-            for (var c : WEB_ONLY_COMMANDS) {
-                // Descriptions are Title-case for the menu; HELP_TEXT's bullets are
-                // lowercase, so match the surrounding list rather than the source.
-                var lowered = Character.toLowerCase(c.shortDescription().charAt(0))
-                        + c.shortDescription().substring(1);
-                sb.append("\n• ").append(c.literal()).append(" — ").append(lowered);
-            }
-            return sb.toString();
-        }
         if (!"slack".equals(channelType)) return HELP_TEXT;
         var sb = new StringBuilder(
                 "Available commands — Slack reserves / for slash commands (which don't work in "

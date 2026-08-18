@@ -1,5 +1,6 @@
 import models.Agent;
 import models.Message;
+import models.Prompt;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1405,35 +1406,108 @@ class SlashCommandsTest extends UnitTest {
         assertEquals(known, mentioned, "HELP_TEXT must not document a command the enum dropped");
     }
 
-    @Test
-    void webHelpListsTheComposerOnlyCommands() {
-        // The composer's "/" menu offers /prompt, so /help on web has to admit it
-        // exists — otherwise the two listings contradict each other.
-        var web = Commands.helpTextFor("web");
-        for (var c : Commands.WEB_ONLY_COMMANDS) {
-            assertTrue(web.contains(c.literal()), "web /help must document " + c.literal());
-        }
-        assertTrue(web.startsWith(Commands.HELP_TEXT), "web /help extends the canonical listing");
+    // ── JCLAW-1073: /prompt on every channel ─────────────────────────────
+
+    /**
+     * Seeds a prompt directly — the library has no channel-side create path.
+     * Titles carry a distinctive token so the multi-match case stays
+     * deterministic even if the wipe race in JCLAW-1012 leaves a stray row.
+     */
+    private static void seedPrompt(String title, String content, String tags) {
+        var p = new Prompt();
+        p.title = title;
+        p.content = content;
+        p.tags = tags;
+        p.category = Prompt.Category.CUSTOM;
+        p.save();
     }
 
     @Test
-    void nonWebHelpOmitsTheComposerOnlyCommands() {
-        // Telegram has no composer to insert into; advertising /prompt there would
-        // promise behaviour the channel cannot deliver.
-        for (var c : Commands.WEB_ONLY_COMMANDS) {
-            assertFalse(Commands.helpTextFor("telegram").contains(c.literal()),
-                    "telegram /help must not document " + c.literal());
-            assertFalse(Commands.helpTextFor("slack").contains(c.literal()),
-                    "slack /help must not document " + c.literal());
-        }
+    void promptIsParsedOnEveryChannel() {
+        // The point of JCLAW-1073: /prompt reaches the server now, so Telegram's
+        // setMyCommands registration and Slack's !prompt form both pick it up.
+        assertEquals(Commands.Command.PROMPT, Commands.parse("/prompt").orElseThrow());
+        assertEquals(Commands.Command.PROMPT, Commands.parse("/prompt code review").orElseThrow());
+        assertTrue(Commands.HELP_TEXT.contains("/prompt"), "HELP_TEXT documents /prompt");
     }
 
     @Test
-    void webOnlyCommandsAreNotParsedAsServerCommands() {
-        // The client owns them end to end; parse() must still reject them so a
-        // literal that slips through is treated as ordinary text, not a command.
-        for (var c : Commands.WEB_ONLY_COMMANDS) {
-            assertTrue(Commands.parse(c.literal()).isEmpty(), c.literal() + " must not parse");
-        }
+    void promptReturnsTheBodyOfTheSingleMatch() {
+        seedPrompt("Zed code review", "Review this diff for correctness.", "zedengineering");
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-prompt-1");
+
+        var result = Commands.execute(
+                Commands.Command.PROMPT, agent, "telegram", "peer-prompt-1", convo, "Zed code");
+
+        assertTrue(result.responseText().contains("Zed code review"), result.responseText());
+        assertTrue(result.responseText().contains("Review this diff for correctness."),
+                result.responseText());
+        // Fenced so Telegram and Slack render a copy control around the body.
+        assertTrue(result.responseText().contains("```"), result.responseText());
+    }
+
+    @Test
+    void promptMatchesOnTagsCaseInsensitively() {
+        seedPrompt("Zed quarterly", "Draft the quarterly update.", "zedexec");
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-prompt-2");
+
+        var result = Commands.execute(
+                Commands.Command.PROMPT, agent, "telegram", "peer-prompt-2", convo, "ZEDEXEC");
+
+        assertTrue(result.responseText().contains("Draft the quarterly update."), result.responseText());
+    }
+
+    @Test
+    void promptListsCandidatesRatherThanGuessingWhenSeveralMatch() {
+        seedPrompt("Zedambig design", "Critique this design.", null);
+        seedPrompt("Zedambig code", "Review this diff.", null);
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-prompt-3");
+
+        var result = Commands.execute(
+                Commands.Command.PROMPT, agent, "telegram", "peer-prompt-3", convo, "Zedambig");
+
+        assertTrue(result.responseText().contains("narrow the search"), result.responseText());
+        assertTrue(result.responseText().contains("Zedambig design"), result.responseText());
+        assertTrue(result.responseText().contains("Zedambig code"), result.responseText());
+        // Bodies stay out: that's the ambiguity we declined to resolve for the user.
+        assertFalse(result.responseText().contains("Critique this design."), result.responseText());
+    }
+
+    @Test
+    void promptReportsNoMatch() {
+        seedPrompt("Zednomatch notes", "Write standup notes.", null);
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-prompt-4");
+
+        var result = Commands.execute(
+                Commands.Command.PROMPT, agent, "telegram", "peer-prompt-4", convo, "zzz-nothing-at-all");
+
+        assertTrue(result.responseText().contains("No saved prompt matches"), result.responseText());
+        assertTrue(result.responseText().contains("Zednomatch notes"), result.responseText());
+    }
+
+    @Test
+    void promptWithoutArgumentListsTheLibrary() {
+        seedPrompt("Zedusage outline", "Outline a blog post.", null);
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-prompt-5");
+
+        var result = Commands.execute(
+                Commands.Command.PROMPT, agent, "telegram", "peer-prompt-5", convo, null);
+
+        assertTrue(result.responseText().contains("Usage: /prompt"), result.responseText());
+        assertTrue(result.responseText().contains("Zedusage outline"), result.responseText());
+    }
+
+    @Test
+    void promptPersistsItsReplyIntoTheConversation() {
+        seedPrompt("Zedpersist", "Body to copy.", null);
+        var convo = ConversationService.findOrCreate(agent, "telegram", "peer-prompt-6");
+
+        Commands.execute(
+                Commands.Command.PROMPT, agent, "telegram", "peer-prompt-6", convo, "Zedpersist");
+
+        // Slash replies belong in scrollback like any other assistant message.
+        var messages = ConversationService.loadRecentMessages(convo);
+        assertTrue(messages.stream().anyMatch(m -> m.content != null && m.content.contains("Body to copy.")),
+                "reply persisted into the conversation");
     }
 }

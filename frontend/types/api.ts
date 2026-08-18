@@ -866,8 +866,6 @@ export interface SlashCommand {
   /** Name without the leading slash. */
   name: string
   description: string
-  /** True for a composer-local command the server does not parse, e.g. /prompt. */
-  webOnly?: boolean
 }
 
 /** JCLAW-813: one entry in the fixed prompt-category list. */

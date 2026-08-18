@@ -46,18 +46,11 @@ class ApiSlashCommandsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void includesComposerOnlyCommandsFlaggedWebOnly() {
-        // The menu and /help are built from this one list, so it carries the
-        // composer-local commands too — flagged, since parse() rejects them.
+    void includesPromptSoTheMenuAndHelpCannotDisagree() {
+        // /prompt is a real command since JCLAW-1073, so it arrives here like any
+        // other rather than being appended client-side.
         var body = getContent(GET("/api/slash-commands"));
-        for (var cmd : Commands.WEB_ONLY_COMMANDS) {
-            assertTrue(body.contains("\"literal\":\"" + cmd.literal() + "\""),
-                    cmd.literal() + " present: " + body);
-            assertTrue(body.contains(cmd.shortDescription()),
-                    cmd.literal() + " description present: " + body);
-        }
-        assertTrue(body.contains("\"webOnly\":true"), "composer-local command flagged: " + body);
-        assertTrue(body.contains("\"webOnly\":false"), "server command not flagged: " + body);
+        assertTrue(body.contains("\"literal\":\"/prompt\""), "/prompt present: " + body);
     }
 
     @Test

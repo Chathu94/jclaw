@@ -1608,7 +1608,7 @@ describe('Chat page — completion popup rendering', () => {
   const COMMANDS = [
     { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
     { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
-    { literal: '/prompt', name: 'prompt', description: 'Insert a saved prompt from your library', webOnly: true },
+    { literal: '/prompt', name: 'prompt', description: 'Use a saved prompt from your library' },
   ]
 
   function setupCompleterApi() {
@@ -1662,12 +1662,10 @@ describe('Chat page — completion popup rendering', () => {
     setupCompleterApi()
     const { popup, rows } = await rowsFor('/')
     expect(popup.attributes('aria-label')).toBe('Slash command options')
-    // Composer-local commands arrive on the same endpoint, so the menu renders
-    // them exactly like the server-parsed ones.
     expect(rows).toEqual([
       ['/new', 'Start a fresh conversation'],
       ['/model', 'Show current model and its capabilities'],
-      ['/prompt', 'Insert a saved prompt from your library'],
+      ['/prompt', 'Use a saved prompt from your library'],
     ])
   })
 
