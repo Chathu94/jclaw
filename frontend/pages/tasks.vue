@@ -8,6 +8,7 @@ import {
   CalendarDaysIcon,
   CheckIcon,
   ChevronRightIcon,
+  ClipboardDocumentCheckIcon,
   NoSymbolIcon,
   PauseIcon,
   PencilSquareIcon,
@@ -27,6 +28,8 @@ const statusFilter = ref('')
 const typeFilter = ref('')
 const qFilter = ref('')
 const agentFilter = ref('')
+
+const hasActiveFilters = computed(() => !!(qFilter.value || statusFilter.value || typeFilter.value || agentFilter.value))
 
 interface Filter { key: string, value: string }
 function onFiltersChanged(filters: Filter[]) {
@@ -1019,8 +1022,43 @@ function zoneForTaskRender(task: Task): string | undefined {
       </ul>
     </div>
 
+    <!-- Empty state — onboarding copy when there are genuinely no tasks; a
+         plain "no matches" when a filter is narrowing an otherwise non-empty
+         set so the chat hint doesn't mislead. -->
+    <section
+      v-if="view === 'table' && !tasks?.length"
+      class="border border-dashed border-border bg-surface-elevated px-6 py-12 text-center"
+    >
+      <template v-if="hasActiveFilters">
+        <ClipboardDocumentCheckIcon class="mx-auto h-10 w-10 text-fg-muted" />
+        <h2 class="mt-3 text-sm font-medium text-fg-strong">
+          No tasks match your filters
+        </h2>
+        <p class="mt-1 text-sm text-fg-muted">
+          Clear the filter bar to see all tasks.
+        </p>
+      </template>
+      <template v-else>
+        <ClipboardDocumentCheckIcon class="mx-auto h-10 w-10 text-fg-muted" />
+        <h2 class="mt-3 text-sm font-medium text-fg-strong">
+          No tasks yet
+        </h2>
+        <p class="mt-1 text-sm text-fg-muted">
+          Open
+          <NuxtLink
+            to="/chat"
+            class="font-medium text-emerald-700 dark:text-emerald-400 underline-offset-2 hover:underline"
+          >
+            a chat
+          </NuxtLink>
+          and say something like <em>"every weekday at 8am, summarise my unread email"</em>
+          or <em>"on the 1st of each month, run the expense report"</em>.
+        </p>
+      </template>
+    </section>
+
     <div
-      v-if="view === 'table'"
+      v-else-if="view === 'table'"
       class="bg-surface-elevated border border-border"
     >
       <!-- table-fixed + per-column header widths: with auto layout the
@@ -1713,12 +1751,6 @@ function zoneForTaskRender(task: Task): string | undefined {
           </template>
         </tbody>
       </table>
-      <div
-        v-if="!tasks?.length"
-        class="px-4 py-8 text-center text-sm text-fg-muted"
-      >
-        No tasks found
-      </div>
     </div>
 
     <ScheduleCalendar
