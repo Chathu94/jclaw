@@ -855,6 +855,19 @@ export interface Prompt {
   updatedAt: string | null
 }
 
+/**
+ * JCLAW-1071: one built-in slash command, from GET /api/slash-commands.
+ * Derived server-side from the `Commands.Command` enum — the same source
+ * Telegram's native dropdown is registered from.
+ */
+export interface SlashCommand {
+  /** The "/x" form the composer inserts. */
+  literal: string
+  /** Name without the leading slash. */
+  name: string
+  description: string
+}
+
 /** JCLAW-813: one entry in the fixed prompt-category list. */
 export interface PromptCategory {
   value: string

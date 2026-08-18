@@ -1,12 +1,15 @@
 import { nextTick, ref, watch, type Ref } from 'vue'
-import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
+import { useComposerCompleter, type CompletionOption } from '~/composables/useComposerCompleter'
+import { modelCompletionSource } from '~/composables/modelCompletionSource'
+import { slashCommandSource } from '~/composables/slashCommandSource'
 import type { Provider } from '~/composables/useProviders'
+import type { SlashCommand } from '~/types/api'
 
 /**
  * Composer-local interaction logic (JCLAW-690 stage 5c; behaviour extracted
  * verbatim from pages/chat.vue). The composer <form> template stays in the page
  * — its DOM refs (chatInput, composerEl, fileInput) bind there — but the reactive
- * glue moves here: the /model NAME autocomplete (JCLAW-114), the textarea
+ * glue moves here: the completion popup (JCLAW-114, JCLAW-1071), the textarea
  * keyboard/resize handlers, the drop/paste/file-input attachment routing
  * (JCLAW-25), and the empty↔active FLIP animation.
  *
@@ -16,6 +19,8 @@ import type { Provider } from '~/composables/useProviders'
 export interface UseChatComposerDeps {
   input: Ref<string>
   providers: Ref<Provider[]>
+  /** Built-in commands for the "/" menu; empty until the lazy fetch resolves. */
+  slashCommands: Ref<SlashCommand[]>
   chatInput: Ref<HTMLTextAreaElement | null>
   subagentTranscript: Ref<{ agentId: number, agentName: string } | null>
   isEmptyChat: Ref<boolean>
@@ -24,11 +29,11 @@ export interface UseChatComposerDeps {
 }
 
 export interface UseChatComposer {
-  modelAutocomplete: ReturnType<typeof useModelAutocomplete>
+  completer: ReturnType<typeof useComposerCompleter>
   composerEl: Ref<HTMLElement | null>
   onInputKeydown: (event: KeyboardEvent) => void
   onInputEnter: (event: KeyboardEvent) => void
-  pickAutocomplete: (choice: string) => void
+  pickAutocomplete: (choice: CompletionOption) => void
   autoResize: () => void
   handleFileUpload: (event: Event) => void
   handleDrop: (event: DragEvent) => void
@@ -36,39 +41,45 @@ export interface UseChatComposer {
 }
 
 export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
-  const { input, providers, chatInput, subagentTranscript, isEmptyChat, addAttachments, sendMessage } = deps
+  const { input, providers, slashCommands, chatInput, subagentTranscript, isEmptyChat, addAttachments, sendMessage } = deps
 
   // Owned here (only the FLIP watcher below reads it); the page binds it via
   // ref="composerEl" on the composer wrapper div.
   const composerEl = ref<HTMLElement | null>(null)
 
   /**
-   * JCLAW-114: /model NAME autocomplete state. Driven by the input watcher
-   * below — watches for the /model <query> prefix and surfaces a floating
-   * popup above the textarea with matching provider/model pairs from the
-   * (already-filtered) providers list. Keyboard nav via ArrowUp/Down/Enter/
-   * Tab/Escape, mouse via click.
+   * Composer typeahead (JCLAW-1071). One popup fed by ordered sources: the "/"
+   * command menu first, then the /model NAME argument completer (JCLAW-114).
+   * Keyboard nav via ArrowUp/Down/Enter/Tab/Escape, mouse via click.
+   *
+   * Sources are ordered, not merged, because their contexts are disjoint — "/"
+   * with no space is command selection, a space ends it. One popup keeps a
+   * single answer to "is a completion open?", which is what onInputEnter needs
+   * to decide whether Enter accepts or sends.
    */
-  const modelAutocomplete = useModelAutocomplete(providers)
+  const completer = useComposerCompleter([
+    slashCommandSource(slashCommands),
+    modelCompletionSource(providers),
+  ])
 
   watch(input, (text) => {
-    modelAutocomplete.update(text)
+    completer.update(text)
   })
 
   function onInputKeydown(event: KeyboardEvent) {
     // Only steal keys while the popup is open — when it's closed, the textarea
     // behaves exactly as before (Enter sends, everything else is text input).
-    if (!modelAutocomplete.open.value) return
+    if (!completer.open.value) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      modelAutocomplete.moveHighlight('down')
+      completer.moveHighlight('down')
     }
     else if (event.key === 'ArrowUp') {
       event.preventDefault()
-      modelAutocomplete.moveHighlight('up')
+      completer.moveHighlight('up')
     }
     else if (event.key === 'Tab' || event.key === 'Enter') {
-      const replacement = modelAutocomplete.accept(input.value)
+      const replacement = completer.accept(input.value)
       if (replacement !== null) {
         event.preventDefault()
         input.value = replacement
@@ -77,14 +88,14 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
     }
     else if (event.key === 'Escape') {
       event.preventDefault()
-      modelAutocomplete.close()
+      completer.close()
     }
   }
 
   function onInputEnter(event: KeyboardEvent) {
-    // When the autocomplete popup is open, Enter accepts the selection
+    // When the completion popup is open, Enter accepts the selection
     // (handled by onInputKeydown). Otherwise it sends the message.
-    if (modelAutocomplete.open.value) {
+    if (completer.open.value) {
       onInputKeydown(event)
       return
     }
@@ -92,11 +103,10 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
     sendMessage()
   }
 
-  function pickAutocomplete(choice: string) {
-    modelAutocomplete.moveHighlight('down') // no-op if already highlighted
-    const idx = modelAutocomplete.options.value.indexOf(choice)
-    if (idx >= 0) modelAutocomplete.highlightedIndex.value = idx
-    const replacement = modelAutocomplete.accept(input.value)
+  function pickAutocomplete(choice: CompletionOption) {
+    const idx = completer.options.value.findIndex(o => o.value === choice.value)
+    if (idx >= 0) completer.highlightedIndex.value = idx
+    const replacement = completer.accept(input.value)
     if (replacement !== null) {
       input.value = replacement
       nextTick(() => {
@@ -174,7 +184,7 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
   }
 
   return {
-    modelAutocomplete,
+    completer,
     composerEl,
     onInputKeydown,
     onInputEnter,

@@ -2,9 +2,16 @@ import { describe, it, expect, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { Provider } from '~/composables/useProviders'
+import type { SlashCommand } from '~/types/api'
 import { useChatComposer, type UseChatComposer, type UseChatComposerDeps } from '~/composables/useChatComposer'
 
 const PROVIDERS: Provider[] = [{ name: 'openai', models: [{ id: 'gpt-4', name: 'GPT-4' }] }]
+
+const SLASH_COMMANDS: SlashCommand[] = [
+  { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
+  { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
+  { literal: '/stop', name: 'stop', description: 'Interrupt the current generation' },
+]
 
 function key(over: Partial<KeyboardEvent> = {}) {
   return { key: 'Enter', preventDefault: vi.fn(), ...over } as unknown as KeyboardEvent
@@ -14,6 +21,7 @@ function mountComposer(over: Partial<UseChatComposerDeps> = {}) {
   const deps: UseChatComposerDeps = {
     input: ref(''),
     providers: ref<Provider[]>(PROVIDERS),
+    slashCommands: ref<SlashCommand[]>(SLASH_COMMANDS),
     chatInput: ref<HTMLTextAreaElement | null>(null),
     subagentTranscript: ref(null),
     isEmptyChat: ref(false),
@@ -109,6 +117,44 @@ describe('useChatComposer', () => {
     const { api } = mountComposer({ input })
     input.value = '/model gpt'
     await nextTick()
-    expect(api.modelAutocomplete.open.value).toBe(true)
+    expect(api.completer.open.value).toBe(true)
+    expect(api.completer.activeSourceId.value).toBe('model')
+  })
+
+  // ── JCLAW-1071: one popup, both sources, one Enter ──
+
+  it('opens the "/" command menu and keeps Enter away from sendMessage', async () => {
+    const input = ref('')
+    const { api, deps } = mountComposer({ input })
+    input.value = '/'
+    await nextTick()
+    expect(api.completer.open.value).toBe(true)
+    expect(api.completer.activeSourceId.value).toBe('slash-command')
+
+    api.onInputEnter(key())
+    // Enter accepted the highlighted command instead of sending it as a message.
+    expect(deps.sendMessage).not.toHaveBeenCalled()
+    expect(input.value).toBe('/new ')
+  })
+
+  it('sends normally once the command menu has closed', async () => {
+    const input = ref('')
+    const { api, deps } = mountComposer({ input })
+    input.value = '/zzz-not-a-command'
+    await nextTick()
+    expect(api.completer.open.value).toBe(false)
+
+    api.onInputEnter(key())
+    expect(deps.sendMessage).toHaveBeenCalledOnce()
+  })
+
+  it('pickAutocomplete accepts the clicked option, not the highlighted one', async () => {
+    const input = ref('')
+    const { api } = mountComposer({ input })
+    input.value = '/'
+    await nextTick()
+    const stop = api.completer.options.value.find(o => o.value === '/stop')!
+    api.pickAutocomplete(stop)
+    expect(input.value).toBe('/stop ')
   })
 })

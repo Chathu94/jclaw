@@ -146,6 +146,9 @@ POST    /api/prompts                            ApiPromptsController.create
 PUT     /api/prompts/{id}                       ApiPromptsController.update
 DELETE  /api/prompts/{id}                       ApiPromptsController.delete
 
+# Slash commands API (JCLAW-1071) — feeds the web composer's "/" menu
+GET     /api/slash-commands                     ApiSlashCommandsController.list
+
 # Tools API
 GET     /api/tools                              ApiToolsController.list
 GET     /api/tools/meta                         ApiToolsController.meta

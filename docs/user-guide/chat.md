@@ -47,7 +47,7 @@ For a hands-free spoken conversation, click **Voice mode** (the voice button nea
 
 ## Slash commands
 
-Type `/` at the start of a message to access these built-in commands. They work identically in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp) — Telegram even surfaces them in its native autocomplete dropdown.
+Type `/` at the start of a message to access these built-in commands. A menu opens listing every command with a one-line description; keep typing to filter it, use the arrow keys to move, and press Enter or Tab to pick one — then Enter again to send. They work identically in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp); Telegram surfaces the same list in its native autocomplete dropdown.
 
 | Command           | What it does                                                                                                  |
 |-------------------|---------------------------------------------------------------------------------------------------------------|

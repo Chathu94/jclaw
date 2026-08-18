@@ -29,7 +29,7 @@ import { formatSize } from '~/utils/format'
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
+import type { Agent, Conversation, Message, ConfigResponse, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import { useChatUsageMeter } from '~/composables/useChatUsageMeter'
@@ -481,8 +481,15 @@ const { label: streamProgressLabel, elapsed: streamProgressElapsed } = useStream
 // resize handlers, drop/paste/file-input routing, and the empty↔active FLIP
 // animation) lives in useChatComposer. The composer <form> template stays in
 // the page and binds chatInput / composerEl locally — no ref forwarding.
+// JCLAW-1071: the "/" menu's options. Lazy — the conversations fetch above is
+// already a top-level await, and the menu isn't needed until a key is pressed.
+const { data: slashCommandsData } = useLazyFetch<SlashCommand[]>('/api/slash-commands', {
+  default: () => [],
+})
+const slashCommands = computed(() => slashCommandsData.value ?? [])
+
 const {
-  modelAutocomplete,
+  completer,
   composerEl,
   onInputKeydown,
   onInputEnter,
@@ -494,6 +501,7 @@ const {
 } = useChatComposer({
   input,
   providers,
+  slashCommands,
   chatInput,
   subagentTranscript,
   isEmptyChat,
@@ -859,34 +867,41 @@ function exportConversation() {
           ref="composerEl"
           class="px-4 py-3 relative mx-auto w-full max-w-3xl"
         >
-          <!-- JCLAW-114: slash model NAME autocomplete popup, anchored above the
-             form. Rendered outside the form so the form's overflow-hidden
-             needed for rounded borders does not clip the popup. The wrapper
-             uses ARIA listbox semantics because no native HTML element covers
-             the WAI ARIA combobox plus listbox pattern for typeahead pickers;
-             aria-label is provided for screen readers. -->
+          <!-- JCLAW-114 / JCLAW-1071: completion popup, anchored above the form.
+             Rendered outside the form so the form's overflow-hidden needed for
+             rounded borders does not clip the popup. The wrapper uses ARIA
+             listbox semantics because no native HTML element covers the WAI ARIA
+             combobox plus listbox pattern for typeahead pickers; the label comes
+             from the active source so it names what is actually being picked. -->
           <div
-            v-if="modelAutocomplete.open.value"
+            v-if="completer.open.value"
+            data-testid="composer-completer"
             class="absolute left-4 right-4 bottom-full mb-1 z-10
                  bg-surface-elevated border border-border rounded-md shadow-lg
                  max-h-60 overflow-y-auto"
             role="listbox"
-            aria-label="Model completion options"
+            :aria-label="completer.ariaLabel.value"
           >
             <!-- Each row uses ARIA option semantics inside the parent listbox; the native HTML option element only works inside select. aria-selected is dynamically bound via the Vue colon shorthand, which Sonar's static analyser does not resolve. -->
             <button
-              v-for="(opt, idx) in modelAutocomplete.options.value"
-              :key="opt"
+              v-for="(opt, idx) in completer.options.value"
+              :key="opt.value"
               type="button"
-              :class="idx === modelAutocomplete.highlightedIndex.value
+              :class="idx === completer.highlightedIndex.value
                 ? 'bg-muted text-fg-strong'
                 : 'text-fg-default hover:bg-muted/50'"
-              class="block w-full text-left px-3 py-1.5 text-xs font-mono transition-colors"
-              :aria-selected="idx === modelAutocomplete.highlightedIndex.value"
+              class="flex w-full items-baseline gap-2 text-left px-3 py-1.5 text-xs transition-colors"
+              :aria-selected="idx === completer.highlightedIndex.value"
               role="option"
               @mousedown.prevent="pickAutocomplete(opt)"
             >
-              {{ opt }}
+              <span class="font-mono">{{ opt.label ?? opt.value }}</span>
+              <!-- Description truncates rather than wrapping: a wrapped row would
+                 shift every row below it as the filter narrows. -->
+              <span
+                v-if="opt.detail"
+                class="text-fg-muted truncate"
+              >{{ opt.detail }}</span>
             </button>
           </div>
           <!--

@@ -432,6 +432,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/skills/{name}
             GET /api/skills/{name}/files
             GET /api/skills/{name}/files/{<.+>filePath}
+            GET /api/slash-commands
             GET /api/status
             GET /api/subagent-runs
             GET /api/subagent-runs/{id}/steps

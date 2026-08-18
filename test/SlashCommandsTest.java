@@ -11,6 +11,10 @@ import services.ConversationService;
 import slash.Commands;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.regex.MatchResult;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * JCLAW-26 coverage: slash-command parsing, execution side effects,
@@ -1379,5 +1383,24 @@ class SlashCommandsTest extends UnitTest {
         for (var cmd : new String[]{"/new", "/reset", "/compact", "/help", "/model", "/usage", "/stop", "/subagent"}) {
             assertTrue(p.contains(cmd), "intro prompt must list " + cmd);
         }
+    }
+
+    // ── JCLAW-1071: HELP_TEXT / enum drift ───────────────────────────────
+
+    @Test
+    void helpTextDocumentsExactlyTheCommandEnum() {
+        // helpTextFor("slack") is generated from the enum; the canonical HELP_TEXT
+        // is a hand-maintained literal, so a new Command can ship advertised on
+        // Slack and in the web /-menu while missing from /help everywhere else.
+        // Descriptions are deliberately NOT compared — HELP_TEXT lowercases them
+        // and adds argument hints the enum doesn't model ("/compact focus-hint").
+        for (var cmd : Commands.Command.values()) {
+            assertTrue(Commands.HELP_TEXT.contains(cmd.literal),
+                    "HELP_TEXT must document " + cmd.literal);
+        }
+        var known = Arrays.stream(Commands.Command.values()).map(c -> c.literal).collect(Collectors.toSet());
+        var mentioned = Pattern.compile("/[a-z]+").matcher(Commands.HELP_TEXT).results()
+                .map(MatchResult::group).collect(Collectors.toSet());
+        assertEquals(known, mentioned, "HELP_TEXT must not document a command the enum dropped");
     }
 }

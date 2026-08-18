@@ -1,20 +1,33 @@
 import { describe, it, expect } from 'vitest'
-import { ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import {
   applyModelOption,
   buildModelOptions,
   filterModelOptions,
   isModelArgumentContext,
-  nextAutocompleteIndex,
-  useModelAutocomplete,
+  modelCompletionSource,
   MODEL_COMMAND_PREFIX,
-} from '~/composables/useModelAutocomplete'
+} from '~/composables/modelCompletionSource'
+import { nextAutocompleteIndex, useComposerCompleter } from '~/composables/useComposerCompleter'
 import type { Provider } from '~/composables/useProviders'
 
 /**
- * JCLAW-114: pure-logic coverage for the /model autocomplete helpers and
- * the composable's reactive state machine. No DOM, no Vue-page mount.
+ * JCLAW-114: pure-logic coverage for the /model autocomplete helpers, plus the
+ * state machine it drives — now the shared composer completer (JCLAW-1071)
+ * running with only the model source registered. These cases are the
+ * regression guard that generalizing the completer left /model behaviour
+ * unchanged. No DOM, no Vue-page mount.
  */
+
+/** The shared completer with only the /model source — the pre-JCLAW-1071 setup. */
+function modelCompleter(providers: Ref<Provider[]>) {
+  return useComposerCompleter([modelCompletionSource(providers)])
+}
+
+/** Completion values, for comparing against the plain strings these cases assert on. */
+function values(completer: ReturnType<typeof modelCompleter>): string[] {
+  return completer.options.value.map(o => o.value)
+}
 
 function makeProviders(): Provider[] {
   return [
@@ -189,21 +202,21 @@ describe('nextAutocompleteIndex', () => {
 
 // ── Composable state machine ──
 
-describe('useModelAutocomplete composable', () => {
+describe('model completion source in the shared completer', () => {
   it('opens when /model <query> matches options', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
 
     expect(ac.open.value).toBe(false)
     ac.update('/model gpt')
     expect(ac.open.value).toBe(true)
-    expect(ac.options.value).toEqual(['openrouter/gpt-4.1'])
-    expect(ac.highlighted.value).toBe('openrouter/gpt-4.1')
+    expect(values(ac)).toEqual(['openrouter/gpt-4.1'])
+    expect(ac.highlighted.value?.value).toBe('openrouter/gpt-4.1')
   })
 
   it('closes when query no longer matches anything', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model ')
     expect(ac.open.value).toBe(true)
     ac.update('/model zzz-nothing-matches')
@@ -212,7 +225,7 @@ describe('useModelAutocomplete composable', () => {
 
   it('closes on fixed sub-keywords', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model ')
     expect(ac.open.value).toBe(true)
     ac.update('/model status')
@@ -221,7 +234,7 @@ describe('useModelAutocomplete composable', () => {
 
   it('clamps highlighted index when filter shrinks options', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model ')
     ac.moveHighlight('down')
     ac.moveHighlight('down')
@@ -233,7 +246,7 @@ describe('useModelAutocomplete composable', () => {
 
   it('moveHighlight cycles through options with wrap', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model open') // 3 options (all openrouter)
     expect(ac.highlightedIndex.value).toBe(0)
     ac.moveHighlight('down')
@@ -248,7 +261,7 @@ describe('useModelAutocomplete composable', () => {
 
   it('accept returns replacement text and closes', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model gpt')
     const result = ac.accept('/model gpt')
     expect(result).toBe('/model openrouter/gpt-4.1')
@@ -257,13 +270,13 @@ describe('useModelAutocomplete composable', () => {
 
   it('accept returns null when popup is closed', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     expect(ac.accept('anything')).toBeNull()
   })
 
   it('close() hides popup and resets state', () => {
     const providers = ref(makeProviders())
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model ')
     ac.moveHighlight('down')
     ac.close()
@@ -276,14 +289,22 @@ describe('useModelAutocomplete composable', () => {
     const providers = ref<Provider[]>([
       { name: 'openai', models: [{ id: 'gpt-5' }] },
     ])
-    const ac = useModelAutocomplete(providers)
+    const ac = modelCompleter(providers)
     ac.update('/model ')
-    expect(ac.options.value).toEqual(['openai/gpt-5'])
+    expect(values(ac)).toEqual(['openai/gpt-5'])
 
     providers.value = [
       { name: 'anthropic', models: [{ id: 'opus-4-7' }] },
     ]
     ac.update('/model ')
-    expect(ac.options.value).toEqual(['anthropic/opus-4-7'])
+    expect(values(ac)).toEqual(['anthropic/opus-4-7'])
+  })
+
+  it('labels the listbox for the model source', () => {
+    const providers = ref(makeProviders())
+    const ac = modelCompleter(providers)
+    ac.update('/model gpt')
+    expect(ac.ariaLabel.value).toBe('Model completion options')
+    expect(ac.activeSourceId.value).toBe('model')
   })
 })
