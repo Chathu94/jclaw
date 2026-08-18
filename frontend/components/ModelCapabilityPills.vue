@@ -27,7 +27,8 @@
  * such fallback today, so the pill is even more strictly informational.
  */
 import type { ProviderModel } from '~/composables/useProviders'
-import { Lightbulb, Eye, Volume2, Video } from '@lucide/vue'
+import { Lightbulb, Eye, Volume2, Video, WrenchOff } from '@lucide/vue'
+import { modelSupportsTools } from '~/composables/useProviders'
 
 export type Capability = 'thinking'
 
@@ -45,9 +46,10 @@ const props = withDefaults(defineProps<{
 defineEmits<(e: 'toggle', capability: Capability) => void>()
 
 interface PillDef {
-  capability: Capability | 'vision' | 'audio' | 'video'
+  capability: Capability | 'vision' | 'audio' | 'video' | 'no-tools'
   label: string
   icon: typeof Lightbulb
+  /** Gates rendering — the list is filtered on it, so it reads as "show this pill". */
   supported: boolean
   enabled: boolean
   /** Tailwind classes for the ON (colored) variant. */
@@ -112,6 +114,20 @@ const pills = computed<PillDef[]>(() => {
       interactive: false,
       locked: false,
     },
+    {
+      // The only pill that marks an absence. Tool-calling is near-universal, so
+      // "has tools" carries no information while "cannot call tools" explains
+      // why an agent's skills went quiet — the state worth a pill is the
+      // negative one, and it only shows on an authoritative no (JCLAW-1075).
+      capability: 'no-tools',
+      label: 'no tools',
+      icon: WrenchOff,
+      supported: !modelSupportsTools(m),
+      enabled: true,
+      onCls: 'text-orange-700 dark:text-orange-400 border-orange-400/40 bg-orange-400/5',
+      interactive: false,
+      locked: false,
+    },
   ]
   return all.filter(p => p.supported)
 })
@@ -138,6 +154,9 @@ function tooltip(p: PillDef): string {
     }
     if (p.capability === 'thinking') {
       return 'thinking — this model always reasons; the toggle is fixed on'
+    }
+    if (p.capability === 'no-tools') {
+      return 'no tools — this model cannot call tools, so an agent\'s tools and skills are unavailable with it'
     }
     return `${p.label} — supported by this model`
   }

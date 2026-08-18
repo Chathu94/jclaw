@@ -18,7 +18,7 @@ import {
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
-import { isLocalProvider } from '~/composables/useProviders'
+import { isDeclaredToolIncapable, isLocalProvider } from '~/composables/useProviders'
 import type { Agent, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 
 const { configData, saving, refresh, getProviderModels, editingKey, editValue, startEdit, updateEntry, providersData } = useSettingsConfig()
@@ -153,7 +153,7 @@ const editingModelIdx = ref<number | null>(null)
 // previously silently wrote 131072 (kimi-k2.5 is actually 256K), which
 // then broke /usage and compaction-budget math. Show 0 honestly instead
 // and let the user enter the real value from the provider's docs.
-const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
+const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, supportsTools: true, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 // Rankings cache for configured models (providerName -> { modelId -> rank })
@@ -260,6 +260,7 @@ function startEditModel(providerName: string, idx: number) {
     supportsThinking: m.supportsThinking || false,
     alwaysThinks: m.alwaysThinks || false,
     supportsVision: m.supportsVision || false,
+    supportsTools: m.supportsTools !== false,
     supportsAudio: m.supportsAudio || false,
     supportsVideo: m.supportsVideo || false,
     promptPrice: m.promptPrice ?? -1,
@@ -272,7 +273,7 @@ function startEditModel(providerName: string, idx: number) {
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, supportsVideo: false, supportsTools: true, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -305,6 +306,9 @@ function modelFormToSaved(): ProviderModelDef {
     supportsVision: f.supportsVision,
     supportsAudio: f.supportsAudio,
     supportsVideo: f.supportsVideo,
+    // Written only when the operator says no. Leaving it out otherwise keeps
+    // "unknown", which reads as supported — see isDeclaredToolIncapable.
+    ...(f.supportsTools ? {} : { supportsTools: false }),
   }
   if (f.promptPrice >= 0) out.promptPrice = f.promptPrice
   if (f.completionPrice >= 0) out.completionPrice = f.completionPrice
@@ -348,6 +352,7 @@ const discoveryFilterThinking = ref('all') // 'all' | 'yes' | 'no'
 const discoveryFilterVision = ref('all') // 'all' | 'yes' | 'no'
 const discoveryFilterAudio = ref('all') // 'all' | 'yes' | 'no'
 const discoveryFilterVideo = ref('all') // 'all' | 'yes' | 'no'
+const discoveryFilterTools = ref('all') // 'all' | 'yes' | 'no'
 const discoveryFilterCost = ref('all') // 'all' | 'free' | 'paid'
 const discoveryFilterPopular = ref('all') // 'all' | 'ranked' | 'top10' | 'top25'
 
@@ -394,6 +399,15 @@ const filteredDiscoveredModels = computed(() => {
     list = list.filter(m => !m.supportsVideo)
   }
 
+  // Tools filter. Unknown counts as supported, matching how the model is
+  // actually driven — "no" surfaces only models the provider declared incapable.
+  if (discoveryFilterTools.value === 'yes') {
+    list = list.filter(m => m.supportsTools !== false)
+  }
+  else if (discoveryFilterTools.value === 'no') {
+    list = list.filter(m => m.supportsTools === false)
+  }
+
   // Cost filter
   if (discoveryFilterCost.value === 'free') {
     list = list.filter(m => m.isFree)
@@ -422,6 +436,10 @@ const filteredDiscoveredModels = computed(() => {
 const discoveryHasVision = computed(() => discoveredModels.value.some(m => m.supportsVision))
 const discoveryHasAudio = computed(() => discoveredModels.value.some(m => m.supportsAudio))
 const discoveryHasVideo = computed(() => discoveredModels.value.some(m => m.supportsVideo))
+// Shown only when the provider actually declared some model tool-incapable —
+// on a provider that reports no capabilities the filter would have nothing to
+// separate, since everything reads as supported.
+const discoveryHasToolIncapable = computed(() => discoveredModels.value.some(isDeclaredToolIncapable))
 
 // Whether the provider offers free models — gates the Cost filter, since the
 // free/paid split is only meaningful when some model is actually free.
@@ -445,6 +463,7 @@ async function startDiscovery(providerName: string) {
   discoveryFilterVision.value = 'all'
   discoveryFilterAudio.value = 'all'
   discoveryFilterVideo.value = 'all'
+  discoveryFilterTools.value = 'all'
   discoveryFilterCost.value = 'all'
   discoveryFilterPopular.value = 'all'
   expandedModelsProvider.value = null
@@ -499,6 +518,11 @@ async function addDiscoveredModels() {
       supportsVision: m.visionDetectedFromProvider ? m.supportsVision : false,
       supportsAudio: m.audioDetectedFromProvider ? m.supportsAudio : false,
       supportsVideo: m.videoDetectedFromProvider ? m.supportsVideo : false,
+      // Only written when the provider authoritatively said no. Absent means
+      // unknown, which the backend reads as supported — writing `false` by
+      // default the way the capabilities above do would disarm every agent on
+      // a provider that reports no capability list (JCLAW-1074).
+      ...(isDeclaredToolIncapable(m) ? { supportsTools: false } : {}),
       ...((m.promptPrice ?? -1) >= 0 ? { promptPrice: m.promptPrice } : {}),
       ...((m.completionPrice ?? -1) >= 0 ? { completionPrice: m.completionPrice } : {}),
       ...((m.cachedReadPrice ?? -1) >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
@@ -1178,6 +1202,17 @@ const groupedProviders = computed(() => {
                         class="accent-white"
                       > Supports Video
                     </label>
+                    <label
+                      :for="`model-tools-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                    >
+                      <input
+                        :id="`model-tools-${name}`"
+                        v-model="modelForm.supportsTools"
+                        type="checkbox"
+                        class="accent-white"
+                      > Can call tools
+                    </label>
                   </div>
                   <div class="flex items-center gap-1">
                     <button
@@ -1453,6 +1488,17 @@ const groupedProviders = computed(() => {
                       class="accent-white"
                     > Supports Video
                   </label>
+                  <label
+                    :for="`addmodel-tools-${name}`"
+                    class="flex items-center gap-1.5 text-xs text-fg-muted"
+                  >
+                    <input
+                      :id="`addmodel-tools-${name}`"
+                      v-model="modelForm.supportsTools"
+                      type="checkbox"
+                      class="accent-white"
+                    > Can call tools
+                  </label>
                 </div>
                 <div class="flex items-center gap-1">
                   <button
@@ -1629,6 +1675,22 @@ const groupedProviders = computed(() => {
                 </option>
                 <option value="no">
                   Video: No
+                </option>
+              </select>
+              <select
+                v-if="discoveryHasToolIncapable"
+                v-model="discoveryFilterTools"
+                aria-label="Filter by tool-calling support"
+                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+              >
+                <option value="all">
+                  Tools: All
+                </option>
+                <option value="yes">
+                  Tools: Yes
+                </option>
+                <option value="no">
+                  Tools: No
                 </option>
               </select>
               <select

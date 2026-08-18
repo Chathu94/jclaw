@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { nextTick } from 'vue'
 import ModelCapabilityPills from '~/components/ModelCapabilityPills.vue'
-import { findProviderModel, type Provider } from '~/composables/useProviders'
+import { findProviderModel, isDeclaredToolIncapable, modelSupportsTools, type Provider } from '~/composables/useProviders'
 
 describe('ModelCapabilityPills', () => {
   it('renders nothing when model is null', async () => {
@@ -183,5 +183,59 @@ describe('findProviderModel', () => {
   it('returns null for missing inputs', () => {
     expect(findProviderModel(providers, null, 'x')).toBeNull()
     expect(findProviderModel(providers, 'openrouter', null)).toBeNull()
+  })
+})
+
+describe('tool-calling capability (JCLAW-1075)', () => {
+  it('treats an absent flag as supported', () => {
+    // Every model discovered before the capability existed carries no flag.
+    // Reading that as "no tools" would tell operators their agents are
+    // disarmed when they are not.
+    expect(modelSupportsTools({ id: 'legacy' })).toBe(true)
+    expect(modelSupportsTools({ id: 'x', supportsTools: undefined })).toBe(true)
+  })
+
+  it('only an explicit false counts as unsupported', () => {
+    expect(modelSupportsTools({ id: 'dolphin3:8b', supportsTools: false })).toBe(false)
+    expect(modelSupportsTools({ id: 'qwen3:8b', supportsTools: true })).toBe(true)
+  })
+
+  it('treats a missing model as supported rather than guessing', () => {
+    expect(modelSupportsTools(null)).toBe(true)
+    expect(modelSupportsTools(undefined)).toBe(true)
+  })
+
+  it('persists only an authoritative negative from discovery', () => {
+    // The capabilities beside this one in the Settings save mapping all follow
+    // `detected ? value : false`. Copying that shape here would write
+    // supportsTools:false for every model on a provider that reports no
+    // capabilities, disarming its agents — absence must stay absence.
+    expect(isDeclaredToolIncapable({ supportsTools: false, toolsDetectedFromProvider: true })).toBe(true)
+    expect(isDeclaredToolIncapable({ supportsTools: true, toolsDetectedFromProvider: true })).toBe(false)
+    expect(isDeclaredToolIncapable({ supportsTools: false, toolsDetectedFromProvider: false })).toBe(false)
+    expect(isDeclaredToolIncapable({})).toBe(false)
+    expect(isDeclaredToolIncapable(null)).toBe(false)
+  })
+
+  it('shows the no-tools pill only for a declared-incapable model', async () => {
+    const incapable = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'dolphin3:8b', supportsTools: false } },
+    })
+    await nextTick()
+    expect(incapable.text()).toContain('no tools')
+
+    // A capable model gets no pill — "has tools" is the unremarkable case.
+    const capable = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'qwen3:8b', supportsTools: true } },
+    })
+    await nextTick()
+    expect(capable.text()).not.toContain('no tools')
+
+    // And neither does one with no recorded capability.
+    const unknown = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'legacy' } },
+    })
+    await nextTick()
+    expect(unknown.text()).not.toContain('no tools')
   })
 })

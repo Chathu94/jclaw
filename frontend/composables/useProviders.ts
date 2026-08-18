@@ -19,6 +19,12 @@ export interface ProviderModel {
   supportsAudio?: boolean
   /** True when the model accepts native video inputs (Qwen-VL family). */
   supportsVideo?: boolean
+  /**
+   * Whether the model can call tools. Absent means unknown, which counts as
+   * supported — only an authoritative negative is recorded (JCLAW-1074), so
+   * read this through {@link modelSupportsTools} rather than truthiness.
+   */
+  supportsTools?: boolean
   /** Total context window size in tokens. 0/undefined when the provider did not advertise it. */
   contextWindow?: number
   [key: string]: unknown
@@ -54,6 +60,32 @@ const LOCAL_PROVIDERS = new Set(['ollama-local', 'lm-studio', 'vllm', 'llama-cpp
  */
 export function isLocalProvider(name: string | null | undefined): boolean {
   return !!name && LOCAL_PROVIDERS.has(name)
+}
+
+/**
+ * Whether a model can call tools. Unknown counts as supported, mirroring the
+ * backend's {@code toolCallingSupported()}: a model discovered before the
+ * capability existed carries no flag, and treating that as "no tools" would
+ * wrongly tell the operator their agent is disarmed.
+ */
+export function modelSupportsTools(model: ProviderModel | null | undefined): boolean {
+  return model?.supportsTools !== false
+}
+
+/**
+ * True only when discovery carried an authoritative "this model cannot call
+ * tools" — the sole case worth persisting.
+ *
+ * Split out of the Settings save mapping because the capabilities beside it all
+ * follow `detected ? value : false`, and copying that shape here would write
+ * `supportsTools: false` for every model on a provider that reports no
+ * capabilities at all, disarming its agents (JCLAW-1074). Absence has to stay
+ * absence.
+ */
+export function isDeclaredToolIncapable(
+  discovered: Record<string, unknown> | null | undefined,
+): boolean {
+  return discovered?.toolsDetectedFromProvider === true && discovered.supportsTools === false
 }
 
 /** Find a model's metadata by provider name + model id, or null if not found. */

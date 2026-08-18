@@ -29,7 +29,7 @@ import { formatSize } from '~/utils/format'
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
+import type { Agent, AgentSkill, AgentTool, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import { useChatUsageMeter } from '~/composables/useChatUsageMeter'
@@ -42,7 +42,7 @@ import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
 import { useChatStream } from '~/composables/useChatStream'
 import { useStreamProgress } from '~/composables/useStreamProgress'
-import { isLocalProvider } from '~/composables/useProviders'
+import { findProviderModel, isLocalProvider, modelSupportsTools } from '~/composables/useProviders'
 import ChatMessage from '~/components/chat/ChatMessage.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 
@@ -475,6 +475,43 @@ const streamProducing = computed(() =>
 // provider too. Remote turns show "Generating…" from the first frame.
 // selectedModelKey is "<provider>::<modelId>".
 const streamIsLocal = computed(() => isLocalProvider(selectedModelKey.value.split('::')[0]))
+
+// JCLAW-1075: a chat-only model leaves the agent answering normally but never
+// acting, which reads as a bad model rather than a configuration mismatch.
+const activeModelInfo = computed(() => {
+  const [provider, modelId] = selectedModelKey.value.split('::')
+  return findProviderModel(providers.value, provider, modelId)
+})
+const modelCannotUseTools = computed(() => !modelSupportsTools(activeModelInfo.value))
+
+// Fetched only once a tool-incapable model is actually selected — the rare
+// case, so an ordinary session pays nothing for the notice.
+const { data: agentToolsData, execute: loadAgentTools } = useLazyFetch<AgentTool[]>(
+  () => `/api/agents/${selectedAgentId.value}/tools`,
+  { default: () => [], immediate: false },
+)
+const { data: agentSkillsData, execute: loadAgentSkills } = useLazyFetch<AgentSkill[]>(
+  () => `/api/agents/${selectedAgentId.value}/skills`,
+  { default: () => [], immediate: false },
+)
+watch([modelCannotUseTools, selectedAgentId], ([cannot, agentId]) => {
+  if (!cannot || !agentId) return
+  loadAgentTools()
+  loadAgentSkills()
+}, { immediate: true })
+
+const noToolsNotice = computed(() => {
+  if (!modelCannotUseTools.value) return null
+  const toolCount = agentToolsData.value?.length ?? 0
+  const skillCount = agentSkillsData.value?.length ?? 0
+  // Nothing configured means nothing lost — no notice worth showing.
+  if (toolCount + skillCount === 0) return null
+  return {
+    modelLabel: activeModelInfo.value?.name || selectedModelKey.value.split('::')[1] || 'This model',
+    toolCount,
+    skillCount,
+  }
+})
 const { label: streamProgressLabel, elapsed: streamProgressElapsed } = useStreamProgress(streaming, streamProducing, streamIsLocal)
 
 // Composer-local interaction glue (/model autocomplete, textarea keyboard +
@@ -725,6 +762,15 @@ function exportConversation() {
           prop. Renders nothing when no run is active.
         -->
         <ChatReembedNotice />
+
+        <!-- JCLAW-1075: says why the agent can't act, before the user concludes
+             the model is bad. Sits with the other conversation-level notices. -->
+        <ChatNoToolsNotice
+          v-if="noToolsNotice"
+          :model-label="noToolsNotice.modelLabel"
+          :tool-count="noToolsNotice.toolCount"
+          :skill-count="noToolsNotice.skillCount"
+        />
 
         <!--
           JCLAW-274: subagent-transcript banner. Surfaces above the message

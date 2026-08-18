@@ -10,6 +10,7 @@
  */
 import { ChevronDown, Search } from '@lucide/vue'
 import type { Provider } from '~/composables/useProviders'
+import { modelSupportsTools } from '~/composables/useProviders'
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from '~/components/ui/popover'
@@ -31,7 +32,7 @@ const query = ref('')
 // this false, so the trigger correctly reclaims focus for keyboard users.
 const picking = ref(false)
 
-interface Row { provider: string, model: string, label: string, sublabel: string }
+interface Row { provider: string, model: string, label: string, sublabel: string, toolIncapable: boolean }
 
 const rows = computed<Row[]>(() => {
   const out: Row[] = []
@@ -42,6 +43,7 @@ const rows = computed<Row[]>(() => {
         model: m.id,
         label: m.name || m.id,
         sublabel: p.name,
+        toolIncapable: !modelSupportsTools(m),
       })
     }
   }
@@ -54,7 +56,11 @@ const filtered = computed<Record<string, Row[]>>(() => {
     ? rows.value.filter(r =>
         r.label.toLowerCase().includes(q)
         || r.model.toLowerCase().includes(q)
-        || r.provider.toLowerCase().includes(q))
+        || r.provider.toLowerCase().includes(q)
+        // Searching "no tools" narrows to the chat-only models. This picker is
+        // a search box rather than a facet panel, so the capability is filtered
+        // the same way everything else in it is — by typing (JCLAW-1075).
+        || (r.toolIncapable && 'no tools'.includes(q)))
     : rows.value
   const groups: Record<string, Row[]> = {}
   for (const r of matches) {
@@ -175,6 +181,12 @@ function onCloseAutoFocus(event: Event) {
               @click="pick(row)"
             >
               <span class="block min-w-0 flex-1 truncate">{{ row.label }}</span>
+              <span
+                v-if="row.toolIncapable"
+                class="shrink-0 rounded border border-orange-400/40 bg-orange-400/5 px-1 py-px
+                       text-[10px] text-orange-700 dark:text-orange-400"
+                title="This model cannot call tools — an agent's tools and skills are unavailable with it"
+              >no tools</span>
               <span class="ml-auto flex items-center gap-1.5 shrink-0 text-muted-foreground truncate max-w-[160px]">
                 {{ row.model }}
               </span>
