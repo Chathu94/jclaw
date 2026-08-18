@@ -47,7 +47,7 @@ For a hands-free spoken conversation, click **Voice mode** (the voice button nea
 
 ## Slash commands
 
-Type `/` at the start of a message to access these built-in commands. A menu opens listing every command with a one-line description; keep typing to filter it, use the arrow keys to move, and press Enter or Tab to pick one — then Enter again to send. They work identically in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp); Telegram surfaces the same list in its native autocomplete dropdown.
+Type `/` at the start of a message to access these built-in commands. A menu opens listing every command with a one-line description; keep typing to filter it, use the arrow keys to move, and press Enter or Tab to pick one — then Enter again to send. They work identically in the web composer and in any external channel ([Telegram](/guide#conversations-and-channels), Slack, WhatsApp); Telegram surfaces the same list in its native autocomplete dropdown. The exception is `/prompt`, which inserts text into the composer and so exists only on the web.
 
 | Command           | What it does                                                                                                  |
 |-------------------|---------------------------------------------------------------------------------------------------------------|
@@ -59,6 +59,7 @@ Type `/` at the start of a message to access these built-in commands. A menu ope
 | `/usage`          | Show how much of the model's context window the current conversation occupies.                                |
 | `/stop`           | Interrupt the current generation. (Same as clicking the Stop button.)                                          |
 | `/subagent`       | Inspect, kill, or read transcripts of subagent runs spawned from this conversation. See [Subagents](/guide#subagents). |
+| `/prompt`         | Search your [Prompts Library](/guide#prompts) and insert a saved prompt into the composer. Web composer only. |
 
 :::tip /compact when context fills up
 `/usage` will warn you when a conversation is pushing against the context window. `/compact` then summarizes the older parts and keeps the recent turns verbatim, so the agent can keep working without losing the thread. Pass a focus hint when you only care about a specific subtopic — the summarizer keeps that thread tight.

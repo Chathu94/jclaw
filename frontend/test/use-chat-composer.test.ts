@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { Provider } from '~/composables/useProviders'
-import type { SlashCommand } from '~/types/api'
+import type { Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer, type UseChatComposer, type UseChatComposerDeps } from '~/composables/useChatComposer'
 
 const PROVIDERS: Provider[] = [{ name: 'openai', models: [{ id: 'gpt-4', name: 'GPT-4' }] }]
@@ -11,6 +11,19 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
   { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
   { literal: '/stop', name: 'stop', description: 'Interrupt the current generation' },
+]
+
+const PROMPTS: Prompt[] = [
+  {
+    id: 1,
+    title: 'Code review',
+    content: 'Review this diff for correctness.',
+    tags: 'engineering',
+    category: 'ENGINEERING',
+    categoryLabel: 'Engineering',
+    createdAt: null,
+    updatedAt: null,
+  },
 ]
 
 function key(over: Partial<KeyboardEvent> = {}) {
@@ -22,6 +35,9 @@ function mountComposer(over: Partial<UseChatComposerDeps> = {}) {
     input: ref(''),
     providers: ref<Provider[]>(PROVIDERS),
     slashCommands: ref<SlashCommand[]>(SLASH_COMMANDS),
+    prompts: ref<Prompt[]>(PROMPTS),
+    promptsLoading: ref(false),
+    loadPrompts: vi.fn(),
     chatInput: ref<HTMLTextAreaElement | null>(null),
     subagentTranscript: ref(null),
     isEmptyChat: ref(false),
@@ -156,5 +172,80 @@ describe('useChatComposer', () => {
     const stop = api.completer.options.value.find(o => o.value === '/stop')!
     api.pickAutocomplete(stop)
     expect(input.value).toBe('/stop ')
+  })
+
+  // ── JCLAW-1072: /prompt never reaches the model as literal text ──
+
+  it('offers /prompt in the "/" menu alongside the backend commands', async () => {
+    const input = ref('')
+    const { api } = mountComposer({ input })
+    input.value = '/'
+    await nextTick()
+    expect(api.completer.options.value.map(o => o.value)).toContain('/prompt')
+  })
+
+  it('loads the library on first entry into /prompt context, not on mount', async () => {
+    const input = ref('')
+    const loadPrompts = vi.fn()
+    const { api } = mountComposer({ input, loadPrompts })
+    expect(loadPrompts).not.toHaveBeenCalled()
+
+    input.value = '/prompt '
+    await nextTick()
+    expect(loadPrompts).toHaveBeenCalled()
+    expect(api.completer.activeSourceId.value).toBe('prompt')
+  })
+
+  it('Enter inserts the prompt body rather than sending', async () => {
+    const input = ref('')
+    const { api, deps } = mountComposer({ input })
+    input.value = '/prompt code'
+    await nextTick()
+
+    api.onInputEnter(key())
+    expect(deps.sendMessage).not.toHaveBeenCalled()
+    expect(input.value).toBe('Review this diff for correctness.')
+  })
+
+  it('swallows Enter on the no-match status row instead of sending the literal', async () => {
+    const input = ref('')
+    const { api, deps } = mountComposer({ input })
+    input.value = '/prompt zzz-nothing'
+    await nextTick()
+    // Popup stays open on a status row so the key has somewhere to go.
+    expect(api.completer.open.value).toBe(true)
+    expect(api.completer.options.value[0]?.disabled).toBe(true)
+
+    const ev = key()
+    api.onInputEnter(ev)
+    expect(deps.sendMessage).not.toHaveBeenCalled()
+    expect(ev.preventDefault).toHaveBeenCalled()
+    expect(input.value).toBe('/prompt zzz-nothing') // unchanged, not cleared
+  })
+
+  it('still blocks send after Escape dismisses the picker', async () => {
+    const input = ref('')
+    const { api, deps } = mountComposer({ input })
+    input.value = '/prompt zzz-nothing'
+    await nextTick()
+    api.onInputKeydown(key({ key: 'Escape' }))
+    expect(api.completer.open.value).toBe(false)
+
+    api.onInputEnter(key())
+    expect(deps.sendMessage).not.toHaveBeenCalled()
+    expect(api.completer.blocksSend.value).toBe(true)
+  })
+
+  it('unblocks send once the text is no longer a /prompt invocation', async () => {
+    const input = ref('')
+    const { api, deps } = mountComposer({ input })
+    input.value = '/prompt zzz'
+    await nextTick()
+    input.value = 'just a normal message'
+    await nextTick()
+    expect(api.completer.blocksSend.value).toBe(false)
+
+    api.onInputEnter(key())
+    expect(deps.sendMessage).toHaveBeenCalledOnce()
   })
 })

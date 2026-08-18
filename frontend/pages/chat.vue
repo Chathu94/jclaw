@@ -29,7 +29,7 @@ import { formatSize } from '~/utils/format'
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, Conversation, Message, ConfigResponse, SlashCommand } from '~/types/api'
+import type { Agent, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import { useChatUsageMeter } from '~/composables/useChatUsageMeter'
@@ -488,6 +488,22 @@ const { data: slashCommandsData } = useLazyFetch<SlashCommand[]>('/api/slash-com
 })
 const slashCommands = computed(() => slashCommandsData.value ?? [])
 
+// JCLAW-1072: the /prompt picker's library. immediate:false — most turns never
+// open it, so chat's cold boot shouldn't pay for the fetch; loadPrompts fires
+// on first entry into /prompt context.
+const {
+  data: promptsData,
+  pending: promptsLoading,
+  execute: executePromptsFetch,
+} = useLazyFetch<Prompt[]>('/api/prompts', { default: () => [], immediate: false })
+const prompts = computed(() => promptsData.value ?? [])
+let promptsRequested = false
+function loadPrompts() {
+  if (promptsRequested) return
+  promptsRequested = true
+  executePromptsFetch()
+}
+
 const {
   completer,
   composerEl,
@@ -502,6 +518,9 @@ const {
   input,
   providers,
   slashCommands,
+  prompts,
+  promptsLoading,
+  loadPrompts,
   chatInput,
   subagentTranscript,
   isEmptyChat,
@@ -885,17 +904,25 @@ function exportConversation() {
             <!-- Each row uses ARIA option semantics inside the parent listbox; the native HTML option element only works inside select. aria-selected is dynamically bound via the Vue colon shorthand, which Sonar's static analyser does not resolve. -->
             <button
               v-for="(opt, idx) in completer.options.value"
-              :key="opt.value"
+              :key="opt.value || opt.detail"
               type="button"
-              :class="idx === completer.highlightedIndex.value
-                ? 'bg-muted text-fg-strong'
-                : 'text-fg-default hover:bg-muted/50'"
+              :disabled="opt.disabled"
+              :class="[
+                opt.disabled
+                  ? 'text-fg-muted italic cursor-default'
+                  : idx === completer.highlightedIndex.value
+                    ? 'bg-muted text-fg-strong'
+                    : 'text-fg-default hover:bg-muted/50',
+              ]"
               class="flex w-full items-baseline gap-2 text-left px-3 py-1.5 text-xs transition-colors"
-              :aria-selected="idx === completer.highlightedIndex.value"
+              :aria-selected="!opt.disabled && idx === completer.highlightedIndex.value"
               role="option"
               @mousedown.prevent="pickAutocomplete(opt)"
             >
-              <span class="font-mono">{{ opt.label ?? opt.value }}</span>
+              <span
+                v-if="opt.label"
+                class="font-mono"
+              >{{ opt.label }}</span>
               <!-- Description truncates rather than wrapping: a wrapped row would
                  shift every row below it as the filter narrows. -->
               <span
@@ -1223,11 +1250,11 @@ function exportConversation() {
                 <button
                   v-else
                   type="submit"
-                  :disabled="!input.trim() && !attachedFiles.length"
+                  :disabled="(!input.trim() && !attachedFiles.length) || completer.blocksSend.value"
                   class="p-1.5 transition-colors
                          enabled:text-emerald-700 dark:enabled:text-emerald-400 enabled:hover:text-emerald-700 dark:enabled:hover:text-emerald-300
                          disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed"
-                  title="Send"
+                  :title="completer.blocksSend.value ? 'Pick a prompt to insert' : 'Send'"
                 >
                   <PaperAirplaneIcon
                     class="w-5 h-5 -rotate-45"

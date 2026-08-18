@@ -1,9 +1,10 @@
-import { nextTick, ref, watch, type Ref } from 'vue'
+import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { useComposerCompleter, type CompletionOption } from '~/composables/useComposerCompleter'
 import { modelCompletionSource } from '~/composables/modelCompletionSource'
 import { slashCommandSource } from '~/composables/slashCommandSource'
+import { promptCompletionSource, PROMPT_PSEUDO_COMMAND } from '~/composables/promptCompletionSource'
 import type { Provider } from '~/composables/useProviders'
-import type { SlashCommand } from '~/types/api'
+import type { Prompt, SlashCommand } from '~/types/api'
 
 /**
  * Composer-local interaction logic (JCLAW-690 stage 5c; behaviour extracted
@@ -21,6 +22,11 @@ export interface UseChatComposerDeps {
   providers: Ref<Provider[]>
   /** Built-in commands for the "/" menu; empty until the lazy fetch resolves. */
   slashCommands: Ref<SlashCommand[]>
+  /** Saved prompts for /prompt search; empty until {@link UseChatComposerDeps.loadPrompts} resolves. */
+  prompts: Ref<Prompt[]>
+  promptsLoading: Ref<boolean>
+  /** Idempotent; fired on first entry into /prompt context, not on page load. */
+  loadPrompts: () => void
   chatInput: Ref<HTMLTextAreaElement | null>
   subagentTranscript: Ref<{ agentId: number, agentName: string } | null>
   isEmptyChat: Ref<boolean>
@@ -41,7 +47,10 @@ export interface UseChatComposer {
 }
 
 export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
-  const { input, providers, slashCommands, chatInput, subagentTranscript, isEmptyChat, addAttachments, sendMessage } = deps
+  const {
+    input, providers, slashCommands, prompts, promptsLoading, loadPrompts,
+    chatInput, subagentTranscript, isEmptyChat, addAttachments, sendMessage,
+  } = deps
 
   // Owned here (only the FLIP watcher below reads it); the page binds it via
   // ref="composerEl" on the composer wrapper div.
@@ -57,9 +66,12 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
    * single answer to "is a completion open?", which is what onInputEnter needs
    * to decide whether Enter accepts or sends.
    */
+  const menuCommands = computed(() => [...slashCommands.value, PROMPT_PSEUDO_COMMAND])
+
   const completer = useComposerCompleter([
-    slashCommandSource(slashCommands),
+    slashCommandSource(menuCommands),
     modelCompletionSource(providers),
+    promptCompletionSource({ prompts, loading: promptsLoading, ensureLoaded: loadPrompts }),
   ])
 
   watch(input, (text) => {
@@ -79,9 +91,12 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
       completer.moveHighlight('up')
     }
     else if (event.key === 'Tab' || event.key === 'Enter') {
+      // Swallowed unconditionally while the popup is open: on a status row
+      // ("No matching prompts") accept() returns null, and letting Enter
+      // through there would send the half-finished invocation as a message.
+      event.preventDefault()
       const replacement = completer.accept(input.value)
       if (replacement !== null) {
-        event.preventDefault()
         input.value = replacement
         nextTick(() => autoResize())
       }
@@ -100,6 +115,9 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
       return
     }
     event.preventDefault()
+    // Escape closes the popup but leaves "/prompt foo" in the box; sending it
+    // would hand the model a slash command it doesn't recognize as one.
+    if (completer.blocksSend.value) return
     sendMessage()
   }
 

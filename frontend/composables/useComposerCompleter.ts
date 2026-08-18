@@ -19,6 +19,8 @@ export interface CompletionOption {
   label?: string
   /** Secondary row text — a command's description, a prompt's category. */
   detail?: string
+  /** A status row ("Loading…", "No matches"): shown, never accepted. */
+  disabled?: boolean
 }
 
 export interface CompletionSource {
@@ -30,6 +32,12 @@ export interface CompletionSource {
   options: (text: string) => CompletionOption[]
   /** The composer text after accepting `choice`. */
   apply: (text: string, choice: CompletionOption) => string
+  /**
+   * Text the composer must not send as-is — a half-finished invocation only
+   * this source can complete. Consulted independently of {@link open}, so
+   * dismissing the popup with Escape doesn't re-enable sending the literal.
+   */
+  blocksSend?: (text: string) => boolean
 }
 
 /**
@@ -55,6 +63,8 @@ export interface UseComposerCompleter {
   readonly ariaLabel: ComputedRef<string>
   /** Id of the active source, or null when closed. */
   readonly activeSourceId: ComputedRef<string | null>
+  /** True when the current text is a half-finished invocation — see {@link CompletionSource.blocksSend}. */
+  readonly blocksSend: ComputedRef<boolean>
   /** Recompute from the textarea's current value. */
   update: (text: string) => void
   close: () => void
@@ -72,6 +82,8 @@ export function useComposerCompleter(sources: CompletionSource[]): UseComposerCo
   const options = ref<CompletionOption[]>([])
   const highlightedIndex = ref(0)
   const activeSource = ref<CompletionSource | null>(null)
+  // Survives close(), so Escape dismisses the popup without unblocking send.
+  const currentText = ref('')
 
   const highlighted = computed<CompletionOption | null>(() => {
     if (!open.value) return null
@@ -80,8 +92,10 @@ export function useComposerCompleter(sources: CompletionSource[]): UseComposerCo
 
   const ariaLabel = computed(() => activeSource.value?.ariaLabel ?? 'Completion options')
   const activeSourceId = computed(() => (open.value ? activeSource.value?.id ?? null : null))
+  const blocksSend = computed(() => sources.some(s => s.blocksSend?.(currentText.value) ?? false))
 
   function update(text: string) {
+    currentText.value = text
     for (const source of sources) {
       const found = source.options(text)
       if (found.length === 0) continue
@@ -111,13 +125,13 @@ export function useComposerCompleter(sources: CompletionSource[]): UseComposerCo
     )
   }
 
-  function accept(currentText: string): string | null {
+  function accept(text: string): string | null {
     if (!open.value) return null
     const source = activeSource.value
     const choice = options.value[highlightedIndex.value]
-    if (!source || !choice) return null
+    if (!source || !choice || choice.disabled) return null
     close()
-    return source.apply(currentText, choice)
+    return source.apply(text, choice)
   }
 
   return {
@@ -127,6 +141,7 @@ export function useComposerCompleter(sources: CompletionSource[]): UseComposerCo
     highlighted,
     ariaLabel,
     activeSourceId,
+    blocksSend,
     update,
     close,
     moveHighlight,
