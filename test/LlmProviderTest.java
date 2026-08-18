@@ -3,6 +3,7 @@ import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatRequest;
+import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 import llm.LlmTypes.ToolDef;
 import llm.OllamaProvider;
@@ -475,5 +476,64 @@ class LlmProviderTest extends UnitTest {
         assertFalse(permanentQuota(""));
         assertFalse(permanentQuota("<html>502 Bad Gateway</html>"));
         assertFalse(permanentQuota("{\"error\":\"just a string\"}"));
+    }
+
+    // =====================
+    // JCLAW-1074 — tools are withheld from chat-only models
+    // =====================
+
+    private static final List<ToolDef> ONE_TOOL = List.of(
+            ToolDef.of("do_thing", "does a thing", Map.of()));
+
+    /** An Ollama provider whose catalog declares one model's tool capability. */
+    private static OllamaProvider ollamaWith(String modelId, Boolean supportsTools) {
+        var info = new ModelInfo(modelId, modelId, 8192, 0, false, false, false, false,
+                supportsTools, -1, -1, -1, -1, null, false);
+        return new OllamaProvider(new ProviderConfig(
+                "ollama-local", "http://localhost:11434/v1", "", List.of(info)));
+    }
+
+    private static ChatRequest requestWithTools(String modelId) {
+        return new ChatRequest(modelId, List.of(ChatMessage.user("Hi")), ONE_TOOL, false, null, null);
+    }
+
+    @Test
+    void toolsAreOmittedForAModelDeclaredToolIncapable() throws Exception {
+        // The 400 this closes: "dolphin3:8b does not support tools".
+        var json = serialize(ollamaWith("dolphin3:8b", false), requestWithTools("dolphin3:8b"));
+        assertFalse(json.has("tools"),
+                "tools must be absent for a chat-only model: " + json);
+        // The turn still happens — withholding tools, not the request.
+        assertTrue(json.has("messages"), "messages still sent: " + json);
+    }
+
+    @Test
+    void toolsAreSentForAModelDeclaredToolCapable() throws Exception {
+        var json = serialize(ollamaWith("qwen3:8b", true), requestWithTools("qwen3:8b"));
+        assertTrue(json.has("tools"), "tools sent for a tool-capable model: " + json);
+    }
+
+    @Test
+    void toolsAreSentWhenCapabilityIsUnrecorded() throws Exception {
+        // null is what every model discovered before JCLAW-1074 deserializes to.
+        // Defaulting these off would silently disarm every agent on restart.
+        var json = serialize(ollamaWith("legacy-model", null), requestWithTools("legacy-model"));
+        assertTrue(json.has("tools"), "unknown capability still sends tools: " + json);
+    }
+
+    @Test
+    void toolsAreSentWhenTheModelIsNotInTheCatalogAtAll() throws Exception {
+        // Empty catalog: a provider that has never been discovered must not have
+        // its agents disarmed as a side effect.
+        var json = serialize(ollama(), requestWithTools("never-discovered"));
+        assertTrue(json.has("tools"), "unlisted model still sends tools: " + json);
+    }
+
+    @Test
+    void modelInfoResolvesUnknownToolSupportAsSupported() {
+        assertTrue(new ModelInfo("m", "m", 1, 1, false).toolCallingSupported(),
+                "convenience constructor defaults to tool-capable");
+        assertFalse(new ModelInfo("m", "m", 1, 1, false, false, false, false,
+                false, -1, -1, -1, -1, null, false).toolCallingSupported());
     }
 }

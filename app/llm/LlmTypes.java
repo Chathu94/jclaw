@@ -271,6 +271,15 @@ public final class LlmTypes {
      *                         chain-of-thought tokens
      * @param supportsVision   true when the model accepts image inputs
      * @param supportsAudio    true when the model accepts audio inputs
+     * @param supportsTools    whether the model can call tools, or {@code null}
+     *                         when unknown — read {@link #toolCallingSupported()}
+     *                         rather than this field. Boxed on purpose
+     *                         (JCLAW-1074): provider model lists are Gson-parsed
+     *                         from stored config, and a primitive would make
+     *                         every model discovered before this field existed
+     *                         deserialize as {@code false}, silently stripping
+     *                         tools from every agent on the next restart. Null
+     *                         distinguishes "not recorded" from "recorded as no".
      * @param promptPrice      USD per million prompt (uncached input) tokens,
      *                         {@code -1} when unknown
      * @param completionPrice  USD per million completion tokens, {@code -1}
@@ -306,6 +315,7 @@ public final class LlmTypes {
             boolean supportsVision,
             boolean supportsAudio,
             boolean supportsVideo,
+            Boolean supportsTools,
             double promptPrice,
             double completionPrice,
             double cachedReadPrice,
@@ -317,7 +327,8 @@ public final class LlmTypes {
          *  the {@code -1} unknown sentinel, vision/audio off, and no explicit
          *  thinking levels. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, false, -1, -1, -1, -1, null, false);
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, false, true,
+                    -1, -1, -1, -1, null, false);
         }
 
         /** Convenience constructor — capabilities plus the four pricing fields;
@@ -325,8 +336,19 @@ public final class LlmTypes {
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking,
                          double promptPrice, double completionPrice,
                          double cachedReadPrice, double cacheWritePrice) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, false,
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, false, true,
                     promptPrice, completionPrice, cachedReadPrice, cacheWritePrice, null, false);
+        }
+
+        /**
+         * Whether to send the {@code tools} array to this model. Unknown resolves
+         * to {@code true}: sending tools to a model that turns out not to support
+         * them fails one request loudly, while withholding them from a capable
+         * model disarms the agent silently — so the recoverable error is the
+         * better default. Only an authoritative {@code false} withholds.
+         */
+        public boolean toolCallingSupported() {
+            return supportsTools == null || supportsTools;
         }
 
         /**

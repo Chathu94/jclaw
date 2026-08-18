@@ -23,6 +23,7 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
             "supportsVision", "visionDetectedFromProvider",
             "supportsAudio", "audioDetectedFromProvider",
             "supportsVideo", "videoDetectedFromProvider",
+            "supportsTools", "toolsDetectedFromProvider",
             "promptPrice", "completionPrice", "cachedReadPrice", "cacheWritePrice",
             "isFree");
 
@@ -56,5 +57,44 @@ class ModelDiscoveryModelShapeTest extends UnitTest {
         assertEquals(EXPECTED_KEYS, model.keySet());
         assertEquals(false, model.get("supportsVideo"));
         assertEquals(false, model.get("videoDetectedFromProvider"));
+    }
+
+    // ── JCLAW-1074: tool-calling capability ──────────────────────────────
+
+    @Test
+    void ollamaCapabilitiesWithoutToolsMarkTheModelToolIncapable() {
+        // The dolphin3:8b shape: chat-capable, no tools. Sending a tools array
+        // to this model is the 400 that made chat-only models unusable.
+        var json = JsonParser.parseString("""
+                {"model_info":{"llama.context_length":131072},"capabilities":["completion"]}
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("dolphin3:8b", json);
+        assertEquals(false, model.get("supportsTools"));
+        assertEquals(true, model.get("toolsDetectedFromProvider"),
+                "a capability list that omits tools is an authoritative no");
+    }
+
+    @Test
+    void ollamaCapabilitiesWithToolsMarkTheModelToolCapable() {
+        var json = JsonParser.parseString("""
+                {"model_info":{"qwen3.context_length":40960},"capabilities":["completion","tools"]}
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("qwen3:8b", json);
+        assertEquals(true, model.get("supportsTools"));
+        assertEquals(true, model.get("toolsDetectedFromProvider"));
+    }
+
+    @Test
+    void aProviderThatReportsNoCapabilitiesLeavesToolsEnabled() {
+        // Unknown means supported — the inverse of every other detector. Guessing
+        // "no tools" here would disarm every agent on providers that publish no
+        // capability list, which is most of them.
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"some-cloud-model"}]}
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseModels(json).get(0);
+        assertEquals(true, model.get("supportsTools"));
+        assertEquals(false, model.get("toolsDetectedFromProvider"),
+                "defaulted, not reported — the UI must not lock this one");
     }
 }

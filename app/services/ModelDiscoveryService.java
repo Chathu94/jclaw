@@ -51,6 +51,8 @@ public class ModelDiscoveryService {
     private static final String KEY_THINKING_DETECTED_FROM_PROVIDER = "thinkingDetectedFromProvider";
     private static final String KEY_ALWAYS_THINKS = "alwaysThinks";
     private static final String KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER = "alwaysThinksDetectedFromProvider";
+    private static final String KEY_SUPPORTS_TOOLS = "supportsTools";
+    private static final String KEY_TOOLS_DETECTED_FROM_PROVIDER = "toolsDetectedFromProvider";
     private static final String KEY_SUPPORTS_VISION = "supportsVision";
     private static final String KEY_VISION_DETECTED_FROM_PROVIDER = "visionDetectedFromProvider";
     private static final String KEY_SUPPORTS_AUDIO = "supportsAudio";
@@ -115,6 +117,7 @@ public class ModelDiscoveryService {
             boolean supportsVision, boolean visionFromProvider,
             boolean supportsAudio, boolean audioFromProvider,
             boolean supportsVideo, boolean videoFromProvider,
+            boolean supportsTools, boolean toolsFromProvider,
             double promptPrice, double completionPrice,
             double cachedReadPrice, double cacheWritePrice,
             boolean isFree) {
@@ -135,6 +138,8 @@ public class ModelDiscoveryService {
             m.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audioFromProvider);
             m.put(KEY_SUPPORTS_VIDEO, supportsVideo);
             m.put(KEY_VIDEO_DETECTED_FROM_PROVIDER, videoFromProvider);
+            m.put(KEY_SUPPORTS_TOOLS, supportsTools);
+            m.put(KEY_TOOLS_DETECTED_FROM_PROVIDER, toolsFromProvider);
             m.put(KEY_PROMPT_PRICE, promptPrice);
             m.put(KEY_COMPLETION_PRICE, completionPrice);
             m.put(KEY_CACHED_READ_PRICE, cachedReadPrice);
@@ -312,6 +317,7 @@ public class ModelDiscoveryService {
             var vision = detectVisionSupport(obj);
             var audio = detectAudioSupport(obj);
             var video = detectVideoSupport(obj);
+            var tools = detectToolSupport(obj);
             var info = new ModelInfo(
                     getString(obj, KEY_ID, ""),
                     inferName(obj),
@@ -322,6 +328,7 @@ public class ModelDiscoveryService {
                     vision.confirmed(), vision.fromProvider(),
                     audio.confirmed(), audio.fromProvider(),
                     video.confirmed(), video.fromProvider(),
+                    tools.confirmed(), tools.fromProvider(),
                     inferPrice(obj, FIELD_PROMPT),
                     inferPrice(obj, FIELD_COMPLETION),
                     inferPrice(obj, TYPE_INPUT_CACHE_READ),
@@ -523,6 +530,29 @@ public class ModelDiscoveryService {
         }
 
         return new CapabilityDetection(false, false);
+    }
+
+    /**
+     * Detect tool-calling support (JCLAW-1074).
+     *
+     * <p><b>Unknown means supported</b>, inverting the default every other
+     * detector uses. The others answer "does this model have an extra
+     * capability?", where guessing no costs a feature. This one gates whether
+     * the {@code tools} array is sent at all, so guessing no would silently
+     * strip tools from every model whose provider publishes no capability
+     * list — most of them. Only an authoritative negative flips it off: a
+     * provider that reports a capability array and omits {@code tools}.
+     *
+     * <p>Ollama is that provider today — {@code /api/show} returns
+     * {@code ["completion"]} for a chat-only model like {@code dolphin3:8b},
+     * which is the 400 this closes.
+     */
+    public static CapabilityDetection detectToolSupport(JsonObject obj) {
+        if (obj.has(FIELD_CAPABILITIES) && obj.get(FIELD_CAPABILITIES).isJsonArray()) {
+            var hit = arrayContainsAny(obj.getAsJsonArray(FIELD_CAPABILITIES), true, "tools");
+            return new CapabilityDetection(hit, true);
+        }
+        return new CapabilityDetection(true, false);
     }
 
     /**
@@ -895,6 +925,9 @@ public class ModelDiscoveryService {
                     // Video: the LM Studio native path is image-only (JCLAW-208),
                     // so no model discovered here is video-native.
                     false, false,
+                    // Tools: the native API doesn't enumerate them, and unknown
+                    // means supported — see detectToolSupport.
+                    true, false,
                     // Local models — no pricing data.
                     -1.0, -1.0, -1.0, -1.0,
                     false);
@@ -971,6 +1004,7 @@ public class ModelDiscoveryService {
         var alwaysThinks = detectAlwaysThinks(forDetect);
         var vision = detectVisionSupport(forDetect);
         var audio = detectAudioSupport(forDetect);
+        var tools = detectToolSupport(forDetect);
 
         return new ModelInfo(
                 id, id,
@@ -984,6 +1018,7 @@ public class ModelDiscoveryService {
                 // Qwen-VL model served here stays supportsVideo=false, matching
                 // the pre-existing behavior where the video keys were absent.
                 false, false,
+                tools.confirmed(), tools.fromProvider(),
                 // Ollama doesn't publish pricing via the API. -1 means "unset" —
                 // the frontend skips these fields when saving.
                 -1.0, -1.0, -1.0, -1.0,

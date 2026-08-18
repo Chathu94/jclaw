@@ -789,6 +789,7 @@ public final class Commands {
         sb.append("Vision: ").append(m.supportsVision() ? CAP_SUPPORTED : CAP_NOT_SUPPORTED).append('\n');
         sb.append("Audio: ").append(m.supportsAudio() ? CAP_SUPPORTED : CAP_NOT_SUPPORTED).append('\n');
         sb.append("Video: ").append(m.supportsVideo() ? CAP_SUPPORTED : CAP_NOT_SUPPORTED).append('\n');
+        sb.append("Tools: ").append(m.toolCallingSupported() ? CAP_SUPPORTED : CAP_NOT_SUPPORTED).append('\n');
         sb.append("Pricing (per 1M tokens): ").append(formatPricing(m));
         return sb.toString();
     }

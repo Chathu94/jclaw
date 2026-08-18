@@ -1127,7 +1127,7 @@ class SlashCommandsTest extends UnitTest {
         var a = new Agent();
         a.thinkingMode = null;
         var m = new llm.LlmTypes.ModelInfo(
-                "id", "name", 4096, 1024, true, false, false, false,
+                "id", "name", 4096, 1024, true, false, false, false, true,
                 0, 0, 0, 0, java.util.List.of("low", "medium", "high"), false);
         var result = renderThinkingSelection(a, m);
         assertTrue(result.contains("not currently enabled"), "got: " + result);
@@ -1138,7 +1138,7 @@ class SlashCommandsTest extends UnitTest {
         var a = new Agent();
         a.thinkingMode = "   ";
         var m = new llm.LlmTypes.ModelInfo(
-                "id", "name", 4096, 1024, true, false, false, false,
+                "id", "name", 4096, 1024, true, false, false, false, true,
                 0, 0, 0, 0, java.util.List.of("low", "high"), false);
         var result = renderThinkingSelection(a, m);
         assertTrue(result.contains("not currently enabled"), "got: " + result);
@@ -1152,7 +1152,7 @@ class SlashCommandsTest extends UnitTest {
         var a = new Agent();
         a.thinkingMode = "high";
         var m = new llm.LlmTypes.ModelInfo(
-                "id", "name", 4096, 1024, true, false, false, false,
+                "id", "name", 4096, 1024, true, false, false, false, true,
                 0, 0, 0, 0, java.util.List.of("low", "medium"), false);
         var result = renderThinkingSelection(a, m);
         assertTrue(result.contains("not advertised"), "got: " + result);
@@ -1164,7 +1164,7 @@ class SlashCommandsTest extends UnitTest {
         var a = new Agent();
         a.thinkingMode = "high";
         var m = new llm.LlmTypes.ModelInfo(
-                "id", "name", 4096, 1024, true, false, false, false,
+                "id", "name", 4096, 1024, true, false, false, false, true,
                 0, 0, 0, 0, java.util.List.of("low", "medium", "high"), false);
         var result = renderThinkingSelection(a, m);
         assertTrue(result.contains("effort: high"), "got: " + result);
@@ -1176,7 +1176,7 @@ class SlashCommandsTest extends UnitTest {
         var a = new Agent();
         a.thinkingMode = "medium";
         var m = new llm.LlmTypes.ModelInfo(
-                "id", "name", 4096, 1024, true, false, false, false,
+                "id", "name", 4096, 1024, true, false, false, false, true,
                 0, 0, 0, 0, java.util.List.of(), false);
         var result = renderThinkingSelection(a, m);
         assertTrue(result.contains("effort: medium"), "got: " + result);
@@ -1186,7 +1186,7 @@ class SlashCommandsTest extends UnitTest {
 
     private llm.LlmTypes.ModelInfo modelWithPrices(double p, double c, double cr, double cw) {
         return new llm.LlmTypes.ModelInfo(
-                "id", "name", 4096, 1024, false, false, false, false,
+                "id", "name", 4096, 1024, false, false, false, false, true,
                 p, c, cr, cw, java.util.List.of(), false);
     }
 

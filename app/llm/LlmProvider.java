@@ -17,6 +17,7 @@ import llm.LlmTypes.ChunkDelta;
 import llm.LlmTypes.EmbeddingRequest;
 import llm.LlmTypes.EmbeddingResponse;
 import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 import llm.LlmTypes.ToolCall;
 import llm.LlmTypes.ToolDef;
@@ -700,11 +701,35 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     // ─── Shared internals ────────────────────────────────────────────────
 
+    /**
+     * True unless the model is configured as unable to call tools (JCLAW-1074).
+     *
+     * <p>Sending a {@code tools} array to a chat-only model is a hard failure,
+     * not a degradation — Ollama answers {@code 400 "<model> does not support
+     * tools"} and the turn produces nothing. Withholding the array instead lets
+     * the model answer normally without them.
+     *
+     * <p>Unknown resolves to true, which is the opposite of
+     * {@code modelSupportsThinking}'s default and deliberate: an unlisted model
+     * here means "we have no capability data", and assuming no tools would
+     * silently disarm every agent on a provider that publishes none.
+     */
+    protected boolean modelSupportsTools(String modelId) {
+        if (modelId == null) return true;
+        var models = config().models();
+        if (models == null) return true;
+        return models.stream()
+                .filter(m -> modelId.equals(m.id()))
+                .findFirst()
+                .map(ModelInfo::toolCallingSupported)
+                .orElse(true);
+    }
+
     protected String serializeRequest(ChatRequest request) {
         var obj = new JsonObject();
         obj.addProperty(JSON_MODEL, request.model());
         obj.add(JSON_MESSAGES, serializeMessages(request.messages()));
-        if (request.tools() != null && !request.tools().isEmpty()) {
+        if (request.tools() != null && !request.tools().isEmpty() && modelSupportsTools(request.model())) {
             obj.add("tools", gson.toJsonTree(request.tools()));
         }
         if (request.stream()) {
