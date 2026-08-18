@@ -461,7 +461,19 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // request that ends in an exception still shows as a call the harness
         // decided to make — the NFR is about decisions, not successes.
         LatencyTrace.countLlmCall();
-        var responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH, json, timeoutSeconds, channel);
+        String responseBody;
+        try {
+            responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH, json, timeoutSeconds, channel);
+        } catch (RuntimeException e) {
+            // JCLAW-1076: the provider has just told us this model can't use
+            // tools. Retry once without them rather than failing the turn. The
+            // retry carries no tools, so it cannot raise this error again.
+            if (!sentTools(request) || !ToolCapabilityMemo.isToolsUnsupported(e)) throw e;
+            ToolCapabilityMemo.record(config.name(), model);
+            var retry = new ChatRequest(model, messages, List.of(), false, maxTokens, thinkingMode);
+            responseBody = executeWithRetry(HttpKeys.CHAT_COMPLETIONS_PATH,
+                    serializeRequest(retry), timeoutSeconds, channel);
+        }
         // A provider can return a 200 whose body is garbage (truncated JSON, an
         // HTML error page, a missing "choices" array). deserializeResponse then
         // throws a raw JsonSyntaxException / IllegalStateException — which
@@ -507,37 +519,66 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // the virtual thread below, because the turn binding lives on the calling
         // thread — the stream thread and the provider's IO thread carry none.
         LatencyTrace.countLlmCall();
-        Thread.ofVirtual().name("llm-stream").start(() -> {
-            try {
-                var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
-                var json = serializeRequest(request);
-                OkHttpLlmHttpDriver.streamSse(buildUri(HttpKeys.CHAT_COMPLETIONS_PATH),
-                        HttpKeys.BEARER_PREFIX + config.apiKey(), json,
-                        data -> {
-                            // The server closes the stream right after the [DONE]
-                            // sentinel, so we skip parsing it here.
-                            if ("[DONE]".equals(data)) return;
-                            // Parse once, reuse for both deserialization and usage
-                            // augmentation. The previous implementation parsed
-                            // twice on every final-usage chunk: once implicitly
-                            // inside gson.fromJson(String, Class), once explicitly
-                            // inside augmentChunkUsage via JsonParser.parseString.
-                            try {
-                                var root = JsonParser.parseString(data).getAsJsonObject();
-                                var chunk = gson.fromJson(root, ChatCompletionChunk.class);
-                                if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, root));
-                            } catch (Exception _) {
-                                // Skip malformed chunks
-                            }
-                        },
-                        onComplete,
-                        t -> onError.accept(t instanceof Exception ex
-                                ? ex : new LlmException("Stream error", t)),
-                        channel);
-            } catch (Exception e) {
-                onError.accept(e);
+        Thread.ofVirtual().name("llm-stream").start(() ->
+                streamOnce(model, messages, tools, onChunk, onComplete, onError,
+                        maxTokens, thinkingMode, channel, true));
+    }
+
+    /**
+     * One streaming attempt. {@code mayRetryWithoutTools} is false on the retry,
+     * so a tools-unsupported error can be handled at most once (JCLAW-1076).
+     */
+    @SuppressWarnings("java:S107") // same shape as chatStream, plus the retry latch
+    private void streamOnce(String model, List<ChatMessage> messages, List<ToolDef> tools,
+                            Consumer<ChatCompletionChunk> onChunk,
+                            Runnable onComplete, Consumer<Exception> onError,
+                            Integer maxTokens, String thinkingMode, String channel,
+                            boolean mayRetryWithoutTools) {
+        // Retrying after tokens have reached the user would replay them. A
+        // tools-unsupported 400 is a request rejection so nothing has streamed
+        // yet, but the latch makes that a guarantee rather than an assumption.
+        var emitted = new java.util.concurrent.atomic.AtomicBoolean(false);
+        Consumer<Throwable> handleFailure = t -> {
+            var retryable = mayRetryWithoutTools && !emitted.get()
+                    && tools != null && !tools.isEmpty()
+                    && ToolCapabilityMemo.isToolsUnsupported(t);
+            if (retryable) {
+                ToolCapabilityMemo.record(config.name(), model);
+                streamOnce(model, messages, List.of(), onChunk, onComplete, onError,
+                        maxTokens, thinkingMode, channel, false);
+                return;
             }
-        });
+            onError.accept(t instanceof Exception ex ? ex : new LlmException("Stream error", t));
+        };
+        try {
+            var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
+            var json = serializeRequest(request);
+            OkHttpLlmHttpDriver.streamSse(buildUri(HttpKeys.CHAT_COMPLETIONS_PATH),
+                    HttpKeys.BEARER_PREFIX + config.apiKey(), json,
+                    data -> {
+                        emitted.set(true);
+                        // The server closes the stream right after the [DONE]
+                        // sentinel, so we skip parsing it here.
+                        if ("[DONE]".equals(data)) return;
+                        // Parse once, reuse for both deserialization and usage
+                        // augmentation. The previous implementation parsed
+                        // twice on every final-usage chunk: once implicitly
+                        // inside gson.fromJson(String, Class), once explicitly
+                        // inside augmentChunkUsage via JsonParser.parseString.
+                        try {
+                            var root = JsonParser.parseString(data).getAsJsonObject();
+                            var chunk = gson.fromJson(root, ChatCompletionChunk.class);
+                            if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, root));
+                        } catch (Exception _) {
+                            // Skip malformed chunks
+                        }
+                    },
+                    onComplete,
+                    handleFailure,
+                    channel);
+        } catch (Exception e) {
+            handleFailure.accept(e);
+        }
     }
 
     // ─── Streaming with accumulation ─────────────────────────────────────
@@ -701,6 +742,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     // ─── Shared internals ────────────────────────────────────────────────
 
+    /** Whether this request actually put a tools array on the wire — the precondition for the JCLAW-1076 retry. */
+    private boolean sentTools(ChatRequest request) {
+        return request.tools() != null && !request.tools().isEmpty()
+                && modelSupportsTools(request.model());
+    }
+
     /**
      * True unless the model is configured as unable to call tools (JCLAW-1074).
      *
@@ -716,6 +763,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      */
     protected boolean modelSupportsTools(String modelId) {
         if (modelId == null) return true;
+        // A model that already rejected tools this run is skipped up front, so
+        // the wasted first call happens once rather than every turn (JCLAW-1076).
+        if (ToolCapabilityMemo.isKnownIncapable(config().name(), modelId)) return false;
         var models = config().models();
         if (models == null) return true;
         return models.stream()

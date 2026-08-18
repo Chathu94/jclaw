@@ -11,6 +11,7 @@ import llm.OpenAiProvider;
 import llm.OpenRouterProvider;
 import llm.TogetherAiProvider;
 import llm.ToolCallChunkMerger;
+import llm.ToolCapabilityMemo;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
@@ -527,6 +528,50 @@ class LlmProviderTest extends UnitTest {
         // its agents disarmed as a side effect.
         var json = serialize(ollama(), requestWithTools("never-discovered"));
         assertTrue(json.has("tools"), "unlisted model still sends tools: " + json);
+    }
+
+    // =====================
+    // JCLAW-1076 — learning tool-incapability from the provider's own error
+    // =====================
+
+    @Test
+    void recognisesTheProviderWordingsThatMeanNoToolSupport() {
+        // The exact message Ollama returned for dolphin3:8b.
+        assertTrue(ToolCapabilityMemo.isToolsUnsupported(
+                "registry.ollama.ai/library/dolphin3:8b does not support tools"));
+        assertTrue(ToolCapabilityMemo.isToolsUnsupported("Tools are not supported by this model"));
+        assertTrue(ToolCapabilityMemo.isToolsUnsupported("Unsupported parameter: 'tools'"));
+        assertTrue(ToolCapabilityMemo.isToolsUnsupported(
+                new RuntimeException("wrapped", new RuntimeException("does not support tools"))));
+    }
+
+    @Test
+    void leavesUnrelatedFailuresAlone() {
+        // Retrying these without tools would silently drop the caller's tools
+        // and hide a real bug, so the match has to stay narrow.
+        assertFalse(ToolCapabilityMemo.isToolsUnsupported("context length exceeded"));
+        assertFalse(ToolCapabilityMemo.isToolsUnsupported("invalid api key"));
+        assertFalse(ToolCapabilityMemo.isToolsUnsupported("tool call arguments were malformed"));
+        assertFalse(ToolCapabilityMemo.isToolsUnsupported("no tools were provided for this request"));
+        assertFalse(ToolCapabilityMemo.isToolsUnsupported((String) null));
+        assertFalse(ToolCapabilityMemo.isToolsUnsupported(new RuntimeException((String) null)));
+    }
+
+    @Test
+    void aLearnedModelIsGatedUpFrontSoTheWastedCallHappensOnce() throws Exception {
+        ToolCapabilityMemo.clearForTest();
+        var provider = ollamaWith("chatonly:8b", null); // unknown — tools would be sent
+        assertTrue(serialize(provider, requestWithTools("chatonly:8b")).has("tools"),
+                "unknown capability sends tools on the first call");
+
+        ToolCapabilityMemo.record("ollama-local", "chatonly:8b");
+
+        assertFalse(serialize(provider, requestWithTools("chatonly:8b")).has("tools"),
+                "after learning, tools are withheld without another failure");
+        // Scoped to the model that actually failed.
+        assertTrue(serialize(provider, requestWithTools("other:8b")).has("tools"),
+                "a sibling model is unaffected");
+        ToolCapabilityMemo.clearForTest();
     }
 
     @Test
