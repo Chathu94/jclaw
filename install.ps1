@@ -77,12 +77,28 @@ function Banner {
 
 # ─── Java detection (context-aware) ──────────────────────────────────────────
 # Runs an invoker that prints `java -version` (Windows java, or WSL's java) and
-# returns the major version as [int], or $null if absent/unparseable.
-function Get-JavaMajor([scriptblock]$Invoker) {
-    try { $out = (& $Invoker 2>&1 | Out-String) } catch { return $null }
-    if ($out -match 'version "(\d+)') { return [int]$Matches[1] }
+# returns its combined output as plain text; '' when the command can't run.
+# java prints that banner on stderr, and 2>&1 turns each line into an ErrorRecord:
+# Out-String renders those through the error formatter, which prefixes the invoked
+# path and wraps at the console width - splitting `version "25` for a path as long
+# as the managed JRE's - and 'Stop' escalates the first one to a throw. So stringify
+# each record, with the preference relaxed for the duration.
+function Get-JavaVersionText([scriptblock]$Invoker) {
+    $prev = $script:ErrorActionPreference
+    $script:ErrorActionPreference = 'Continue'
+    try { return ((& $Invoker 2>&1 | ForEach-Object { "$_" }) -join "`n") }
+    catch { return '' }
+    finally { $script:ErrorActionPreference = $prev }
+}
+
+# Major version out of a `java -version` banner, or $null when it carries none.
+function Get-JavaMajorFrom([string]$Text) {
+    if ($Text -match 'version "(\d+)') { return [int]$Matches[1] }
     return $null
 }
+
+# The major version an invoker reports as [int], or $null if absent/unparseable.
+function Get-JavaMajor([scriptblock]$Invoker) { Get-JavaMajorFrom (Get-JavaVersionText $Invoker) }
 
 function Show-JavaHelp([switch]$Auto) {
     Write-Host ''
@@ -143,8 +159,13 @@ function Get-ZuluJre {
     $java = Get-ChildItem -Path $JreDir -Recurse -Filter 'java.exe' -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -match '\\bin\\java\.exe$' } | Select-Object -First 1
     if (-not $java) { throw "unpacked the JRE but found no bin\java.exe under $JreDir." }
-    $jv = Get-JavaMajor { & $java.FullName -version }
-    if ($null -eq $jv -or $jv -lt $MinJava) { throw "managed JRE reports Java $jv, expected $MinJava+." }
+    $out = Get-JavaVersionText { & $java.FullName -version }
+    $jv  = Get-JavaMajorFrom $out
+    if ($null -eq $jv -or $jv -lt $MinJava) {
+        $said = (($out -split "`n" | Where-Object { $_.Trim() }) -join ' | ')
+        if (-not $said) { $said = '(nothing)' }
+        throw "$($java.FullName) did not report Java $MinJava+ - it printed: $said"
+    }
     Substep "installed -> $(Split-Path $java.FullName)"
 }
 
