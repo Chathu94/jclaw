@@ -102,6 +102,23 @@ public final class Commands {
         public String bareName() { return literal.substring(1); }
     }
 
+    /**
+     * A command the web composer implements locally, against the composer
+     * rather than the conversation.
+     *
+     * <p>Deliberately outside {@link Command}: that enum is what
+     * {@code TelegramCommandsRegistrationJob} feeds to {@code setMyCommands} and
+     * what {@link #parse} recognizes, and neither applies here — there is no
+     * composer to insert into off the web, and the text never reaches the
+     * server. Kept backend-side anyway so {@code /help} and the composer's "/"
+     * menu are built from one list instead of disagreeing (JCLAW-1072).
+     */
+    public record WebCommand(String literal, String shortDescription) {}
+
+    /** @see WebCommand */
+    public static final List<WebCommand> WEB_ONLY_COMMANDS = List.of(
+            new WebCommand("/prompt", "Insert a saved prompt from your library"));
+
     /** Canned response text for {@link Command#HELP}. */
     public static final String HELP_TEXT = """
             Available commands:
@@ -524,8 +541,22 @@ public final class Commands {
      * the Slack help lists the {@code !} forms; every other channel uses the
      * canonical {@code /} forms ({@link #HELP_TEXT}). The Slack listing is built from
      * {@link Command} so it can't drift from the actual command set.
+     *
+     * <p>Web additionally lists {@link #WEB_ONLY_COMMANDS} — otherwise the composer
+     * offers {@code /prompt} in its "/" menu while {@code /help} denies it exists.
      */
     public static String helpTextFor(String channelType) {
+        if ("web".equals(channelType)) {
+            var sb = new StringBuilder(HELP_TEXT);
+            for (var c : WEB_ONLY_COMMANDS) {
+                // Descriptions are Title-case for the menu; HELP_TEXT's bullets are
+                // lowercase, so match the surrounding list rather than the source.
+                var lowered = Character.toLowerCase(c.shortDescription().charAt(0))
+                        + c.shortDescription().substring(1);
+                sb.append("\n• ").append(c.literal()).append(" — ").append(lowered);
+            }
+            return sb.toString();
+        }
         if (!"slack".equals(channelType)) return HELP_TEXT;
         var sb = new StringBuilder(
                 "Available commands — Slack reserves / for slash commands (which don't work in "

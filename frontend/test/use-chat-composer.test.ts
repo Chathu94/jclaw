@@ -11,6 +11,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { literal: '/new', name: 'new', description: 'Start a fresh conversation' },
   { literal: '/model', name: 'model', description: 'Show current model and its capabilities' },
   { literal: '/stop', name: 'stop', description: 'Interrupt the current generation' },
+  // Served by /api/slash-commands like the rest, flagged as composer-local.
+  { literal: '/prompt', name: 'prompt', description: 'Insert a saved prompt from your library', webOnly: true },
 ]
 
 const PROMPTS: Prompt[] = [

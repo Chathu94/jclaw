@@ -10,6 +10,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import slash.Commands;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 
 import static utils.GsonHolder.GSON;
@@ -32,18 +33,27 @@ public class ApiSlashCommandsController extends Controller {
      * Wire shape for one command: the {@code /x} form the composer inserts, the
      * bare name, and the one-line description already shared with Telegram's
      * native dropdown.
+     *
+     * @param webOnly true for a composer-local command the server does not parse
+     *                — the client owns its behaviour ({@link Commands.WebCommand})
      */
-    public record SlashCommandView(String literal, String name, String description) {
+    public record SlashCommandView(String literal, String name, String description, boolean webOnly) {
         static SlashCommandView of(Commands.Command c) {
-            return new SlashCommandView(c.literal, c.bareName(), c.shortDescription);
+            return new SlashCommandView(c.literal, c.bareName(), c.shortDescription, false);
+        }
+
+        static SlashCommandView of(Commands.WebCommand c) {
+            return new SlashCommandView(c.literal(), c.literal().substring(1), c.shortDescription(), true);
         }
     }
 
     @ApiResponse(responseCode = "200",
             content = @Content(array = @ArraySchema(schema = @Schema(implementation = SlashCommandView.class))))
-    @Operation(summary = "List the built-in slash commands (literal, name, description)")
+    @Operation(summary = "List the slash commands offered by the web composer (literal, name, description)")
     public static void list() {
-        renderJSON(gson.toJson(
-                Arrays.stream(Commands.Command.values()).map(SlashCommandView::of).toList()));
+        var all = new ArrayList<SlashCommandView>(
+                Arrays.stream(Commands.Command.values()).map(SlashCommandView::of).toList());
+        Commands.WEB_ONLY_COMMANDS.stream().map(SlashCommandView::of).forEach(all::add);
+        renderJSON(gson.toJson(all));
     }
 }

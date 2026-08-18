@@ -46,6 +46,21 @@ class ApiSlashCommandsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void includesComposerOnlyCommandsFlaggedWebOnly() {
+        // The menu and /help are built from this one list, so it carries the
+        // composer-local commands too — flagged, since parse() rejects them.
+        var body = getContent(GET("/api/slash-commands"));
+        for (var cmd : Commands.WEB_ONLY_COMMANDS) {
+            assertTrue(body.contains("\"literal\":\"" + cmd.literal() + "\""),
+                    cmd.literal() + " present: " + body);
+            assertTrue(body.contains(cmd.shortDescription()),
+                    cmd.literal() + " description present: " + body);
+        }
+        assertTrue(body.contains("\"webOnly\":true"), "composer-local command flagged: " + body);
+        assertTrue(body.contains("\"webOnly\":false"), "server command not flagged: " + body);
+    }
+
+    @Test
     void requiresAuthentication() {
         POST("/api/auth/logout", "application/json", "{}");
         var response = GET("/api/slash-commands");

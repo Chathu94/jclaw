@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import type { CompletionOption, CompletionSource } from '~/composables/useComposerCompleter'
-import type { Prompt, SlashCommand } from '~/types/api'
+import type { Prompt } from '~/types/api'
 
 /**
  * Completion source for `/prompt <query>` (JCLAW-1072) — search the Prompts
@@ -10,18 +10,6 @@ import type { Prompt, SlashCommand } from '~/types/api'
 
 /** Literal that opens prompt search. Trailing space required, like /model. */
 export const PROMPT_COMMAND_PREFIX = '/prompt '
-
-/**
- * The `/` menu entry for prompt search. Deliberately NOT a backend
- * `Commands.Command`: that enum is what TelegramCommandsRegistrationJob feeds
- * to setMyCommands, and Telegram has no composer to insert text into, so
- * advertising it there would promise behaviour that channel can't deliver.
- */
-export const PROMPT_PSEUDO_COMMAND: SlashCommand = {
-  literal: '/prompt',
-  name: 'prompt',
-  description: 'Insert a saved prompt',
-}
 
 /** True once the user is past the /prompt literal and into its argument. */
 export function isPromptArgumentContext(text: string): boolean {

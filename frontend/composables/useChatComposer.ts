@@ -1,8 +1,8 @@
-import { computed, nextTick, ref, watch, type Ref } from 'vue'
+import { nextTick, ref, watch, type Ref } from 'vue'
 import { useComposerCompleter, type CompletionOption } from '~/composables/useComposerCompleter'
 import { modelCompletionSource } from '~/composables/modelCompletionSource'
 import { slashCommandSource } from '~/composables/slashCommandSource'
-import { promptCompletionSource, PROMPT_PSEUDO_COMMAND } from '~/composables/promptCompletionSource'
+import { promptCompletionSource } from '~/composables/promptCompletionSource'
 import type { Provider } from '~/composables/useProviders'
 import type { Prompt, SlashCommand } from '~/types/api'
 
@@ -66,10 +66,8 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
    * single answer to "is a completion open?", which is what onInputEnter needs
    * to decide whether Enter accepts or sends.
    */
-  const menuCommands = computed(() => [...slashCommands.value, PROMPT_PSEUDO_COMMAND])
-
   const completer = useComposerCompleter([
-    slashCommandSource(menuCommands),
+    slashCommandSource(slashCommands),
     modelCompletionSource(providers),
     promptCompletionSource({ prompts, loading: promptsLoading, ensureLoaded: loadPrompts }),
   ])

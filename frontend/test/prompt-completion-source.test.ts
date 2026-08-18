@@ -5,7 +5,6 @@ import {
   isPromptArgumentContext,
   isPromptCommandText,
   promptCompletionSource,
-  PROMPT_PSEUDO_COMMAND,
 } from '~/composables/promptCompletionSource'
 import { slashCommandSource } from '~/composables/slashCommandSource'
 import { useComposerCompleter } from '~/composables/useComposerCompleter'
@@ -167,17 +166,5 @@ describe('prompt source in the shared completer', () => {
     const ac = completer()
     ac.update('/new')
     expect(ac.blocksSend.value).toBe(false)
-  })
-})
-
-// ── The "/" menu entry ──
-
-describe('PROMPT_PSEUDO_COMMAND', () => {
-  it('is shaped like a backend command so the menu renders it uniformly', () => {
-    expect(PROMPT_PSEUDO_COMMAND).toEqual({
-      literal: '/prompt',
-      name: 'prompt',
-      description: 'Insert a saved prompt',
-    })
   })
 })

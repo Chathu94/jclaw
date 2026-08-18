@@ -97,9 +97,10 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(slackHelp.contains("!reset"), "Slack help must list !reset");
         assertTrue(slackHelp.contains("!help"), "Slack help must list !help");
         assertFalse(slackHelp.contains("/reset"), "Slack help must not show the (dead-in-threads) /reset form");
-        // Non-Slack channels keep the canonical / forms.
+        // Non-Slack channels keep the canonical / forms. Web extends the listing
+        // with its composer-local commands — see webHelpListsTheComposerOnlyCommands.
         assertEquals(Commands.HELP_TEXT, Commands.helpTextFor("telegram"));
-        assertEquals(Commands.HELP_TEXT, Commands.helpTextFor("web"));
+        assertTrue(Commands.helpTextFor("web").startsWith(Commands.HELP_TEXT));
     }
 
     @Test
@@ -338,7 +339,7 @@ class SlashCommandsTest extends UnitTest {
         var result = Commands.execute(
                 Commands.Command.HELP, agent, "web", "admin", convo);
 
-        assertEquals(Commands.HELP_TEXT, result.responseText());
+        assertEquals(Commands.helpTextFor("web"), result.responseText());
         assertEquals(convo.id, result.conversation().id);
         // Conversation still has contextSince = null — /help is not a reset.
         var reloaded = ConversationService.findById(convo.id);
@@ -1402,5 +1403,37 @@ class SlashCommandsTest extends UnitTest {
         var mentioned = Pattern.compile("/[a-z]+").matcher(Commands.HELP_TEXT).results()
                 .map(MatchResult::group).collect(Collectors.toSet());
         assertEquals(known, mentioned, "HELP_TEXT must not document a command the enum dropped");
+    }
+
+    @Test
+    void webHelpListsTheComposerOnlyCommands() {
+        // The composer's "/" menu offers /prompt, so /help on web has to admit it
+        // exists — otherwise the two listings contradict each other.
+        var web = Commands.helpTextFor("web");
+        for (var c : Commands.WEB_ONLY_COMMANDS) {
+            assertTrue(web.contains(c.literal()), "web /help must document " + c.literal());
+        }
+        assertTrue(web.startsWith(Commands.HELP_TEXT), "web /help extends the canonical listing");
+    }
+
+    @Test
+    void nonWebHelpOmitsTheComposerOnlyCommands() {
+        // Telegram has no composer to insert into; advertising /prompt there would
+        // promise behaviour the channel cannot deliver.
+        for (var c : Commands.WEB_ONLY_COMMANDS) {
+            assertFalse(Commands.helpTextFor("telegram").contains(c.literal()),
+                    "telegram /help must not document " + c.literal());
+            assertFalse(Commands.helpTextFor("slack").contains(c.literal()),
+                    "slack /help must not document " + c.literal());
+        }
+    }
+
+    @Test
+    void webOnlyCommandsAreNotParsedAsServerCommands() {
+        // The client owns them end to end; parse() must still reject them so a
+        // literal that slips through is treated as ordinary text, not a command.
+        for (var c : Commands.WEB_ONLY_COMMANDS) {
+            assertTrue(Commands.parse(c.literal()).isEmpty(), c.literal() + " must not parse");
+        }
     }
 }
