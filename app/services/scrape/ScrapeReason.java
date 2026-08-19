@@ -23,6 +23,10 @@ public enum ScrapeReason {
     TRUST_BLOCK,
     /** Blocked by a non-Cloudflare WAF. Excluded from the epic's numerator and denominator. */
     OTHER_WAF,
+    /** We were not blocked — the origin served a page with no server-rendered text.
+     *  A rendering gap that rung 3 closes, not an anti-bot one, so it is kept distinct
+     *  from {@link #TRUST_BLOCK} rather than inflating the blocked count. */
+    THIN_CONTENT,
     TIMEOUT,
     /** Transport or extraction failure that is ours, not the origin's. */
     ERROR

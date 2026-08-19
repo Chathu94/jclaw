@@ -81,14 +81,21 @@ def probe(domain):
     return url, status, headers, body
 
 
-def classify(status, headers, body):
-    """Assign a protection tier from what is deployed, never from whether we failed.
+def classify(status, headers, body, text=None):
+    """Assign a protection tier from what the origin *did*, never from whether we failed.
 
-    Circularity guard: 'we got a 403' alone is not a tier. The tier comes from
-    Cloudflare's own markers (cf-ray, cf-mitigated, challenge platform, Turnstile).
+    Two guards, and the second was learned the hard way. Circularity: 'we got a 403'
+    alone is not a tier. Marker-presence: a page that *references* Turnstile is not a
+    page *gated by* Turnstile — wiley.com and onetrust.com embed the widget and serve
+    597 and 1574 characters of real content, and labelling them 'turnstile' put five
+    open sites in the hardest tier and inverted the whole benchmark.
+
+    So a marker only names a tier when the origin refused to serve content.
     """
     if status == 0:
         return "unreachable", None
+    if text is None:
+        text = visible_text(body)
     on_cf = "cf-ray" in headers
     if not on_cf:
         for name, test in OTHER_WAF:
@@ -96,29 +103,63 @@ def classify(status, headers, body):
                 return "other-waf", name
         return "not-cloudflare", None
 
+    gated = (any(m in body for m in TURNSTILE_MARKERS)
+             or any(m in body for m in CHALLENGE_MARKERS)
+             or "cf-mitigated" in headers)
+
+    # A 200 with no gate marker is a served page at any size — example.com is 142
+    # characters of complete content and is the canonical known-one, so thinness
+    # alone must never read as blocked. It takes a marker *and* a body too thin to
+    # be a page: hxuakdlb.com returns 200 with 0 characters behind a Turnstile
+    # widget, while wiley.com returns 597 and merely embeds one.
+    if status == 200 and (not gated or len(text) >= SERVED_MIN_TEXT):
+        return "open", None
+
     if any(m in body for m in TURNSTILE_MARKERS):
         return "turnstile", None
     if "cf-mitigated" in headers or any(m in body for m in CHALLENGE_MARKERS):
         return "managed-challenge", None
     if status in (403, 406, 429):
         return "basic", None
-    if status == 200 and len(body) > 500:
-        return "open", None
     return "unreachable", "thin-or-%s" % status
 
 
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
+SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S)
+TAG_RE = re.compile(r"<[^>]+>")
+
+# Below this many characters of visible text a 200 is a gate, not a page. A
+# JS-rendered Turnstile wall returns 200 with an empty body (hxuakdlb.com: 0 chars);
+# a real page that merely embeds a Turnstile widget returns hundreds (wiley.com: 597).
+SERVED_MIN_TEXT = 200
 
 
-def ground_truth(status, body, tier):
+def visible_text(body):
+    return " ".join(TAG_RE.sub(" ", SCRIPT_RE.sub("", body)).split())
+
+
+def ground_truth(status, body, tier, text=None):
     """Assertions the harness scores against.
 
     Negative markers are the load-bearing half: a Cloudflare interstitial is valid
     HTML that extracts to clean markdown, so without them the harness scores a
     challenge page as a success. Positive markers are only capturable for origins
     that already answered us, i.e. the open tier.
+
+    {min_chars} is derived per entry rather than fixed, because a blanket 600 scored
+    example.com - 198 extracted characters, and the canonical known-one - as blocked.
+    A quarter of the observed visible text allows for Readability stripping nav and
+    chrome; the floor and ceiling keep tiny and enormous pages both scoreable.
     """
-    gt = {"min_chars": 600, "reject_markers": list(CHALLENGE_MARKERS + TURNSTILE_MARKERS)}
+    if text is None:
+        text = visible_text(body)
+    gt = {"min_chars": max(50, min(500, len(text) // 4)),
+          # What the probe actually saw. An origin at the floor with a large HTML
+          # body is a client-rendered app, not a small page - the harness needs that
+          # apart from anti-bot failure.
+          "observed_text": len(text),
+          "observed_html": len(body),
+          "reject_markers": list(CHALLENGE_MARKERS + TURNSTILE_MARKERS)}
     if tier == "open" and status == 200:
         m = TITLE_RE.search(body)
         if m:
@@ -180,10 +221,11 @@ def main():
         for f in as_completed(futs):
             rank, d = futs[f]
             url, status, headers, body = f.result()
-            tier, note = classify(status, headers, body)
+            text = visible_text(body)
+            tier, note = classify(status, headers, body, text)
             results.append({"domain": d, "url": url, "rank": rank, "status": status,
                             "tier": tier, "note": note,
-                            "ground_truth": ground_truth(status, body, tier)})
+                            "ground_truth": ground_truth(status, body, tier, text)})
             done += 1
             if done % 250 == 0:
                 print("    %d/%d (%.0fs)" % (done, len(domains), time.time() - t0), file=sys.stderr)

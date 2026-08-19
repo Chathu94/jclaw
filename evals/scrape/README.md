@@ -114,5 +114,31 @@ browser".
 a URL that always challenges must score 0%, not 60%.
 
 `expect_title` is only capturable for origins that already answered the builder, i.e. the `open`
-tier. Protected entries carry negative assertions plus `min_chars` — which is sufficient, because
-the failure mode being guarded against is precisely "a challenge page counted as content".
+tier. Protected entries carry negative assertions plus `min_chars`.
+
+`min_chars` is **derived per entry**, at a quarter of the observed visible text (floor 50, ceiling
+500). A blanket 600 scored `example.com` — 198 extracted characters, and the canonical known-one —
+as blocked. `observed_text` and `observed_html` are recorded alongside so a client-rendered app
+(68 text / 5,515 HTML) is distinguishable from a genuinely small page (142 / 559).
+
+## A tier is only assigned when the origin refused
+
+A marker is not a tier. `wiley.com` and `onetrust.com` embed a Turnstile widget and serve 597 and
+1,574 characters of real content; the first corpus labelled them `turnstile`, which put open sites
+in the hardest tier and inverted the whole benchmark — Turnstile scored 60% against
+managed-challenge's 12%.
+
+So a marker names a tier only when the body is also too thin to be a page: `hxuakdlb.com` returns
+200 with **zero** characters behind a Turnstile widget. And thinness alone is not a gate either —
+`example.com` is 142 characters of complete content with no marker at all.
+
+## What the runtime classifier cannot see
+
+Readability strips scripts, so by the time a page reaches `BlockClassifier` the technical markers
+are gone. A pure-JS Turnstile gate and a client-rendered SPA both extract to nothing and both land
+as `THIN_CONTENT`.
+
+The corpus tier is the disambiguator: 22 of 28 `THIN_CONTENT` results in the first clean baseline
+sat in the `turnstile` tier (gates), 5 in `open` (genuine SPAs — twitter.com, x.com, roku.com).
+Report reason × tier, never reason alone. JCLAW-1086 gives the classifier the raw response and
+removes the ambiguity at source.

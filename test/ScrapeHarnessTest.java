@@ -59,8 +59,37 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void thinBodyIsTrustBlockNotOk() {
-        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify("tiny", gt()));
+    public void thinPageIsThinContentNotABlock() {
+        // twitter.com, chatgpt.com and friends return a JS shell: 60-odd characters, no
+        // refusal. Counting that as blocked would attribute a rendering gap to Cloudflare
+        // and inflate the number rung 3 is supposed to move.
+        assertEquals(ScrapeReason.THIN_CONTENT, BlockClassifier.classify("tiny", gt()));
+    }
+
+    @Test
+    public void longRealPageMentioningScrapingIsNotAPolicyBlock() {
+        // Regression: the first baseline scored oxylabs.io as POLICY_BLOCK off 7,947
+        // characters of marketing copy. A proxy vendor's own page says "scraping is
+        // prohibited"; that is content, not a refusal.
+        var vendorPage = "Oxylabs proxy service. Our terms note that scraping is prohibited "
+                + "on some targets and that ai training use varies by jurisdiction. ".repeat(30);
+        assertTrue(vendorPage.length() > gt().minChars());
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(vendorPage, gt()));
+    }
+
+    @Test
+    public void shortPolicyRefusalIsStillDetected() {
+        assertEquals(ScrapeReason.POLICY_BLOCK,
+                BlockClassifier.classify("Automated access is not permitted.", gt()));
+    }
+
+    @Test
+    public void challengeIsCaughtEvenWhenLongerThanTheMinCharsFloor() {
+        // An extracted interstitial runs a few hundred characters and clears a small
+        // site's derived floor, so brevity cannot be the test for a challenge.
+        var lowFloor = new GroundTruth(50, List.of(), null);
+        assertTrue(CHALLENGE_PAGE.length() > lowFloor.minChars());
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(CHALLENGE_PAGE, lowFloor));
     }
 
     @Test
@@ -74,8 +103,10 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void blankOutputIsErrorNotSilentPass() {
-        assertEquals(ScrapeReason.ERROR, BlockClassifier.classify("", gt()));
+    public void blankIsThinContentAndNullIsError() {
+        // A fetched page that extracts to nothing is a JS gate or a client-rendered app —
+        // not a failure of ours. Only a null (the tool never produced output) is ours.
+        assertEquals(ScrapeReason.THIN_CONTENT, BlockClassifier.classify("", gt()));
         assertEquals(ScrapeReason.ERROR, BlockClassifier.classify(null, gt()));
     }
 

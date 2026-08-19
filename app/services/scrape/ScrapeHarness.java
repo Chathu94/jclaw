@@ -45,8 +45,11 @@ public final class ScrapeHarness {
         return url -> tool.execute("{\"url\":\"%s\",\"mode\":\"text\"}".formatted(url), null);
     }
 
+    /** {@code detail} carries the head of a failing fetch's output. Without it a run
+     *  reports ERROR without saying what the error was, which makes the harness
+     *  unfalsifiable — the failure mode it exists to prevent, one level up. */
     public record Result(String url, String tier, boolean ok, ScrapeReason reason,
-                         int chars, boolean titleSeen, long ms) {}
+                         int chars, boolean titleSeen, long ms, String detail) {}
 
     public record TierScore(int total, int ok, double rate) {}
 
@@ -83,8 +86,11 @@ public final class ScrapeHarness {
         }
         long ms = (System.nanoTime() - t0) / 1_000_000;
         var reason = BlockClassifier.classify(out, e.groundTruth());
-        return new Result(e.url(), e.tier(), reason == ScrapeReason.OK, reason,
-                out == null ? 0 : out.length(), e.groundTruth().titleSeen(out == null ? "" : out), ms);
+        boolean ok = reason == ScrapeReason.OK;
+        var text = out == null ? "" : out;
+        return new Result(e.url(), e.tier(), ok, reason, text.length(),
+                e.groundTruth().titleSeen(text), ms,
+                ok ? null : text.substring(0, Math.min(200, text.length())).replace('\n', ' '));
     }
 
     private static RungReport report(String rungName, ScrapeCorpus.Corpus corpus,
