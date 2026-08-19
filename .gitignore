@@ -263,3 +263,6 @@ build/
 
 # graphify knowledge graph — rebuilt locally from source, per-machine
 graphify-out/
+
+# Tranco seed list for the scrape corpus builder (JCLAW-1081) — ~22 MB, regenerable
+evals/scrape/.cache/

@@ -325,6 +325,7 @@ usage_for() {
         logs)     usage_logs     ;;
         upgrade)  usage_upgrade  ;;
         loadtest) usage_loadtest ;;
+        scrapetest) usage_scrapetest ;;
         evals)    usage_evals    ;;
         test)     usage_test     ;;
         e2e)      usage_e2e      ;;
@@ -844,6 +845,25 @@ EOF
     fi
 }
 
+usage_scrapetest() {
+    cat <<'USAGE'
+Usage: ./jclaw.sh scrapetest [options]
+
+Runs the CF-100 corpus against one rung of the scrape escalation ladder and
+reports per-tier access rates (JCLAW-1081). Needs the backend running: the
+thing being measured is the shipped fetch stack, so a curl-based harness would
+measure curl instead.
+
+Options:
+  --rung N           Rung to measure (default 1). 1 = web_fetch path.
+  --concurrency N    Outbound fan-out, 1-16 (default 8).
+  --out FILE         Write the full JSON report to FILE.
+
+Build or refresh the corpus first:
+  python3 evals/scrape/build_corpus.py --sample 15000 --per-tier 25
+USAGE
+}
+
 usage_evals() {
     if is_developer_clone; then
         cat <<EOF
@@ -1294,6 +1314,22 @@ while [[ $# -gt 0 ]]; do
                 COMPLETION_SHELL="$1"
                 shift
             fi
+            ;;
+        scrapetest)
+            # Developer-only, and its flags are forwarded verbatim rather than
+            # re-declared here — same reasoning as `evals` below.
+            if ! is_developer_clone; then
+                echo "Error: 'scrapetest' is a developer-only command, not available in this distribution."
+                exit 1
+            fi
+            COMMAND="$1"
+            shift
+            if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+                usage_scrapetest
+                exit 0
+            fi
+            SCRAPETEST_ARGS=("$@")
+            break
             ;;
         evals)
             # Developer-only, like the block below — but its flags are NOT
@@ -3432,6 +3468,87 @@ if segs:
 # Auth mirrors loadtest — loopback plus the X-Loadtest-Auth header carrying the
 # application secret — because it is the same trust boundary: an operator-run
 # harness on the local host with no plaintext admin credential to log in with.
+do_scrapetest() {
+    local rung="1" concurrency="" out=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --rung)        rung="${2:-}";        shift 2 ;;
+            --concurrency) concurrency="${2:-}"; shift 2 ;;
+            --out)         out="${2:-}";         shift 2 ;;
+            --help|-h)     usage_scrapetest; exit 0 ;;
+            *) echo "Error: unknown option for scrapetest: $1"; usage_scrapetest; exit 2 ;;
+        esac
+    done
+
+    cd "$SCRIPT_DIR"
+    if [[ ! -f evals/scrape/cf-100.json ]]; then
+        echo "Error: no corpus at evals/scrape/cf-100.json."
+        echo "       Build it: python3 evals/scrape/build_corpus.py --sample 15000 --per-tier 25"
+        exit 1
+    fi
+
+    load_env_file
+    local var_name secret
+    var_name=$(secret_var_name)
+    secret=${!var_name:-}
+    if [[ -z "$secret" ]]; then
+        echo "Error: $var_name is not set - scrapetest authenticates with it via the"
+        echo "       X-Loadtest-Auth header. Generate or rotate via: $0 secret"
+        exit 1
+    fi
+
+    if ! curl -s -o /dev/null -w '%{http_code}' "http://localhost:$BACKEND_PORT/" | grep -q '^[23]'; then
+        echo "Error: Backend is not responding on port $BACKEND_PORT."
+        echo "       Start it first: $0 ${DEV_MODE:+--dev }start"
+        exit 1
+    fi
+
+    local body
+    body=$(printf '{"rung":"%s"' "$rung")
+    [[ -n "$concurrency" ]] && body+=$(printf ',"concurrency":%s' "$concurrency")
+    body+='}'
+
+    echo "==> Running CF-100 against rung $rung (this makes ~100 outbound requests)"
+    local tmp status
+    tmp=$(mktemp)
+    status=$(curl -s -o "$tmp" -w '%{http_code}' \
+        -H "X-Loadtest-Auth: $secret" \
+        -H "Content-Type: application/json" \
+        -X POST --data "$body" \
+        "http://localhost:$BACKEND_PORT/api/scrape/harness")
+
+    if [[ "$status" != "200" ]]; then
+        echo "Error: scrapetest failed (HTTP $status)"
+        cat "$tmp"; echo; rm -f "$tmp"
+        exit 1
+    fi
+
+    python3 - "$tmp" <<'PYSUM'
+import json, sys
+r = json.load(open(sys.argv[1]))
+print()
+print("  %-22s %s" % ("rung", r["rung"]))
+print("  %-22s %d/%d = %.1f%%" % ("access rate", r["ok"], r["attempted"], r["rate"]))
+print()
+print("  %-20s %6s %6s %8s" % ("tier", "ok", "total", "rate"))
+for tier, sc in r["byTier"].items():
+    print("  %-20s %6d %6d %7.1f%%" % (tier, sc["ok"], sc["total"], sc["rate"]))
+print()
+print("  reasons:")
+for reason, n in sorted(r["byReason"].items(), key=lambda kv: -kv[1]):
+    print("    %-16s %4d" % (reason, n))
+print()
+PYSUM
+
+    if [[ -n "$out" ]]; then
+        mkdir -p "$(dirname "$out")"
+        mv "$tmp" "$out"
+        echo "==> Full report written to $out"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 do_evals_capture() {
     local out="" agent="" suite="" concurrency="" local_suites=""
     local -a rest=()
@@ -4745,6 +4862,9 @@ case "$COMMAND" in
         ;;
     loadtest)
         do_loadtest
+        ;;
+    scrapetest)
+        do_scrapetest ${SCRAPETEST_ARGS[@]+"${SCRAPETEST_ARGS[@]}"}
         ;;
     evals)
         do_evals

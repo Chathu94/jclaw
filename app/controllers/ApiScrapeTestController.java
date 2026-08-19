@@ -1,0 +1,85 @@
+package controllers;
+
+import play.mvc.Before;
+import play.mvc.Controller;
+import services.scrape.ScrapeCorpus;
+import services.scrape.ScrapeHarness;
+import utils.ApiResponses;
+
+import java.io.IOException;
+
+import static utils.GsonHolder.GSON;
+
+/**
+ * Runs the CF-100 corpus against one rung and returns the scored report (JCLAW-1081).
+ *
+ * <p>Lives behind an endpoint rather than in the offline {@code ./jclaw.sh evals} path
+ * for the same reason {@code /api/evals/capture} does: the thing being measured is the
+ * shipped fetch stack — OkHttp, SsrfGuard, Readability, and later the sidecars — which
+ * only exists inside a booted app. A shell script with curl would measure curl.
+ *
+ * <p>Gated by {@link LoadtestAuthCheck}: loopback origin plus {@code X-Loadtest-Auth}
+ * carrying {@code application.secret}. Same gate as loadtest and eval capture rather
+ * than a third one, and it fits — this endpoint makes outbound requests to a hundred
+ * third-party origins, which is not something a passing visitor should be able to
+ * trigger.
+ */
+public class ApiScrapeTestController extends Controller {
+
+    /** Bound on outbound fan-out: the corpus is a hundred unrelated third parties and
+     *  the point is to measure access, not to arrive as a burst. */
+    private static final int MAX_CONCURRENCY = 16;
+
+    @Before
+    static void requireLoadtestAuth() {
+        LoadtestAuthCheck.checkLoadtestAuth();
+    }
+
+    /**
+     * {@code POST /api/scrape/harness} with {@code {"rung": "1", "concurrency": <n>?}}.
+     *
+     * <p>One rung per call, never the escalation ladder: the ladder returns a single
+     * outcome, and per-rung attribution is the only reason this harness exists.
+     */
+    public static void harness() {
+        var body = JsonBodyReader.readJsonBody();
+        var rungId = body != null && body.has("rung") ? body.get("rung").getAsString() : "1";
+        int concurrency = Math.clamp(
+                body != null && body.has("concurrency") ? body.get("concurrency").getAsInt() : 8,
+                1, MAX_CONCURRENCY);
+
+        ScrapeCorpus.Corpus corpus;
+        try {
+            corpus = ScrapeCorpus.load();
+        } catch (IOException e) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND,
+                    "No corpus at %s — build it with evals/scrape/build_corpus.py"
+                            .formatted(ScrapeCorpus.DEFAULT_PATH));
+            throw ApiResponses.unreachable();
+        }
+
+        if (!corpus.isEqualAllocation()) {
+            // The epic gate only forces work on the hard tiers under equal allocation;
+            // scoring a proportional corpus against the same threshold would report a
+            // pass that means nothing. Refuse rather than qualify it in a footnote.
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Corpus allocation is '%s', not 'equal' — the gate threshold is only "
+                            + "meaningful against an equal-allocation corpus."
+                            .formatted(corpus.allocation()));
+            throw ApiResponses.unreachable();
+        }
+
+        var rung = switch (rungId) {
+            case "1" -> ScrapeHarness.rung1();
+            default -> null;
+        };
+        if (rung == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Unknown rung '%s'. Available: 1. Rungs 2-4 land with JCLAW-1087/1088/1089."
+                            .formatted(rungId));
+            throw ApiResponses.unreachable();
+        }
+
+        renderJSON(GSON.toJson(ScrapeHarness.run("rung" + rungId, rung, corpus, concurrency)));
+    }
+}

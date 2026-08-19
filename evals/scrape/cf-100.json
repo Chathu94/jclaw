@@ -1,0 +1,1634 @@
+{
+  "tranco_list_id": "K9LYW",
+  "probed_on": "2026-08-19",
+  "sample_size": 12250,
+  "seed": 1081,
+  "allocation": "equal",
+  "per_tier": 25,
+  "entries": [
+    {
+      "url": "https://cloudflare.com",
+      "tier": "open",
+      "rank": 2,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "cloudflare: build for the agent era"
+      }
+    },
+    {
+      "url": "https://twitter.com",
+      "tier": "open",
+      "rank": 16,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "x. it\u2019s what\u2019s happening / x"
+      }
+    },
+    {
+      "url": "https://linkedin.com",
+      "tier": "open",
+      "rank": 18,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "linkedin: log in or sign up"
+      }
+    },
+    {
+      "url": "https://x.com",
+      "tier": "open",
+      "rank": 53,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "x. it\u2019s what\u2019s happening / x"
+      }
+    },
+    {
+      "url": "https://cloudflare.net",
+      "tier": "open",
+      "rank": 62,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "cloudflare, inc. - investor relations"
+      }
+    },
+    {
+      "url": "https://chatgpt.com",
+      "tier": "open",
+      "rank": 76,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "chatgpt: chat, work, create &amp; code with ai"
+      }
+    },
+    {
+      "url": "https://vimeo.com",
+      "tier": "open",
+      "rank": 80,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "vimeo - all-in-one video platform"
+      }
+    },
+    {
+      "url": "https://zoom.us",
+      "tier": "open",
+      "rank": 82,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "one platform to connect | zoom"
+      }
+    },
+    {
+      "url": "https://workers.dev",
+      "tier": "open",
+      "rank": 95,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "cloudflare workers - global serverless functions platform"
+      }
+    },
+    {
+      "url": "https://openai.com",
+      "tier": "open",
+      "rank": 102,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "openai | research &amp; deployment"
+      }
+    },
+    {
+      "url": "https://discord.gg",
+      "tier": "open",
+      "rank": 118,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "discord - group chat that\u2019s all fun &amp; games"
+      }
+    },
+    {
+      "url": "https://discord.com",
+      "tier": "open",
+      "rank": 163,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "discord - group chat that\u2019s all fun &amp; games"
+      }
+    },
+    {
+      "url": "https://shopify.com",
+      "tier": "open",
+      "rank": 172,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "shopify: the all-in-one commerce platform for businesses - shopify"
+      }
+    },
+    {
+      "url": "https://example.com",
+      "tier": "open",
+      "rank": 181,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "example domain"
+      }
+    },
+    {
+      "url": "https://rubiconproject.com",
+      "tier": "open",
+      "rank": 193,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "magnite - the largest independent sell-side advertising company"
+      }
+    },
+    {
+      "url": "https://vungle.com",
+      "tier": "open",
+      "rank": 194,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "the leading growth acceleration platform for the mobile industry."
+      }
+    },
+    {
+      "url": "https://creativecommons.org",
+      "tier": "open",
+      "rank": 197,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "building tools for shared knowledge - creative commons"
+      }
+    },
+    {
+      "url": "https://cpanel.net",
+      "tier": "open",
+      "rank": 212,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "web hosting control panel &amp; server management tools | cpanel"
+      }
+    },
+    {
+      "url": "https://nist.gov",
+      "tier": "open",
+      "rank": 223,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "national institute of standards and technology"
+      }
+    },
+    {
+      "url": "https://t.co",
+      "tier": "open",
+      "rank": 226,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "t.co / x"
+      }
+    },
+    {
+      "url": "https://pages.dev",
+      "tier": "open",
+      "rank": 233,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "cloudflare pages"
+      }
+    },
+    {
+      "url": "https://oxylabs.io",
+      "tier": "open",
+      "rank": 241,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "oxylabs \u2013 high quality proxy service &amp; web search api for ai"
+      }
+    },
+    {
+      "url": "https://who.int",
+      "tier": "open",
+      "rank": 245,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "world health organization (who)"
+      }
+    },
+    {
+      "url": "https://hubspot.com",
+      "tier": "open",
+      "rank": 248,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ],
+        "expect_title": "hubspot | software &amp; tools for your business - homepage"
+      }
+    },
+    {
+      "url": "https://roku.com",
+      "tier": "open",
+      "rank": 262,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://hostgator.com.br",
+      "tier": "basic",
+      "rank": 672,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://allaboutcookies.org",
+      "tier": "basic",
+      "rank": 725,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://blackhub.team",
+      "tier": "basic",
+      "rank": 744,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://ancestry.com",
+      "tier": "basic",
+      "rank": 962,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://btloader.com",
+      "tier": "basic",
+      "rank": 983,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://hollywoodbets.net",
+      "tier": "basic",
+      "rank": 1336,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://betway.co.za",
+      "tier": "basic",
+      "rank": 1419,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://turbo.az",
+      "tier": "basic",
+      "rank": 1621,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://escort.club",
+      "tier": "basic",
+      "rank": 1644,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://betway.co.bw",
+      "tier": "basic",
+      "rank": 2186,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://onpe.gob.pe",
+      "tier": "basic",
+      "rank": 2317,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://blueapron.com",
+      "tier": "basic",
+      "rank": 2938,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://themegrill.com",
+      "tier": "basic",
+      "rank": 3825,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://www.gwu.edu",
+      "tier": "basic",
+      "rank": 4262,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://vivo.com.br",
+      "tier": "basic",
+      "rank": 4431,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://www.share-dns.net",
+      "tier": "basic",
+      "rank": 5415,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://braze-images.com",
+      "tier": "basic",
+      "rank": 6022,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://paypalobjects.com",
+      "tier": "basic",
+      "rank": 6060,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://klook.com",
+      "tier": "basic",
+      "rank": 6220,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://csis.org",
+      "tier": "basic",
+      "rank": 6547,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://torrid.com",
+      "tier": "basic",
+      "rank": 6787,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://washingtonexaminer.com",
+      "tier": "basic",
+      "rank": 7907,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://skyvegas.com",
+      "tier": "basic",
+      "rank": 7995,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://acsbapp.com",
+      "tier": "basic",
+      "rank": 8279,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://betway.co.mz",
+      "tier": "basic",
+      "rank": 8720,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://roblox.com",
+      "tier": "managed-challenge",
+      "rank": 59,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://nih.gov",
+      "tier": "managed-challenge",
+      "rank": 133,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://epicgames.com",
+      "tier": "managed-challenge",
+      "rank": 156,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://w3.org",
+      "tier": "managed-challenge",
+      "rank": 184,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://medium.com",
+      "tier": "managed-challenge",
+      "rank": 188,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://sciencedirect.com",
+      "tier": "managed-challenge",
+      "rank": 214,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://researchgate.net",
+      "tier": "managed-challenge",
+      "rank": 217,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://sourceforge.net",
+      "tier": "managed-challenge",
+      "rank": 231,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://hostgator.com",
+      "tier": "managed-challenge",
+      "rank": 326,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://cookiedatabase.org",
+      "tier": "managed-challenge",
+      "rank": 376,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://indeed.com",
+      "tier": "managed-challenge",
+      "rank": 381,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://bluehost.com",
+      "tier": "managed-challenge",
+      "rank": 423,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://claude.ai",
+      "tier": "managed-challenge",
+      "rank": 439,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://pixabay.com",
+      "tier": "managed-challenge",
+      "rank": 442,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://stackoverflow.com",
+      "tier": "managed-challenge",
+      "rank": 494,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://markmonitor.com",
+      "tier": "managed-challenge",
+      "rank": 520,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://namecheap.com",
+      "tier": "managed-challenge",
+      "rank": 528,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://tandfonline.com",
+      "tier": "managed-challenge",
+      "rank": 552,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://cambridge.org",
+      "tier": "managed-challenge",
+      "rank": 650,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://anydesk.com",
+      "tier": "managed-challenge",
+      "rank": 664,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://shop.app",
+      "tier": "managed-challenge",
+      "rank": 682,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://iso.org",
+      "tier": "managed-challenge",
+      "rank": 704,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://mediafire.com",
+      "tier": "managed-challenge",
+      "rank": 727,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://curseforge.com",
+      "tier": "managed-challenge",
+      "rank": 756,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://perplexity.ai",
+      "tier": "managed-challenge",
+      "rank": 758,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://wiley.com",
+      "tier": "turnstile",
+      "rank": 307,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://cookielaw.org",
+      "tier": "turnstile",
+      "rank": 509,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://onetrust.com",
+      "tier": "turnstile",
+      "rank": 616,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://artfight.net",
+      "tier": "turnstile",
+      "rank": 1543,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://laracasts.com",
+      "tier": "turnstile",
+      "rank": 2979,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://shaalaa.com",
+      "tier": "turnstile",
+      "rank": 3457,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://coingecko.com",
+      "tier": "turnstile",
+      "rank": 3588,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://news24.com",
+      "tier": "turnstile",
+      "rank": 3870,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://laravel-news.com",
+      "tier": "turnstile",
+      "rank": 5215,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://photoroom.com",
+      "tier": "turnstile",
+      "rank": 9427,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://save-free.com",
+      "tier": "turnstile",
+      "rank": 21191,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://ip2location.io",
+      "tier": "turnstile",
+      "rank": 25195,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://reviews.co.uk",
+      "tier": "turnstile",
+      "rank": 25675,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://eharmony.com",
+      "tier": "turnstile",
+      "rank": 29288,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://hxuakdlb.com",
+      "tier": "turnstile",
+      "rank": 87842,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://hv984yg.com",
+      "tier": "turnstile",
+      "rank": 88345,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://crossmarket.ai",
+      "tier": "turnstile",
+      "rank": 92662,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://cleverhumanizer.ai",
+      "tier": "turnstile",
+      "rank": 106497,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://55vv4433.com",
+      "tier": "turnstile",
+      "rank": 203205,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://259r23.com",
+      "tier": "turnstile",
+      "rank": 212942,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://qeseh.com",
+      "tier": "turnstile",
+      "rank": 216887,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://jmwlvp.com",
+      "tier": "turnstile",
+      "rank": 269898,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://teile.com",
+      "tier": "turnstile",
+      "rank": 328552,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://rusthelp.com",
+      "tier": "turnstile",
+      "rank": 366123,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    },
+    {
+      "url": "https://sgg5kk.com",
+      "tier": "turnstile",
+      "rank": 418125,
+      "ground_truth": {
+        "min_chars": 600,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile"
+        ]
+      }
+    }
+  ]
+}

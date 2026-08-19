@@ -333,6 +333,11 @@ POST    /api/evals/capture                      ApiEvalsController.capture
 # JCLAW-942: load a benchmark corpus through the real capture pipeline. Same gate.
 POST    /api/evals/memory-ingest                ApiEvalsController.memoryIngest
 
+# Scrape access-rate harness (JCLAW-1081): run the CF-100 corpus against one rung of
+# the escalation ladder. Needs the booted app because the thing measured is the shipped
+# fetch stack. Same loopback + X-Loadtest-Auth gate.
+POST    /api/scrape/harness                     ApiScrapeTestController.harness
+
 # Apps registry (SPEC-apps): operator-hosted mini-apps under public/apps/<slug>/
 GET     /api/apps                               ApiAppsController.list
 DELETE  /api/apps/{slug}                        ApiAppsController.delete

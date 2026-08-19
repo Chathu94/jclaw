@@ -1,0 +1,20 @@
+{
+  "tranco_list_id": "K9LYW",
+  "probed_on": "2026-08-19",
+  "sample_size": 12250,
+  "counts": {
+    "unreachable": 3288,
+    "managed-challenge": 711,
+    "other-waf": 1222,
+    "not-cloudflare": 4389,
+    "open": 2454,
+    "turnstile": 63,
+    "basic": 123
+  },
+  "cloudflare_tier_share": {
+    "open": 0.7323,
+    "basic": 0.0367,
+    "managed-challenge": 0.2122,
+    "turnstile": 0.0188
+  }
+}
