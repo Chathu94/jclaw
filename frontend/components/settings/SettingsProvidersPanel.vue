@@ -1266,30 +1266,16 @@ const groupedProviders = computed(() => {
                         v-if="model.name"
                         class="ml-2 text-xs text-fg-muted"
                       >{{ model.name }}</span>
-                      <span
-                        v-if="model.supportsThinking && !model.alwaysThinks"
-                        class="ml-2 text-[10px] text-emerald-700 dark:text-emerald-400 border border-emerald-400/30 px-1"
-                      >thinking</span>
-                      <span
-                        v-else-if="model.alwaysThinks"
-                        class="ml-2 inline-flex items-center gap-0.5 text-[10px] text-emerald-700 dark:text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
-                        title="Pure reasoning model — thinking is always on"
-                      >thinking<LockClosedIcon
-                        class="w-2 h-2"
-                        aria-hidden="true"
-                      /></span>
-                      <span
-                        v-if="model.supportsVision"
-                        class="ml-2 text-[10px] text-sky-700 dark:text-sky-400 border border-sky-400/30 px-1"
-                      >vision</span>
-                      <span
-                        v-if="model.supportsAudio"
-                        class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
-                      >audio</span>
-                      <span
-                        v-if="model.supportsVideo"
-                        class="ml-2 text-[10px] text-purple-700 dark:text-purple-400 border border-purple-400/30 px-1"
-                      >video</span>
+                      <!-- Rendered from the shared component rather than repeated
+                         here: this list previously carried its own copy of the
+                         pill markup and silently missed the tools capability
+                         when it was added (JCLAW-1075). readonly because there
+                         is no thinking mode to toggle in a provider listing. -->
+                      <ModelCapabilityPills
+                        :model="model"
+                        readonly
+                        class="ml-2 inline-flex align-middle"
+                      />
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
@@ -1830,6 +1816,13 @@ const groupedProviders = computed(() => {
                     class="text-[10px] text-fg-muted border border-input px-1"
                     title="Video support guessed from model name (not confirmed by provider)"
                   >video?</span>
+                  <!-- No guessed variant: unknown tool support reads as supported,
+                     so only a provider-confirmed negative is ever shown. -->
+                  <span
+                    v-if="isDeclaredToolIncapable(model)"
+                    class="text-[10px] text-orange-700 dark:text-orange-400 border border-orange-400/30 px-1"
+                    title="This model cannot call tools — an agent's tools and skills are unavailable with it"
+                  >no tools</span>
                   <span
                     v-if="model.contextWindow"
                     class="text-[10px] text-fg-muted font-mono"

@@ -38,9 +38,16 @@ const props = withDefaults(defineProps<{
   thinkingMode?: string | null
   /** Controls pill height / icon size. Defaults to the compact listing size. */
   size?: 'sm' | 'md'
+  /**
+   * Render every pill as a plain label. For listings that describe a model
+   * rather than configure one — there is no thinking mode to toggle there, so
+   * a clickable pill would emit into a handler nobody supplies.
+   */
+  readonly?: boolean
 }>(), {
   thinkingMode: null,
   size: 'sm',
+  readonly: false,
 })
 
 defineEmits<(e: 'toggle', capability: Capability) => void>()
@@ -129,7 +136,9 @@ const pills = computed<PillDef[]>(() => {
       locked: false,
     },
   ]
-  return all.filter(p => p.supported)
+  return all
+    .filter(p => p.supported)
+    .map(p => (props.readonly ? { ...p, interactive: false } : p))
 })
 
 const sizeCls = computed(() =>

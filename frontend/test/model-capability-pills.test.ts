@@ -217,6 +217,24 @@ describe('tool-calling capability (JCLAW-1075)', () => {
     expect(isDeclaredToolIncapable(null)).toBe(false)
   })
 
+  it('renders every pill as a plain label when readonly', async () => {
+    // Provider listings describe a model rather than configure one, so a
+    // clickable thinking pill would emit a toggle nobody handles.
+    const editable = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'm', supportsThinking: true } },
+    })
+    await nextTick()
+    expect(editable.findAll('button').length).toBeGreaterThan(0)
+
+    const listing = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'm', supportsThinking: true }, readonly: true },
+    })
+    await nextTick()
+    expect(listing.findAll('button')).toHaveLength(0)
+    // Still visible, and still in its capability colour rather than muted-off.
+    expect(listing.text()).toContain('thinking')
+  })
+
   it('shows the no-tools pill only for a declared-incapable model', async () => {
     const incapable = await mountSuspended(ModelCapabilityPills, {
       props: { model: { id: 'dolphin3:8b', supportsTools: false } },
