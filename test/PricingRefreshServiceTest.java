@@ -341,4 +341,106 @@ class PricingRefreshServiceTest extends UnitTest {
         assertTrue(callFillIfMissing(model, "promptPrice", 4.2));
         assertEquals(4.2, model.get("promptPrice").getAsDouble(), 0.0001);
     }
+
+    // ─── JCLAW-1077: capabilities from the same catalogue ─────────────
+
+    /** LiteLLM capability shape. Unknown flags are null there, not false. */
+    private static String capsJson(String... flags) {
+        var sb = new StringBuilder("{\"input_cost_per_token\":1.0e-6");
+        for (var f : flags) sb.append(",\"").append(f).append("\":true");
+        return sb.append('}').toString();
+    }
+
+    private static JsonObject savedModel(String provider) {
+        return JsonParser.parseString(ConfigService.get("provider." + provider + ".models"))
+                .getAsJsonArray().get(0).getAsJsonObject();
+    }
+
+    @Test
+    void fillsVisionThinkingAndAudioFromTheCatalogue() {
+        seedProviderModels("together", """
+                [{"id":"moonshotai/Kimi-K2.5","supportsVision":false,"supportsThinking":false}]""");
+        var c = catalog("together_ai/moonshotai/Kimi-K2.5",
+                capsJson("supports_vision", "supports_reasoning", "supports_audio_input"));
+
+        PricingRefreshService.applyCatalog(c);
+
+        var m = savedModel("together");
+        assertTrue(m.get("supportsVision").getAsBoolean());
+        assertTrue(m.get("supportsThinking").getAsBoolean());
+        assertTrue(m.get("supportsAudio").getAsBoolean());
+    }
+
+    @Test
+    void neverClearsACapabilityTheProviderAlreadyReported() {
+        // Upward only: a community catalogue may add to what the provider said,
+        // never contradict it.
+        seedProviderModels("together", """
+                [{"id":"some-model","supportsVision":true,"supportsThinking":true}]""");
+        var c = catalog("some-model", capsJson()); // no capability flags at all
+
+        PricingRefreshService.applyCatalog(c);
+
+        var m = savedModel("together");
+        assertTrue(m.get("supportsVision").getAsBoolean(), "vision survived");
+        assertTrue(m.get("supportsThinking").getAsBoolean(), "thinking survived");
+    }
+
+    @Test
+    void neverOverridesAnExplicitToolsAnswer() {
+        // A stored false is the operator's checkbox or a negative learned from a
+        // real provider rejection (JCLAW-1076) — not a community file's to undo.
+        seedProviderModels("together", """
+                [{"id":"chatonly","supportsTools":false}]""");
+        var c = catalog("chatonly", capsJson("supports_function_calling"));
+
+        PricingRefreshService.applyCatalog(c);
+
+        assertFalse(savedModel("together").get("supportsTools").getAsBoolean(),
+                "an authoritative no is not overturned by the catalogue");
+    }
+
+    @Test
+    void makesAnImplicitToolsYesExplicit() {
+        seedProviderModels("together", """
+                [{"id":"agentic"}]""");
+        var c = catalog("agentic", capsJson("supports_function_calling"));
+
+        PricingRefreshService.applyCatalog(c);
+
+        assertTrue(savedModel("together").get("supportsTools").getAsBoolean());
+    }
+
+    @Test
+    void matchesCapabilitiesAcrossHostsButNotPrices() {
+        // The real shape of the Together miss: LiteLLM keys Kimi under other
+        // hosts and in lower case, so the strict chain finds nothing. Capability
+        // belongs to the model and may cross hosts; price belongs to the host
+        // and must not.
+        seedProviderModels("together", """
+                [{"id":"moonshotai/Kimi-K2.6"}]""");
+        var c = catalog("azure_ai/kimi-k2.6",
+                capsJson("supports_vision", "supports_reasoning", "supports_function_calling"));
+
+        PricingRefreshService.applyCatalog(c);
+
+        var m = savedModel("together");
+        assertTrue(m.get("supportsVision").getAsBoolean(), "capability crossed hosts");
+        assertTrue(m.get("supportsThinking").getAsBoolean());
+        assertFalse(m.has("promptPrice"),
+                "Azure's price must not be imported for a model served by Together");
+    }
+
+    @Test
+    void leavesAModelTheCatalogueDoesNotCoverAlone() {
+        seedProviderModels("together", """
+                [{"id":"unknown/Model-X","supportsVision":false}]""");
+        var c = catalog("something-else", capsJson("supports_vision"));
+
+        PricingRefreshService.applyCatalog(c);
+
+        var m = savedModel("together");
+        assertFalse(m.get("supportsVision").getAsBoolean(), "no capability invented");
+        assertFalse(m.has("supportsTools"));
+    }
 }

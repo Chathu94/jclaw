@@ -65,6 +65,12 @@ public final class PricingRefreshService {
     /** Network timeout for the catalog fetch. Generous; the file is occasionally slow on cold cache hits. */
     private static final int FETCH_TIMEOUT_SECONDS = 30;
 
+    // Capability fields on the stored model JSON (JCLAW-1077).
+    private static final String KEY_SUPPORTS_VISION = "supportsVision";
+    private static final String KEY_SUPPORTS_AUDIO = "supportsAudio";
+    private static final String KEY_SUPPORTS_THINKING = "supportsThinking";
+    private static final String KEY_SUPPORTS_TOOLS = "supportsTools";
+
     /**
      * Provider names this service does NOT consult LiteLLM for. Free-tier
      * and local providers don't have pricing the operator could refresh.
@@ -222,19 +228,98 @@ public final class PricingRefreshService {
         var id = extractModelId(model);
         if (id == null) return false;
 
-        var litellmEntry = lookupCatalog(catalog, id);
-        if (litellmEntry == null) return false;
-
         boolean changed = false;
-        changed |= fillIfMissing(model, "promptPrice",
-                extractPerMillion(litellmEntry, "input_cost_per_token"));
-        changed |= fillIfMissing(model, "completionPrice",
-                extractPerMillion(litellmEntry, "output_cost_per_token"));
-        changed |= fillIfMissing(model, "cachedReadPrice",
-                extractPerMillion(litellmEntry, "cache_read_input_token_cost"));
-        changed |= fillIfMissing(model, "cacheWritePrice",
-                extractPerMillion(litellmEntry, "cache_creation_input_token_cost"));
+
+        // Prices use the strict lookup only. A price belongs to the host: the
+        // same model costs different amounts on Together and Azure, so a
+        // cross-host match would import a number that is simply wrong.
+        var priced = lookupCatalog(catalog, id);
+        if (priced != null) {
+            changed |= fillIfMissing(model, "promptPrice",
+                    extractPerMillion(priced, "input_cost_per_token"));
+            changed |= fillIfMissing(model, "completionPrice",
+                    extractPerMillion(priced, "output_cost_per_token"));
+            changed |= fillIfMissing(model, "cachedReadPrice",
+                    extractPerMillion(priced, "cache_read_input_token_cost"));
+            changed |= fillIfMissing(model, "cacheWritePrice",
+                    extractPerMillion(priced, "cache_creation_input_token_cost"));
+        }
+
+        // Capabilities match more loosely, because a capability belongs to the
+        // model rather than the host — Kimi-K3 calls tools whoever serves it.
+        // The strict chain misses every Together model (LiteLLM keys them under
+        // other hosts, lower-cased), which is why the fallback exists at all.
+        var capable = priced != null ? priced : lookupCatalogByBareName(catalog, id);
+        if (capable != null) changed |= fillCapabilities(model, capable);
+
         return changed;
+    }
+
+    /**
+     * Fill capability flags from a LiteLLM entry (JCLAW-1077).
+     *
+     * <p>Upward only: a capability is written when absent or {@code false} and
+     * never cleared. A third-party catalogue may add to what a provider
+     * reported, never contradict it.
+     */
+    private static boolean fillCapabilities(JsonObject model, JsonObject entry) {
+        boolean changed = false;
+        changed |= raiseFlag(model, KEY_SUPPORTS_VISION, entry, "supports_vision");
+        changed |= raiseFlag(model, KEY_SUPPORTS_AUDIO, entry, "supports_audio_input");
+        changed |= raiseFlag(model, KEY_SUPPORTS_THINKING, entry, "supports_reasoning");
+        // Tools are the exception: an explicit value is authoritative either way.
+        // A stored false is the operator's checkbox or a negative learned from a
+        // real provider rejection (JCLAW-1076); neither is a community file's to
+        // overrule. A stored true needs no help, and absent already behaves as
+        // supported — so this only ever makes an implicit yes explicit.
+        if (!model.has(KEY_SUPPORTS_TOOLS) && readFlag(entry, "supports_function_calling")) {
+            model.addProperty(KEY_SUPPORTS_TOOLS, true);
+            changed = true;
+        }
+        return changed;
+    }
+
+    /** Set {@code field} true when the catalogue says so and the model doesn't already. */
+    private static boolean raiseFlag(JsonObject model, String field, JsonObject entry, String catalogKey) {
+        if (!readFlag(entry, catalogKey)) return false;
+        if (model.has(field) && !model.get(field).isJsonNull()
+                && model.get(field).getAsJsonPrimitive().isBoolean()
+                && model.get(field).getAsBoolean()) {
+            return false;
+        }
+        model.addProperty(field, true);
+        return true;
+    }
+
+    /** LiteLLM leaves unknown capabilities as null rather than false, so absent means unknown. */
+    private static boolean readFlag(JsonObject entry, String key) {
+        return entry.has(key) && entry.get(key).isJsonPrimitive()
+                && entry.get(key).getAsJsonPrimitive().isBoolean()
+                && entry.get(key).getAsBoolean();
+    }
+
+    /**
+     * Case-insensitive match on the bare model name, ignoring the host prefix
+     * LiteLLM keys on ({@code azure_ai/kimi-k2.6} matches {@code moonshotai/Kimi-K2.6}).
+     *
+     * <p>Capability lookup only — see {@link #applyToModel} for why prices must
+     * not use it. Entries are scanned rather than indexed: this runs nightly
+     * over a few dozen configured models, so a map would cost more to build
+     * than the scans it saves.
+     */
+    static JsonObject lookupCatalogByBareName(JsonObject catalog, String id) {
+        var bare = bareName(id);
+        if (bare.isBlank()) return null;
+        for (var e : catalog.entrySet()) {
+            if (!e.getValue().isJsonObject()) continue;
+            if (bare.equals(bareName(e.getKey()))) return e.getValue().getAsJsonObject();
+        }
+        return null;
+    }
+
+    private static String bareName(String key) {
+        var last = key.contains("/") ? key.substring(key.lastIndexOf('/') + 1) : key;
+        return last.toLowerCase();
     }
 
     private static String extractModelId(JsonObject model) {
