@@ -1012,3 +1012,79 @@ describe('Agents page — core-memory usage sits on the agent, not in Settings',
     expect(component.find('[data-testid="agent-core-memory"]').text()).toContain('4 of 20 allowed')
   })
 })
+
+/**
+ * JCLAW-1078: opening an agent must not edit it.
+ *
+ * `providers` is filtered to providers that have an API key, so an agent stored
+ * against a provider whose key is currently unset is not in that list. The
+ * provider watcher used to read that as "invalid provider" and set
+ * `enabled = false` — on page load, before the operator touched anything, and
+ * irreversibly, since picking a valid provider afterwards never restored it.
+ * Saving then failed with 409 "The main agent cannot be disabled", or worse,
+ * silently disabled a custom agent, which the backend does not guard.
+ */
+describe('Agents page — an unconfigured provider does not disable the agent', () => {
+  function setupWithUnconfiguredProvider() {
+    registerEndpoint('/api/agents', () => [
+      // Stored against ollama-cloud, whose key is unset below — exactly the
+      // fresh-install shape that triggered the bug.
+      { id: 2, name: 'helper', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+        enabled: true, isMain: false, providerConfigured: false,
+        thinkingMode: null, compressionEnabled: false, compressionJson: false,
+        compressionCode: false, compressionText: false, compressionTargetRatio: 0.3,
+        acpAllowed: false, createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z' },
+    ])
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        // An empty apiKey is what drops ollama-cloud from the UI's provider
+        // list — the filter only removes a provider that HAS the key and left
+        // it blank, which is exactly the state a fresh install is in.
+        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
+        { key: 'provider.ollama-cloud.apiKey', value: '' },
+        { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1' },
+        { key: 'provider.ollama-local.apiKey', value: 'olla****' },
+        { key: 'provider.ollama-local.models', value:
+          '[{"id":"dolphin3:8b","name":"dolphin3:8b","supportsTools":false}]' },
+      ],
+    }))
+    registerEndpoint('/api/tools/meta', () => [])
+    registerEndpoint('/api/agents/2/tools', () => [])
+    registerEndpoint('/api/agents/2/skills', () => [])
+  }
+
+  it('leaves enabled untouched when the stored provider has no key', async () => {
+    let putBody: Record<string, unknown> | null = null
+    registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        putBody = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    })
+    setupWithUnconfiguredProvider()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    await openHelperEdit(component)
+
+    // Switch to a provider that IS configured, as the operator would.
+    const selects = component.findAll<HTMLSelectElement>('select')
+    const providerSelect = selects.find(s =>
+      Array.from(s.element.options).some(o => o.value === 'ollama-local'))
+    expect(providerSelect, 'provider select should offer ollama-local').toBeTruthy()
+    await providerSelect!.setValue('ollama-local')
+    await flushPromises()
+
+    const saveBtn = component.findAll('button').find(b =>
+      (b.attributes('title') ?? '') === 'Save')
+    expect(saveBtn).toBeTruthy()
+    await saveBtn!.trigger('click')
+    await vi.waitFor(() => expect(putBody).not.toBeNull())
+
+    // The whole bug in one assertion: the agent was never asked to be disabled.
+    expect(putBody!.enabled).toBe(true)
+    expect(putBody).toMatchObject({ modelProvider: 'ollama-local', modelId: 'dolphin3:8b' })
+  })
+})

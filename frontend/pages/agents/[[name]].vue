@@ -93,6 +93,11 @@ const form = ref<AgentForm>({
 // formDirty below — together they gate the Save button so it's only active
 // when the form has unsaved changes.
 const formBaseline = ref({ ...form.value })
+
+// True while the form is being filled from a loaded agent rather than typed
+// into, so field watchers can tell an operator's edit from a page load
+// (JCLAW-1078).
+const populatingForm = ref(false)
 const formDirty = computed(() =>
   JSON.stringify(form.value) !== JSON.stringify(formBaseline.value),
 )
@@ -723,6 +728,7 @@ const _providerValid = computed(() => {
 function newAgent() {
   const defaultProvider = providers.value[0]?.name ?? ''
   const defaultModel = providers.value[0]?.models?.[0]?.id ?? ''
+  populatingForm.value = true
   form.value = {
     name: '',
     description: '',
@@ -735,9 +741,13 @@ function newAgent() {
   creating.value = true
   editing.value = null
   saveError.value = null
+  void nextTick(() => {
+    populatingForm.value = false
+  })
 }
 
 function editAgent(agent: Agent) {
+  populatingForm.value = true
   form.value = {
     name: agent.name,
     description: agent.description ?? '',
@@ -747,6 +757,9 @@ function editAgent(agent: Agent) {
     thinkingMode: agent.thinkingMode ?? '',
   }
   formBaseline.value = { ...form.value }
+  void nextTick(() => {
+    populatingForm.value = false
+  })
   editing.value = agent
   compressionEnabled.value = agent.compressionEnabled
   compressionJson.value = agent.compressionJson
@@ -1228,15 +1241,28 @@ async function toggleSkill(skillName: string, enabled: boolean) {
   }
 }
 
-// When provider changes, reset model to first available and disable if provider invalid
+/**
+ * When the operator picks a different provider, move the model to one that
+ * provider actually offers.
+ *
+ * <p>Only for a hand-made change (JCLAW-1078). Populating the form from a
+ * loaded agent also changes this field, and reacting to that edited the record
+ * merely because someone opened it: `providers` is filtered to providers with
+ * an API key, so an agent stored against a provider whose key is currently
+ * unset would have its model silently swapped on load.
+ *
+ * <p>It used to set `enabled = false` here too, which is what made saving the
+ * main agent fail with "The main agent cannot be disabled" and — since only the
+ * main agent is guarded — quietly switched off any custom agent instead. An
+ * unconfigured provider is a configuration gap, not an instruction to turn the
+ * agent off; the editor already says so via `providerConfigured`.
+ */
 watch(() => form.value.modelProvider, (newProvider) => {
+  if (populatingForm.value) return
   const provider = providers.value.find(p => p.name === newProvider)
   const currentModelValid = provider?.models?.some(m => m.id === form.value.modelId)
   if (!currentModelValid) {
     form.value.modelId = provider?.models?.[0]?.id ?? ''
-  }
-  if (!provider) {
-    form.value.enabled = false
   }
 })
 
