@@ -19,10 +19,12 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * SSRF-guarded fetch plus readable-content extraction, shared by {@code web_fetch}
@@ -78,8 +80,33 @@ public final class WebExtraction {
 
     /** Raw fetch result: undecoded body bytes plus the response Content-Type and
      *  the final (post-redirect) URL. Bytes — not a decoded String — so binary
-     *  documents (PDF, Office) reach Tika intact. */
-    public record FetchResult(byte[] body, String contentType, String finalUrl) {}
+     *  documents (PDF, Office) reach Tika intact.
+     *
+     *  <p>A record component of array type gets reference equality from the compiler,
+     *  which reads as value equality at the call site and is not. The three methods are
+     *  written out so the type means what its shape advertises; {@code toString} reports
+     *  the body's length rather than dumping several MiB of bytes into a log line. */
+    public record FetchResult(byte[] body, String contentType, String finalUrl) {
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof FetchResult(byte[] b, String ct, String url)
+                    && Arrays.equals(body, b)
+                    && Objects.equals(contentType, ct)
+                    && Objects.equals(finalUrl, url);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(Arrays.hashCode(body), contentType, finalUrl);
+        }
+
+        @Override
+        public String toString() {
+            return "FetchResult[body=%d bytes, contentType=%s, finalUrl=%s]"
+                    .formatted(body == null ? 0 : body.length, contentType, finalUrl);
+        }
+    }
 
     /** Signals an outbound host the operator's allowlist doesn't cover. A distinct
      *  type from the {@link SecurityException} {@link SsrfGuard} throws, which

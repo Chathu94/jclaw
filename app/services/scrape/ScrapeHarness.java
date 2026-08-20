@@ -8,9 +8,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Runs the CF-100 corpus and reports per-rung access rates (JCLAW-1081).
@@ -70,9 +71,6 @@ public final class ScrapeHarness {
         };
     }
 
-    /** {@code detail} carries the head of a failing fetch's output. Without it a run
-     *  reports ERROR without saying what the error was, which makes the harness
-     *  unfalsifiable — the failure mode it exists to prevent, one level up. */
     /**
      * Rung 1s: the shipped {@code web_scrape} tool's own per-URL path — everything rung 1
      * does, plus SSRF admission, robots.txt and per-host pacing.
@@ -109,23 +107,47 @@ public final class ScrapeHarness {
                              Map<String, Integer> byNextRung, int prerenderCapable,
                              List<Result> results) {}
 
+    /** Ceiling on one entry, well above the fetch timeout so it only fires on a hang. */
+    private static final int RESULT_TIMEOUT_SECONDS = 120;
+
     public static RungReport run(String rungName, Rung rung, ScrapeCorpus.Corpus corpus,
                                  int concurrency) {
+        var entries = corpus.entries();
         var results = new ArrayList<Result>();
-        var counter = new AtomicInteger();
         try (var pool = Executors.newFixedThreadPool(Math.max(1, concurrency))) {
-            var futures = corpus.entries().stream()
+            var futures = entries.stream()
                     .map(e -> pool.submit(() -> measure(rung, e)))
                     .toList();
-            for (var f : futures) {
+            for (int i = 0; i < futures.size(); i++) {
+                var entry = entries.get(i);
                 try {
-                    results.add(f.get(120, TimeUnit.SECONDS));
-                } catch (Exception ex) {
-                    counter.incrementAndGet();
+                    results.add(futures.get(i).get(RESULT_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+                } catch (InterruptedException _) {
+                    // Restore the flag rather than swallow it: the caller decides whether
+                    // an interrupted run is fatal, and it cannot if the flag is gone.
+                    Thread.currentThread().interrupt();
+                    results.add(errored(entry, "interrupted"));
+                    break;
+                } catch (ExecutionException | TimeoutException e) {
+                    // Record it. Dropping the entry shrank the denominator, so a URL that
+                    // hung made the reported access rate go UP — the one direction a
+                    // measurement must never fail in.
+                    results.add(errored(entry, reason(e)));
                 }
             }
         }
-        return report(rungName, corpus, results);
+        return report(rungName, results);
+    }
+
+    private static Result errored(ScrapeCorpus.Entry e, String detail) {
+        return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
+                false, ScrapeReason.ERROR, ScrapeRung.NONE, false, 0, false, 0, detail);
+    }
+
+    private static String reason(Exception e) {
+        var cause = e.getCause() == null ? e : e.getCause();
+        var m = cause.getMessage();
+        return m == null || m.isBlank() ? cause.getClass().getSimpleName() : m;
     }
 
     private static Result measure(Rung rung, ScrapeCorpus.Entry e) {
@@ -159,8 +181,7 @@ public final class ScrapeHarness {
                 ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '));
     }
 
-    private static RungReport report(String rungName, ScrapeCorpus.Corpus corpus,
-                                     List<Result> results) {
+    private static RungReport report(String rungName, List<Result> results) {
         var byReason = new LinkedHashMap<String, Integer>();
         var byNextRung = new LinkedHashMap<String, Integer>();
         for (var r : results) {

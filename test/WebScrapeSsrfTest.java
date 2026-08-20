@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * makes on its own, rather than being stopped by the resolver that production also
  * has. {@code routes.hits} is therefore the assertion that matters.
  */
-public class WebScrapeSsrfTest extends UnitTest {
+class WebScrapeSsrfTest extends UnitTest {
 
     private static final Field CLIENT_FIELD;
     static {
@@ -87,7 +87,7 @@ public class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
-    public void linksToCloudMetadataAndPrivateRangesAreNeverFetched() {
+    void linksToCloudMetadataAndPrivateRangesAreNeverFetched() {
         routes.put("https://site.test/", pageLinking("Home",
                 "http://169.254.169.254/latest/meta-data/",   // AWS/GCP metadata
                 "http://10.0.0.5/admin",                      // RFC-1918
@@ -106,7 +106,7 @@ public class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
-    public void aRefusalDoesNotSpendAPageFromTheBudget() {
+    void aRefusalDoesNotSpendAPageFromTheBudget() {
         routes.put("https://site.test/", pageLinking("Home",
                 "http://10.0.0.5/a", "http://10.0.0.6/b", "/one", "/two"));
         routes.put("https://site.test/one", pageLinking("One"));
@@ -121,7 +121,7 @@ public class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
-    public void nonHttpSchemesInMarkupAreNeverQueued() {
+    void nonHttpSchemesInMarkupAreNeverQueued() {
         routes.put("https://site.test/", pageLinking("Home",
                 "file:///etc/passwd", "ftp://internal.test/x",
                 "javascript:fetch('/admin')", "mailto:a@b.test", "/ok"));
@@ -132,7 +132,7 @@ public class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
-    public void aRedirectOntoALoopbackAddressIsRefusedAtThatHop() {
+    void aRedirectOntoALoopbackAddressIsRefusedAtThatHop() {
         routes.put("https://site.test/", pageLinking("Home", "/bounce"));
         routes.redirect("https://site.test/bounce", "http://127.0.0.1:9000/api/status");
 
@@ -145,7 +145,7 @@ public class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
-    public void theAllowlistContainsEgressAcrossTheWholeCrawlNotJustTheSeed() {
+    void theAllowlistContainsEgressAcrossTheWholeCrawlNotJustTheSeed() {
         ConfigService.set(CFG_ALLOWLIST, "site.test");
         routes.put("https://site.test/", pageLinking("Home", "https://elsewhere.test/x", "/inside"));
         routes.put("https://site.test/inside", pageLinking("Inside"));
@@ -160,7 +160,7 @@ public class WebScrapeSsrfTest extends UnitTest {
     }
 
     @Test
-    public void anUnsafeSeedIsRejectedOutrightRatherThanCrawledEmpty() {
+    void anUnsafeSeedIsRejectedOutrightRatherThanCrawledEmpty() {
         var out = scrape("{\"url\":\"http://169.254.169.254/latest/meta-data/\"}");
         assertTrue(out.startsWith("Error: URL rejected by SSRF guard"), out);
         assertTrue(routes.pageHits().isEmpty(), "nothing may be requested: " + routes.pageHits());

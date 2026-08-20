@@ -34,7 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * concurrently — sharing a host would make these assertions depend on which class
  * populated the cache first.
  */
-public class RobotsCacheTest extends UnitTest {
+class RobotsCacheTest extends UnitTest {
 
     private static final Field CLIENT_FIELD;
     static {
@@ -89,7 +89,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void aDisallowedPathIsNotFetchedAndIsReported() {
+    void aDisallowedPathIsNotFetchedAndIsReported() {
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret", "/public/ok"));
         routes.put(HOST + "/public/ok", page("Public"));
@@ -103,7 +103,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void aDirectiveAimedAtOurTokenIsHonoured() {
+    void aDirectiveAimedAtOurTokenIsHonoured() {
         // A rule naming jclaw specifically must bind even when * is permissive.
         routes.put(HOST + "/robots.txt",
                 "User-agent: *\nAllow: /\n\nUser-agent: jclaw\nDisallow: /nope\n", "text/plain");
@@ -112,7 +112,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void aMissingRobotsTxtFailsOpen() {
+    void aMissingRobotsTxtFailsOpen() {
         // Politeness, not security: a broken file on someone else's server must not
         // break the caller's crawl. SsrfGuard and the allowlist are the controls that
         // fail closed.
@@ -121,7 +121,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void robotsTxtIsFetchedOncePerHostNotOncePerUrl() {
+    void robotsTxtIsFetchedOncePerHostNotOncePerUrl() {
         routes.put(HOST + "/robots.txt", "User-agent: *\nAllow: /\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/a", "/b"));
         routes.put(HOST + "/a", page("A"));
@@ -134,13 +134,13 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void aDeclaredCrawlDelayIsHonouredWithinItsBand() {
+    void aDeclaredCrawlDelayIsHonouredWithinItsBand() {
         routes.put(HOST + "/robots.txt", "User-agent: *\nCrawl-delay: 2\n", "text/plain");
         assertEquals(2_000, RobotsCache.delayMillis(URI.create(HOST + "/"), client, ID));
     }
 
     @Test
-    public void aLargeCrawlDelayIsClampedRatherThanParkingTheCrawl() {
+    void aLargeCrawlDelayIsClampedRatherThanParkingTheCrawl() {
         // Sites do declare tens of seconds. Honouring that literally would park the
         // thread for the whole budget; the cap lets the wall-clock budget end the crawl
         // instead, so the outcome is fewer pages rather than a stalled tool call.
@@ -149,7 +149,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void aCrawlDelayBeyondTheParsersOwnMaximumIsDiscardedNotClamped() {
+    void aCrawlDelayBeyondTheParsersOwnMaximumIsDiscardedNotClamped() {
         // Two thresholds stack, and only the second is ours. SimpleRobotRulesParser
         // discards any Crawl-delay over DEFAULT_MAX_CRAWL_DELAY (300s) rather than
         // capping it, so the value never reaches our clamp and the default applies.
@@ -160,14 +160,14 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void noDeclaredDelayStillPaces() {
+    void noDeclaredDelayStillPaces() {
         routes.put(HOST + "/robots.txt", "User-agent: *\nAllow: /\n", "text/plain");
         assertEquals(RobotsCache.DEFAULT_DELAY_MS,
                 RobotsCache.delayMillis(URI.create(HOST + "/"), client, ID));
     }
 
     @Test
-    public void consecutiveRequestsToOneHostAreSpacedByTheDelay() throws Exception {
+    void consecutiveRequestsToOneHostAreSpacedByTheDelay() throws Exception {
         var uri = URI.create(HOST + "/x");
         long t0 = System.nanoTime();
         RobotsCache.awaitSlot(uri, 200);
@@ -177,7 +177,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void pacingIsPerHostSoOneSlowSiteDoesNotStallAnother() throws Exception {
+    void pacingIsPerHostSoOneSlowSiteDoesNotStallAnother() throws Exception {
         long t0 = System.nanoTime();
         RobotsCache.awaitSlot(URI.create("https://a.test/x"), 400);
         RobotsCache.awaitSlot(URI.create("https://b.test/x"), 400);
@@ -186,7 +186,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void aPerCallOverrideIgnoresRobotsWithoutTouchingConfig() {
+    void aPerCallOverrideIgnoresRobotsWithoutTouchingConfig() {
         // The operator asking in chat is the case this exists for: config stays on, one
         // request opts out.
         ConfigService.set(CFG_RESPECT, "true");
@@ -200,7 +200,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void omittingTheArgumentKeepsRobotsHonoured() {
+    void omittingTheArgumentKeepsRobotsHonoured() {
         // Opt-out per call, never by omission.
         ConfigService.set(CFG_RESPECT, "true");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
@@ -213,7 +213,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void theArgumentCanAlsoRestoreRobotsWhenConfigTurnedThemOff() {
+    void theArgumentCanAlsoRestoreRobotsWhenConfigTurnedThemOff() {
         ConfigService.set(CFG_RESPECT, "false");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret"));
@@ -224,7 +224,7 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
-    public void turningOffRespectRobotsIgnoresTheRulesButStillPaces() {
+    void turningOffRespectRobotsIgnoresTheRulesButStillPaces() {
         ConfigService.set(CFG_RESPECT, "false");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret"));

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
@@ -68,6 +69,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_TIMEOUT_SECONDS = "web_scrape.timeout-seconds";
     private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
     private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
+
+    private static final String INTERRUPTED = "interrupted";
+    private static final String ROBOTS_REFUSAL = "disallowed by robots.txt";
 
     /** Ceilings an operator can lower but the model cannot raise. This is a tool call
      *  inside a conversation, not a background crawler: the caller is waiting, and the
@@ -203,15 +207,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
         boolean respect = respectRobotsDefault();
         if (respect && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
-            return ScrapeObservation.failed(url, "disallowed by robots.txt");
+            return ScrapeObservation.failed(url, ROBOTS_REFUSAL);
         }
         try {
             RobotsCache.awaitSlot(uri, respect
                     ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
                     : RobotsCache.DEFAULT_DELAY_MS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return ScrapeObservation.failed(url, "interrupted");
+            return ScrapeObservation.failed(url, INTERRUPTED);
         }
         try {
             var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
@@ -221,122 +225,160 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
     }
 
+    /** Accumulators for one crawl. A small mutable carrier so the passes below can be
+     *  separate methods without threading six out-parameters through each of them. */
+    private static final class CrawlState {
+        final List<Page> pages = new ArrayList<>();
+        final List<Refusal> refused = new ArrayList<>();
+        final LinkedHashSet<String> seen = new LinkedHashSet<>();
+        int totalChars;
+        int unvisited;
+        String stoppedBecause;
+    }
+
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
                          boolean respectRobots) {
-        var deadline = System.nanoTime()
+        long deadline = System.nanoTime()
                 + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
-        var seen = new LinkedHashSet<String>();
-        var pages = new ArrayList<Page>();
-        var refused = new ArrayList<Refusal>();
-
-        var level = new ArrayList<URI>(List.of(seed));
-        seen.add(canonical(seed));
+        var state = new CrawlState();
+        state.seen.add(canonical(seed));
+        var level = List.of(seed);
         int depth = 0;
-        String stoppedBecause = null;
-        int totalChars = 0;
-        int unvisited = 0;
 
         try (var pool = Executors.newFixedThreadPool(configConcurrency())) {
             while (!level.isEmpty()) {
-                // Admission runs single-threaded, before any work is submitted. Both
-                // checks are cheap and rejecting here keeps `seen`, the refusal list
-                // and the budget free of synchronisation.
-                var admitted = new ArrayList<URI>();
-                for (var uri : level) {
-                    try {
-                        SsrfGuard.assertSafeScheme(uri);
-                    } catch (SecurityException e) {
-                        refused.add(new Refusal(uri.toString(), e.getMessage()));
-                        continue;
-                    }
-                    if (respectRobots && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
-                        refused.add(new Refusal(uri.toString(), "disallowed by robots.txt"));
-                        continue;
-                    }
-                    admitted.add(uri);
-                }
-
-                // Slice to the remaining budget before submitting, so the page count is
-                // exact without workers racing on a shared counter.
-                int room = maxPages - pages.size();
-                if (room <= 0) {
-                    stoppedBecause = "page budget (%d) reached".formatted(maxPages);
-                    unvisited += admitted.size();
-                    break;
-                }
-                if (admitted.size() > room) {
-                    // Truncating a level to the remaining budget IS the stop reason.
-                    // Leaving it unset reported "Stopped: null" alongside a non-zero
-                    // unread count.
-                    unvisited += admitted.size() - room;
-                    admitted = new ArrayList<>(admitted.subList(0, room));
-                    stoppedBecause = "page budget (%d) reached".formatted(maxPages);
-                }
+                var admitted = withinBudget(admit(level, respectRobots, state), maxPages, state);
                 if (admitted.isEmpty()) {
                     break;
                 }
-
-                var futures = admitted.stream()
-                        .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots)))
-                        .toList();
-
-                // Collected in submission order, never completion order: the JCLAW-1091
-                // harness compares runs, and a result whose page order varies per run is
-                // not comparable.
-                var fetchedLevel = new ArrayList<WebExtraction.FetchResult>();
-                for (int i = 0; i < futures.size(); i++) {
-                    var uri = admitted.get(i);
-                    try {
-                        var outcome = futures.get(i).get();
-                        if (!outcome.usable()) {
-                            // Name the reason and the rung that would address it, rather
-                            // than a bare failure. An agent reading "TURNSTILE" knows not
-                            // to retry; "[Could not fetch]" invites a retry loop.
-                            pages.add(new Page(uri.toString(), "[Not retrieved \u2014 %s%s%s]"
-                                    .formatted(outcome.reason(),
-                                            outcome.detail() == null ? "" : ": " + outcome.detail(),
-                                            outcome.nextRung() == ScrapeRung.NONE ? ""
-                                                    : "; needs " + outcome.nextRung())));
-                            continue;
-                        }
-                        pages.add(new Page(outcome.fetched().finalUrl(), outcome.text()));
-                        totalChars += outcome.text().length();
-                        fetchedLevel.add(outcome.fetched());
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        stoppedBecause = "interrupted";
-                        break;
-                    } catch (ExecutionException e) {
-                        pages.add(new Page(uri.toString(),
-                                "[Not retrieved \u2014 %s]".formatted(reason(e))));
-                    }
-                }
-
-                if (stoppedBecause != null) {
+                var fetched = fetchLevel(pool, admitted, respectRobots, state);
+                if (state.stoppedBecause != null || exhausted(deadline, state)
+                        || depth >= maxDepth) {
                     break;
                 }
-                if (System.nanoTime() > deadline) {
-                    stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
-                    break;
-                }
-                if (totalChars >= MAX_TOTAL_CHARS) {
-                    stoppedBecause = "content budget (%d characters) reached".formatted(MAX_TOTAL_CHARS);
-                    break;
-                }
-                if (depth >= maxDepth) {
-                    break;
-                }
-
-                var next = new ArrayList<URI>();
-                for (var fetched : fetchedLevel) {
-                    collectLinks(fetched, seed, sameHostOnly, seen, next);
-                }
-                level = next;
+                level = nextLevel(fetched, seed, sameHostOnly, state.seen);
                 depth++;
             }
         }
+        return render(seed, state, maxDepth, sameHostOnly);
+    }
 
-        return render(seed, pages, refused, maxDepth, sameHostOnly, stoppedBecause, unvisited);
+    /**
+     * Drop the URLs this crawl will not visit, recording why.
+     *
+     * <p>Runs single-threaded before any work is submitted. Both checks are cheap, and
+     * rejecting here keeps {@code seen}, the refusal list and the page budget free of
+     * synchronisation.
+     */
+    private static List<URI> admit(List<URI> level, boolean respectRobots, CrawlState state) {
+        var admitted = new ArrayList<URI>();
+        for (var uri : level) {
+            try {
+                SsrfGuard.assertSafeScheme(uri);
+            } catch (SecurityException e) {
+                state.refused.add(new Refusal(uri.toString(), e.getMessage()));
+                continue;
+            }
+            if (respectRobots && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
+                state.refused.add(new Refusal(uri.toString(), ROBOTS_REFUSAL));
+                continue;
+            }
+            admitted.add(uri);
+        }
+        return admitted;
+    }
+
+    /** Slice a level to the remaining page budget before anything is submitted, so the
+     *  page count stays exact without workers racing a shared counter. */
+    private static List<URI> withinBudget(List<URI> admitted, int maxPages, CrawlState state) {
+        int room = maxPages - state.pages.size();
+        if (room <= 0) {
+            state.stoppedBecause = budgetReached(maxPages);
+            state.unvisited += admitted.size();
+            return List.of();
+        }
+        if (admitted.size() > room) {
+            // Truncating a level to the remaining budget IS the stop reason. Leaving it
+            // unset reported "Stopped: null" beside a non-zero unread count.
+            state.unvisited += admitted.size() - room;
+            state.stoppedBecause = budgetReached(maxPages);
+            return List.copyOf(admitted.subList(0, room));
+        }
+        return admitted;
+    }
+
+    private static String budgetReached(int maxPages) {
+        return "page budget (%d) reached".formatted(maxPages);
+    }
+
+    /**
+     * Fetch a whole level concurrently and record each outcome.
+     *
+     * <p>Results are collected in submission order, never completion order: the
+     * JCLAW-1091 harness compares runs, and a result whose page order varies per run is
+     * not comparable.
+     */
+    private List<WebExtraction.FetchResult> fetchLevel(ExecutorService pool, List<URI> admitted,
+                                                       boolean respectRobots, CrawlState state) {
+        var futures = admitted.stream()
+                .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots)))
+                .toList();
+        var fetched = new ArrayList<WebExtraction.FetchResult>();
+        for (int i = 0; i < futures.size(); i++) {
+            var uri = admitted.get(i);
+            try {
+                record(futures.get(i).get(), uri, state, fetched);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                state.stoppedBecause = INTERRUPTED;
+                return fetched;
+            } catch (ExecutionException e) {
+                state.pages.add(new Page(uri.toString(),
+                        "[Not retrieved \u2014 %s]".formatted(reason(e))));
+            }
+        }
+        return fetched;
+    }
+
+    /** Name the reason and the rung that would address it rather than reporting a bare
+     *  failure. An agent reading "TURNSTILE" knows not to retry; "[Could not fetch]"
+     *  invites a retry loop. */
+    private static void record(Outcome outcome, URI uri, CrawlState state,
+                               List<WebExtraction.FetchResult> fetched) {
+        if (!outcome.usable()) {
+            state.pages.add(new Page(uri.toString(), "[Not retrieved \u2014 %s%s%s]"
+                    .formatted(outcome.reason(),
+                            outcome.detail() == null ? "" : ": " + outcome.detail(),
+                            outcome.nextRung() == ScrapeRung.NONE ? ""
+                                    : "; needs " + outcome.nextRung())));
+            return;
+        }
+        state.pages.add(new Page(outcome.fetched().finalUrl(), outcome.text()));
+        state.totalChars += outcome.text().length();
+        fetched.add(outcome.fetched());
+    }
+
+    /** True when the time or content budget is spent; records which one. */
+    private boolean exhausted(long deadline, CrawlState state) {
+        if (System.nanoTime() > deadline) {
+            state.stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
+            return true;
+        }
+        if (state.totalChars >= MAX_TOTAL_CHARS) {
+            state.stoppedBecause =
+                    "content budget (%d characters) reached".formatted(MAX_TOTAL_CHARS);
+            return true;
+        }
+        return false;
+    }
+
+    private static List<URI> nextLevel(List<WebExtraction.FetchResult> fetched, URI seed,
+                                       boolean sameHostOnly, LinkedHashSet<String> seen) {
+        var next = new ArrayList<URI>();
+        for (var f : fetched) {
+            collectLinks(f, seed, sameHostOnly, seen, next);
+        }
+        return next;
     }
 
     /** One page's work, as it runs on the pool. Pacing happens here so the wait for a
@@ -353,9 +395,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             RobotsCache.awaitSlot(uri, respectRobots
                     ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
                     : RobotsCache.DEFAULT_DELAY_MS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return classified(uri, null, ScrapeObservation.failed(uri.toString(), "interrupted"));
+            return classified(uri, null, ScrapeObservation.failed(uri.toString(), INTERRUPTED));
         }
         try {
             var fetched = WebExtraction.fetch(uri.toString(), CLIENT, HEADERS);
@@ -434,9 +476,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return m == null || m.isBlank() ? e.getClass().getSimpleName() : m;
     }
 
-    private static String render(URI seed, List<Page> pages, List<Refusal> refused,
-                                 int maxDepth, boolean sameHostOnly,
-                                 String stoppedBecause, int unvisited) {
+    private static String render(URI seed, CrawlState state, int maxDepth,
+                                 boolean sameHostOnly) {
+        var pages = state.pages;
+        var refused = state.refused;
+        var stoppedBecause = state.stoppedBecause;
+        int unvisited = state.unvisited;
         var sb = new StringBuilder();
         sb.append("Scraped %d page%s from %s (depth \u2264 %d, %s)\n"
                 .formatted(pages.size(), pages.size() == 1 ? "" : "s", seed,

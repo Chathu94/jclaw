@@ -326,7 +326,7 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    void extractTextPrependsTitleWhenPresent() throws Exception {
+    void extractTextPrependsTitleWhenPresent() {
         var html = "<html><head><title>My Page</title></head>"
                 + "<body><p>Hello world</p></body></html>";
         var text = extractText(html, "http://example.test/");
@@ -336,7 +336,7 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    void extractTextOmitsTitleWhenBlank() throws Exception {
+    void extractTextOmitsTitleWhenBlank() {
         var html = "<html><body><p>Body only</p></body></html>";
         var text = extractText(html, "http://example.test/");
         assertFalse(text.startsWith("# "),
@@ -345,7 +345,7 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    void extractTextStripsScriptAndStyleAndNav() throws Exception {
+    void extractTextStripsScriptAndStyleAndNav() {
         var html = "<html><head><title>X</title></head><body>"
                 + "<nav>NAV-CONTENT</nav>"
                 + "<script>alert('SCRIPT-CONTENT')</script>"
@@ -362,7 +362,7 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    void extractTextTruncatesWhenOverMaxLength() throws Exception {
+    void extractTextTruncatesWhenOverMaxLength() {
         // Inject a body big enough that extractText hits the > MAX_TEXT_LENGTH
         // truncation branch.
         var sb = new StringBuilder("<html><body>");
@@ -449,7 +449,7 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    void extractTextDropsElementIdAnnotations() throws Exception {
+    void extractTextDropsElementIdAnnotations() {
         // flexmark-html2md would otherwise emit element ids as Kramdown-style
         // {#id} annotations (rife in Parsoid/Wikipedia HTML). Verify they're gone.
         var html = "<html><head><title>T</title></head><body>"

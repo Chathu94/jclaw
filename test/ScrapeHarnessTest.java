@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * gate and a client-rendered app are both zero characters — the markers that tell them
  * apart survive only in the raw body.
  */
-public class ScrapeHarnessTest extends UnitTest {
+class ScrapeHarnessTest extends UnitTest {
 
     private static ScrapeObservation obs(String rawHtml, String extracted) {
         var fr = new WebExtraction.FetchResult(rawHtml.getBytes(StandardCharsets.UTF_8),
@@ -48,26 +48,26 @@ public class ScrapeHarnessTest extends UnitTest {
             "# Understanding Widgets\n\nWidgets combine several parts into one. ".repeat(20);
 
     @Test
-    public void knownZero_aChallengePageIsNeverScoredAsContent() {
+    void knownZero_aChallengePageIsNeverScoredAsContent() {
         assertEquals(ScrapeReason.JS_CHALLENGE,
                 BlockClassifier.classify(obs(CHALLENGE_RAW, CHALLENGE_TEXT)));
     }
 
     @Test
-    public void knownOne_aRealArticleScoresOk() {
+    void knownOne_aRealArticleScoresOk() {
         assertEquals(ScrapeReason.OK,
                 BlockClassifier.classify(obs("<html><body>...</body></html>", ARTICLE_TEXT)));
     }
 
     @Test
-    public void aTurnstileGateWithNoContentBehindItIsTurnstile() {
+    void aTurnstileGateWithNoContentBehindItIsTurnstile() {
         var raw = "<html><head><script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\">"
                 + "</script></head><body><div class=\"cf-turnstile\"></div></body></html>";
         assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(obs(raw, "")));
     }
 
     @Test
-    public void aPageThatMerelyEmbedsTurnstileIsNotAGate() {
+    void aPageThatMerelyEmbedsTurnstileIsNotAGate() {
         // The defect that inverted the first corpus: wiley.com and onetrust.com embed the
         // widget and serve real content. Marker presence alone is not a gate — it takes a
         // marker AND nothing readable behind it.
@@ -76,7 +76,7 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void aClientRenderedShellIsThinContentNotABlock() {
+    void aClientRenderedShellIsThinContentNotABlock() {
         // No gate marker, no text: the origin served us, there is simply nothing
         // server-rendered. A rendering gap, not an anti-bot one — and the distinction the
         // provisional classifier could not make, because after extraction this and a JS
@@ -87,7 +87,7 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void shortNonHtmlResponsesAreContentNotThinPages() {
+    void shortNonHtmlResponsesAreContentNotThinPages() {
         // Regression: the thin-content floor was applied to every content type, so a
         // seven-character JSON body — a complete, valid response — was discarded as an
         // empty page. A gate is an HTML phenomenon; JSON, plain text and extracted PDF
@@ -99,7 +99,7 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void anEmptyNonHtmlResponseIsStillThin() {
+    void anEmptyNonHtmlResponseIsStillThin() {
         var fr = new WebExtraction.FetchResult(new byte[0], "application/json",
                 "https://api.test/x");
         assertEquals(ScrapeReason.THIN_CONTENT,
@@ -107,7 +107,7 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void aLongPageDiscussingScrapingIsNotAPolicyBlock() {
+    void aLongPageDiscussingScrapingIsNotAPolicyBlock() {
         // Regression: oxylabs.io scored POLICY_BLOCK off 7,947 characters of marketing
         // copy. A proxy vendor's own page says "scraping is prohibited"; that is content.
         var raw = "<html><body>our terms note that scraping is prohibited on some targets</body></html>";
@@ -115,14 +115,14 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void aShortPolicyRefusalIsStillDetected() {
+    void aShortPolicyRefusalIsStillDetected() {
         var raw = "<html><body>automated access is not permitted</body></html>";
         assertEquals(ScrapeReason.POLICY_BLOCK,
                 BlockClassifier.classify(obs(raw, "automated access is not permitted")));
     }
 
     @Test
-    public void httpStatusIsRecoveredFromTheFailureMessage() {
+    void httpStatusIsRecoveredFromTheFailureMessage() {
         assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(
                 ScrapeObservation.failed("https://x.test/", "HTTP 403 fetching https://x.test/")));
         assertEquals(ScrapeReason.POLICY_BLOCK, BlockClassifier.classify(
@@ -134,12 +134,12 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void nullIsErrorNotSilentPass() {
+    void nullIsErrorNotSilentPass() {
         assertEquals(ScrapeReason.ERROR, BlockClassifier.classify(null));
     }
 
     @Test
-    public void thinContentEscalatesToTheBrowserSkippingImpersonation() {
+    void thinContentEscalatesToTheBrowserSkippingImpersonation() {
         // A different TLS fingerprint cannot execute JavaScript, so sending a SPA to the
         // impersonation rung spends a request arriving at the same empty page.
         assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.THIN_CONTENT));
@@ -149,13 +149,13 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void aPolicyBlockEscalatesToNothingBecauseTheAnswerIsIdentityNotEvasion() {
+    void aPolicyBlockEscalatesToNothingBecauseTheAnswerIsIdentityNotEvasion() {
         assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK));
         assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.OK));
     }
 
     @Test
-    public void prerenderMarkersAreRecorded() {
+    void prerenderMarkersAreRecorded() {
         // abundent.academy: 68 characters to a browser UA, 5,169 to Googlebot. Counted
         // as evidence for whether the descoped identity lane has measurable value.
         var raw = "<html><head><script>window.prerenderready = false;</script>"
@@ -167,7 +167,7 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void harnessScoresACorpusWithoutTouchingTheNetwork() throws Exception {
+    void harnessScoresACorpusWithoutTouchingTheNetwork() throws Exception {
         var json = """
                 {"tranco_list_id":"TEST","probed_on":"2026-08-20","allocation":"equal",
                  "per_stratum":1,"strata":["unprotected-ssr","interactive"],
@@ -201,7 +201,7 @@ public class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    public void groundTruthOverridesTheClassifierRatherThanFeedingIt() throws Exception {
+    void groundTruthOverridesTheClassifierRatherThanFeedingIt() throws Exception {
         // The corpus's reject markers are an INDEPENDENT check. A benchmark whose only
         // guard is the component under test has no guard at all: here the classifier is
         // fed a body with no marker and plenty of text, so it says OK, and the entry's

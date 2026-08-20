@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * per-host pacing keys on the full hostname — so they crawl together without sharing a
  * crawl-delay slot, which is the case parallelism is for.
  */
-public class WebScrapeConcurrencyTest extends UnitTest {
+class WebScrapeConcurrencyTest extends UnitTest {
 
     private static final Field CLIENT_FIELD;
     static {
@@ -97,7 +97,7 @@ public class WebScrapeConcurrencyTest extends UnitTest {
     }
 
     @Test
-    public void aLevelIsFetchedConcurrently() {
+    void aLevelIsFetchedConcurrently() {
         ConfigService.set(CFG_CONCURRENCY, "4");
         seedFourHosts();
         routes.holdMillis = 250;
@@ -109,7 +109,7 @@ public class WebScrapeConcurrencyTest extends UnitTest {
     }
 
     @Test
-    public void concurrencyOneKeepsTheCrawlStrictlySequential() {
+    void concurrencyOneKeepsTheCrawlStrictlySequential() {
         ConfigService.set(CFG_CONCURRENCY, "1");
         seedFourHosts();
         routes.holdMillis = 100;
@@ -121,7 +121,7 @@ public class WebScrapeConcurrencyTest extends UnitTest {
     }
 
     @Test
-    public void theCapIsClampedSoConfigCannotAskForUnboundedFanOut() {
+    void theCapIsClampedSoConfigCannotAskForUnboundedFanOut() {
         ConfigService.set(CFG_CONCURRENCY, "9999");
         seedFourHosts();
         routes.holdMillis = 150;
@@ -135,7 +135,7 @@ public class WebScrapeConcurrencyTest extends UnitTest {
     }
 
     @Test
-    public void pageOrderIsDiscoveryOrderNotCompletionOrder() {
+    void pageOrderIsDiscoveryOrderNotCompletionOrder() {
         ConfigService.set(CFG_CONCURRENCY, "4");
         // First link is slowest, last is fastest: completion order is the reverse of
         // discovery order, so any output ordered by completion would show it.
@@ -161,7 +161,7 @@ public class WebScrapeConcurrencyTest extends UnitTest {
     }
 
     @Test
-    public void theBudgetStaysExactUnderConcurrency() {
+    void theBudgetStaysExactUnderConcurrency() {
         ConfigService.set(CFG_CONCURRENCY, "8");
         seedFourHosts();
 

@@ -51,7 +51,7 @@ public class ApiScrapeTestController extends Controller {
         ScrapeCorpus.Corpus corpus;
         try {
             corpus = ScrapeCorpus.load();
-        } catch (IOException e) {
+        } catch (IOException _) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND,
                     "No corpus at %s — build it with evals/scrape/build_corpus.py"
                             .formatted(ScrapeCorpus.DEFAULT_PATH));

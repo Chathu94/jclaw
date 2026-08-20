@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>URLs use a routable-looking host so {@code assertSafeScheme} and the literal-IP
  * checks still run for real; only the socket is stubbed.
  */
-public class WebScrapeToolTest extends UnitTest {
+class WebScrapeToolTest extends UnitTest {
 
     private static final Field CLIENT_FIELD;
     static {
@@ -82,7 +82,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void depthZeroReadsOnlyTheSeed() {
+    void depthZeroReadsOnlyTheSeed() {
         routes.put("https://site.test/", page("Home", "/a", "/b"));
         routes.put("https://site.test/a", page("A"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":0}");
@@ -94,7 +94,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void followsLinksToTheGivenDepth() {
+    void followsLinksToTheGivenDepth() {
         routes.put("https://site.test/", page("Home", "/a"));
         routes.put("https://site.test/a", page("A", "/b"));
         routes.put("https://site.test/b", page("B"));
@@ -106,7 +106,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void sameHostOnlyIsTheDefaultAndExcludesOffHostLinks() {
+    void sameHostOnlyIsTheDefaultAndExcludesOffHostLinks() {
         routes.put("https://site.test/", page("Home", "https://other.test/x"));
         routes.put("https://other.test/x", page("Offsite"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
@@ -116,7 +116,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void subdomainsCountAsTheSameSite() {
+    void subdomainsCountAsTheSameSite() {
         routes.put("https://site.test/", page("Home", "https://docs.site.test/guide"));
         routes.put("https://docs.site.test/guide", page("Guide"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
@@ -124,7 +124,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void offHostIsFollowedWhenSameHostOnlyIsFalse() {
+    void offHostIsFollowedWhenSameHostOnlyIsFalse() {
         routes.put("https://site.test/", page("Home", "https://other.test/x"));
         routes.put("https://other.test/x", page("Offsite"));
         var out = scrape(
@@ -133,7 +133,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void pageBudgetStopsTheCrawlAndSaysWhatWasLeft() {
+    void pageBudgetStopsTheCrawlAndSaysWhatWasLeft() {
         routes.put("https://site.test/", page("Home", "/a", "/b", "/c"));
         for (var p : List.of("a", "b", "c")) {
             routes.put("https://site.test/" + p, page(p.toUpperCase()));
@@ -148,7 +148,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void aUrlIsFetchedOnceEvenWhenLinkedRepeatedlyOrWithAFragment() {
+    void aUrlIsFetchedOnceEvenWhenLinkedRepeatedlyOrWithAFragment() {
         routes.put("https://site.test/", page("Home", "/a", "/a#section", "/a"));
         routes.put("https://site.test/a", page("A", "/"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":2}");
@@ -158,7 +158,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void queryStringsAreDistinctPagesNotDuplicates() {
+    void queryStringsAreDistinctPagesNotDuplicates() {
         routes.put("https://site.test/", page("Home", "/p?id=1", "/p?id=2"));
         routes.put("https://site.test/p?id=1", page("One"));
         routes.put("https://site.test/p?id=2", page("Two"));
@@ -169,7 +169,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void oneUnreachablePageDoesNotEndTheCrawl() {
+    void oneUnreachablePageDoesNotEndTheCrawl() {
         routes.put("https://site.test/", page("Home", "/broken", "/good"));
         routes.fail("https://site.test/broken", new IOException("connection reset"));
         routes.put("https://site.test/good", page("Good"));
@@ -181,7 +181,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void eachPageIsAttributedToItsSourceUrl() {
+    void eachPageIsAttributedToItsSourceUrl() {
         routes.put("https://site.test/", page("Home", "/a"));
         routes.put("https://site.test/a", page("A"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
@@ -191,7 +191,7 @@ public class WebScrapeToolTest extends UnitTest {
     }
 
     @Test
-    public void nonHtmlPagesYieldNoLinksToFollow() {
+    void nonHtmlPagesYieldNoLinksToFollow() {
         routes.put("https://site.test/", "{\"a\":1}", "application/json");
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":2}");
 
