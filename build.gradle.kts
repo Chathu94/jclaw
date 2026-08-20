@@ -276,6 +276,14 @@ dependencies {
     // parent POM pins for its parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.23.1")
 
+    // crawler-commons — Googlebot-compatible robots.txt parsing and sitemap handling
+    // for web_scrape (JCLAW-1084). The same SimpleRobotRulesParser Nutch and
+    // StormCrawler use, so the matching rules come from a parser exercised far more
+    // widely than a hand-rolled one. Its only compile deps are slf4j-api and
+    // commons-io, both already resolved here.
+    implementation("com.github.crawler-commons:crawler-commons:1.6")
+
+
     // Readability4J — Kotlin port of Mozilla Readability, drives WebFetchTool's
     // main-content extraction (JCLAW-775). Pins an old jsoup transitively; the
     // 1.22.2 above wins on the resolved classpath. WebFetchTool falls back to a

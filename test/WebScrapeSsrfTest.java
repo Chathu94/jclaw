@@ -99,7 +99,7 @@ public class WebScrapeSsrfTest extends UnitTest {
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1,\"sameHostOnly\":false}");
 
         assertEquals(List.of("https://site.test/", "https://site.test/safe"), routes.hits,
-                "only the seed and the safe link may reach the network: " + routes.hits);
+                "only the seed and the safe link may reach the network: " + routes.pageHits());
         assertTrue(out.contains("# Safe"), "the crawl completes past the refusals");
         assertTrue(out.contains("Refused 4 links"), out.substring(0, 400));
         assertTrue(out.contains("169.254.169.254"), "the refusal names the host");
@@ -128,7 +128,7 @@ public class WebScrapeSsrfTest extends UnitTest {
         routes.put("https://site.test/ok", pageLinking("Ok"));
 
         scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1,\"sameHostOnly\":false}");
-        assertEquals(List.of("https://site.test/", "https://site.test/ok"), routes.hits);
+        assertEquals(List.of("https://site.test/", "https://site.test/ok"), routes.pageHits());
     }
 
     @Test
@@ -138,8 +138,8 @@ public class WebScrapeSsrfTest extends UnitTest {
 
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
 
-        assertFalse(routes.hits.contains("http://127.0.0.1:9000/api/status"),
-                "the redirect target must never be requested: " + routes.hits);
+        assertFalse(routes.pageHits().contains("http://127.0.0.1:9000/api/status"),
+                "the redirect target must never be requested: " + routes.pageHits());
         assertTrue(out.contains("Could not fetch") || out.contains("Refused"),
                 "the refusal is surfaced, not swallowed");
     }
@@ -153,8 +153,8 @@ public class WebScrapeSsrfTest extends UnitTest {
 
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1,\"sameHostOnly\":false}");
 
-        assertFalse(routes.hits.contains("https://elsewhere.test/x"),
-                "an off-allowlist host must not be fetched even when linked: " + routes.hits);
+        assertFalse(routes.pageHits().contains("https://elsewhere.test/x"),
+                "an off-allowlist host must not be fetched even when linked: " + routes.pageHits());
         assertTrue(out.contains("# Inside"));
         assertFalse(out.contains("# Outside"));
     }
@@ -163,13 +163,20 @@ public class WebScrapeSsrfTest extends UnitTest {
     public void anUnsafeSeedIsRejectedOutrightRatherThanCrawledEmpty() {
         var out = scrape("{\"url\":\"http://169.254.169.254/latest/meta-data/\"}");
         assertTrue(out.startsWith("Error: URL rejected by SSRF guard"), out);
-        assertTrue(routes.hits.isEmpty(), "nothing may be requested: " + routes.hits);
+        assertTrue(routes.pageHits().isEmpty(), "nothing may be requested: " + routes.pageHits());
     }
 
     static final class RouteInterceptor implements Interceptor {
         private final Map<String, String> bodies = new HashMap<>();
         private final Map<String, String> redirects = new HashMap<>();
         final List<String> hits = new ArrayList<>();
+
+        /** Hits with robots.txt filtered out. RobotsCache is a process-global cache, so
+         *  whether a given test observes that fetch depends on which test ran first —
+         *  asserting on raw hits would make frontier tests order-dependent. */
+        List<String> pageHits() {
+            return hits.stream().filter(u -> !u.endsWith("/robots.txt")).toList();
+        }
 
         void put(String url, String body) { bodies.put(url, body); }
 

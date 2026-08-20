@@ -90,7 +90,7 @@ public class WebScrapeToolTest extends UnitTest {
         assertTrue(out.contains("Scraped 1 page from"), out.substring(0, 120));
         assertTrue(out.contains("# Home"));
         assertFalse(out.contains("# A"), "depth 0 must not follow links");
-        assertEquals(1, routes.hits.size());
+        assertEquals(1, routes.pageHits().size());
     }
 
     @Test
@@ -144,7 +144,7 @@ public class WebScrapeToolTest extends UnitTest {
         // Silent truncation would read as a complete crawl.
         assertTrue(out.contains("page budget (2) reached"), out.substring(0, 200));
         assertTrue(out.contains("not read"), out.substring(0, 200));
-        assertEquals(2, routes.hits.size());
+        assertEquals(2, routes.pageHits().size());
     }
 
     @Test
@@ -153,7 +153,7 @@ public class WebScrapeToolTest extends UnitTest {
         routes.put("https://site.test/a", page("A", "/"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":2}");
 
-        assertEquals(2, routes.hits.size(), "seed + /a only: " + routes.hits);
+        assertEquals(2, routes.pageHits().size(), "seed + /a only: " + routes.pageHits());
         assertTrue(out.contains("Scraped 2 pages"));
     }
 
@@ -195,7 +195,7 @@ public class WebScrapeToolTest extends UnitTest {
         routes.put("https://site.test/", "{\"a\":1}", "application/json");
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":2}");
 
-        assertEquals(1, routes.hits.size());
+        assertEquals(1, routes.pageHits().size());
         assertTrue(out.contains("{\"a\":1}"), "JSON passes through unchanged");
     }
 
@@ -205,6 +205,13 @@ public class WebScrapeToolTest extends UnitTest {
         private final Map<String, String> types = new HashMap<>();
         private final Map<String, IOException> failures = new HashMap<>();
         final List<String> hits = new ArrayList<>();
+
+        /** Hits with robots.txt filtered out. RobotsCache is a process-global cache, so
+         *  whether a given test observes that fetch depends on which test ran first —
+         *  asserting on raw hits would make frontier tests order-dependent. */
+        List<String> pageHits() {
+            return hits.stream().filter(u -> !u.endsWith("/robots.txt")).toList();
+        }
 
         void put(String url, String body) { put(url, body, "text/html; charset=utf-8"); }
 

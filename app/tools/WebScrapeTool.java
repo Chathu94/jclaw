@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import utils.PlayConfig;
+import utils.RobotsCache;
 import utils.SsrfGuard;
 import utils.WebExtraction;
 
@@ -42,8 +43,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     static OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(
             CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
 
-    private static final Map<String, String> HEADERS =
-            Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
+    private static final String USER_AGENT = "Mozilla/5.0 (compatible; JClaw/1.0)";
+    private static final Map<String, String> HEADERS = Map.of("User-Agent", USER_AGENT);
+
+    /** {@code jclaw} is the token a site would write in a {@code User-agent:} line;
+     *  the header above is what goes on the wire. */
+    private static final RobotsCache.Identity IDENTITY =
+            new RobotsCache.Identity(USER_AGENT, "jclaw");
 
     private static final String ARG_URL = "url";
     private static final String ARG_MAX_PAGES = "maxPages";
@@ -53,6 +59,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_MAX_PAGES = "web_scrape.max-pages";
     private static final String CFG_MAX_DEPTH = "web_scrape.max-depth";
     private static final String CFG_TIMEOUT_SECONDS = "web_scrape.timeout-seconds";
+    private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
 
     /** Ceilings an operator can lower but the model cannot raise. This is a tool call
      *  inside a conversation, not a background crawler: the caller is waiting, and the
@@ -194,6 +201,25 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 continue;
             }
 
+            // Robots and pacing are separate controls on purpose. respect-robots=false
+            // says "ignore this site's directives", not "hammer it" — so the per-host
+            // pacing stays on either way. Getting banned is the failure mode both exist
+            // to prevent, and only one of them is a matter of the site's opinion.
+            boolean respectRobots = respectRobots();
+            if (respectRobots && !RobotsCache.isAllowed(hop.uri(), CLIENT, IDENTITY)) {
+                refused.add(new Refusal(hop.uri().toString(), "disallowed by robots.txt"));
+                continue;
+            }
+            try {
+                RobotsCache.awaitSlot(hop.uri(), respectRobots
+                        ? RobotsCache.delayMillis(hop.uri(), CLIENT, IDENTITY)
+                        : RobotsCache.DEFAULT_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                stoppedBecause = "interrupted";
+                break;
+            }
+
             WebExtraction.FetchResult fetched;
             try {
                 fetched = WebExtraction.fetch(hop.uri().toString(), CLIENT, HEADERS);
@@ -305,5 +331,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static int configTimeoutSeconds() {
         return (int) PlayConfig.longOr(CFG_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    /** Default-on. An operator turning this off is making a deliberate choice about
+     *  someone else's site, so it has to be a config edit rather than a tool argument
+     *  the model can set. */
+    private static boolean respectRobots() {
+        return !"false".equalsIgnoreCase(
+                services.ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
     }
 }
