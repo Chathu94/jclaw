@@ -82,8 +82,29 @@ TAG_RE = re.compile(r"<[^>]+>")
 TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
 
 
+# A truncated read can cut mid-<script>, leaving it unclosed. SCRIPT_RE cannot match
+# an unclosed tag, so its JavaScript is then counted as prose: pinterest.com reported
+# 467,893 characters of "visible text" against 75 in the untruncated page, which put a
+# pure SPA into the server-rendered stratum.
+UNCLOSED_SCRIPT_RE = re.compile(r"<(script|style)[^>]*>(?:(?!</\1>).)*$", re.S)
+
+
 def visible_text(body):
+    body = UNCLOSED_SCRIPT_RE.sub("", body)
     return " ".join(TAG_RE.sub(" ", SCRIPT_RE.sub("", body)).split())
+
+
+def read_body(r):
+    """Read up to BODY_CAP, reporting truncation in BYTES.
+
+    The previous guard compared the decoded character count against a byte cap. UTF-8
+    multi-byte content decodes to fewer characters than bytes, so `len(body) >=
+    BODY_CAP` was false even on a truncated read — pinterest.com truncated at 1,048,576
+    bytes and decoded to 1,048,508 characters, and the guard silently never fired.
+    """
+    raw = r.read(BODY_CAP + 1)
+    truncated = len(raw) > BODY_CAP
+    return raw[:BODY_CAP].decode("utf-8", "replace").lower(), truncated
 
 
 def fetch(url, timeout=12):
@@ -101,16 +122,17 @@ def fetch(url, timeout=12):
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
             h = {k.lower(): v.lower() for k, v in r.headers.items()}
-            return r.status, h, r.read(BODY_CAP).decode("utf-8", "replace").lower()
+            body, truncated = read_body(r)
+            return r.status, h, body, truncated
     except urllib.error.HTTPError as ex:
         h = {k.lower(): v.lower() for k, v in ex.headers.items()} if ex.headers else {}
         try:
-            body = ex.read(BODY_CAP).decode("utf-8", "replace").lower()
+            body, truncated = read_body(ex)
         except Exception:
-            body = ""
-        return ex.code, h, body
+            body, truncated = "", False
+        return ex.code, h, body, truncated
     except Exception:
-        return 0, {}, ""
+        return 0, {}, "", False
 
 
 def probe(domain):
@@ -118,13 +140,13 @@ def probe(domain):
     (fanfiction.net, huawei.com, sss.gov.ph), and those skew to the stable,
     well-known sites a durable corpus wants."""
     url = "https://" + domain
-    status, headers, body = fetch(url)
+    status, headers, body, truncated = fetch(url)
     if status == 0:
         alt = "https://www." + domain
-        s2, h2, b2 = fetch(alt)
+        s2, h2, b2, t2 = fetch(alt)
         if s2 != 0:
-            return alt, s2, h2, b2
-    return url, status, headers, body
+            return alt, s2, h2, b2, t2
+    return url, status, headers, body, truncated
 
 
 def detect_vendor(headers, body):
@@ -134,7 +156,7 @@ def detect_vendor(headers, body):
     return "none"
 
 
-def classify(status, headers, body, text=None):
+def classify(status, headers, body, text=None, truncated=False):
     """Return (vendor, outcome, rendering).
 
     Outcome records what the origin *did*, never whether we failed — a 403 alone is
@@ -157,10 +179,12 @@ def classify(status, headers, body, text=None):
     # a page before this counts as a gate.
     if status == 200 and (not gated or len(text) >= SERVED_MIN_TEXT):
         # A body that hit the read cap was not seen whole, so its text/markup ratio
-        # says nothing about rendering. Call it ssr rather than guess.
-        truncated = len(body) >= BODY_CAP
-        rendering = ("spa" if (not truncated and len(text) < SPA_MAX_TEXT
-                               and len(body) > SPA_MIN_HTML) else "ssr")
+        # says nothing about rendering. Report it as unknown rather than guess — the
+        # rendering-defined strata exclude it instead of taking a coin flip.
+        if truncated:
+            return vendor, "served", "unknown"
+        rendering = ("spa" if (len(text) < SPA_MAX_TEXT and len(body) > SPA_MIN_HTML)
+                     else "ssr")
         return vendor, "served", rendering
 
     if any(m in body for m in INTERACTIVE_MARKERS):
@@ -174,6 +198,10 @@ def classify(status, headers, body, text=None):
 
 def stratum_of(vendor, outcome, rendering):
     if outcome == "served":
+        if rendering == "unknown":
+            # Rendering could not be judged, so the rendering-defined strata cannot
+            # take it. edge-served is rendering-agnostic and still can.
+            return None if vendor == "none" else "edge-served"
         if vendor == "none":
             return "unprotected-spa" if rendering == "spa" else "unprotected-ssr"
         return "edge-served"
@@ -299,9 +327,9 @@ def main():
         futs = {ex.submit(probe, d): (rank, d) for rank, d in domains}
         for f in as_completed(futs):
             rank, d = futs[f]
-            url, status, headers, body = f.result()
+            url, status, headers, body, truncated = f.result()
             text = visible_text(body)
-            vendor, outcome, rendering = classify(status, headers, body, text)
+            vendor, outcome, rendering = classify(status, headers, body, text, truncated)
             results.append({
                 "domain": d, "url": url, "rank": rank, "status": status,
                 "vendor": vendor, "outcome": outcome, "rendering": rendering,
