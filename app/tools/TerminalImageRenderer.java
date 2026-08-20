@@ -31,6 +31,10 @@ public final class TerminalImageRenderer {
     /** Consecutive block-art lines that qualify a region as a terminal image. */
     public static final int MIN_BLOCK_ART_LINES = 5;
 
+    /** White border drawn around rendered art, in half-block modules. Four is the
+     *  quiet zone the QR specification requires for a scannable code. */
+    private static final int QUIET_ZONE_MODULES = 4;
+
     /**
      * Detect QR codes or other terminal-rendered images in command output,
      * render them as PNGs, and replace the block art in the output with
@@ -76,15 +80,37 @@ public final class TerminalImageRenderer {
         qrLines.clear();
     }
 
-    /** True when {@code line} is dominated (&gt; 70%) by Unicode block glyphs. */
+    /**
+     * True when {@code line} is at least 70% Unicode block glyphs and spaces
+     * <em>and</em> carries a real glyph.
+     *
+     * <p>Space counts toward the 70% because it is the white pixel of half-block
+     * encoding, but a line of nothing but spaces is a blank line, not a picture
+     * (JCLAW-1097). Treating it as one meant a progress bar that cleared itself with
+     * 80 spaces read as five consecutive rows of art, and {@link ShellExecTool}'s
+     * streaming detector returns early on that signal — so the caller got a blank PNG
+     * instead of the output the command went on to produce.
+     */
     public static boolean isBlockArtLine(String line) {
         if (line.length() <= 10) return false;
-        long blockChars = line.chars().filter(c ->
-                c == '█' || c == '▀' || c == '▄' || c == '▌' || c == '▐' ||
-                c == '░' || c == '▒' || c == '▓' || c == '▊' || c == '▋' ||
-                c == '▍' || c == '▎' || c == '▏' || c == ' '
-        ).count();
-        return blockChars > line.length() * 0.7;
+        int glyphs = 0;
+        int surface = 0;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (isBlockGlyph(c)) {
+                glyphs++;
+                surface++;
+            } else if (c == ' ') {
+                surface++;
+            }
+        }
+        return glyphs > 0 && surface > line.length() * 0.7;
+    }
+
+    private static boolean isBlockGlyph(char c) {
+        return c == '█' || c == '▀' || c == '▄' || c == '▌' || c == '▐'
+                || c == '░' || c == '▒' || c == '▓' || c == '▊' || c == '▋'
+                || c == '▍' || c == '▎' || c == '▏';
     }
 
     /**
@@ -104,8 +130,12 @@ public final class TerminalImageRenderer {
             int cellW = 8;  // pixels per character width
             int cellH = 8;  // pixels per HALF character height (each char = 2 vertical halves)
             int maxWidth = lines.stream().mapToInt(String::length).max().orElse(0);
-            int imgWidth = maxWidth * cellW;
-            int imgHeight = lines.size() * cellH * 2; // *2 because each char line = 2 pixel rows
+            // Draw the quiet zone instead of inheriting it: since JCLAW-1097 an all-space
+            // line no longer qualifies as art, so a QR code's blank border rows never reach
+            // here, and a QR without a quiet zone is unreliable to scan.
+            int margin = QUIET_ZONE_MODULES * cellW;
+            int imgWidth = maxWidth * cellW + 2 * margin;
+            int imgHeight = lines.size() * cellH * 2 + 2 * margin; // *2: each char line = 2 pixel rows
 
             if (imgWidth <= 0 || imgHeight <= 0 || imgWidth > 8000 || imgHeight > 8000) return null;
 
@@ -114,6 +144,7 @@ public final class TerminalImageRenderer {
             g.setColor(Color.WHITE);
             g.fillRect(0, 0, imgWidth, imgHeight);
 
+            g.translate(margin, margin);
             paintBlockArt(g, lines, cellW, cellH);
             g.dispose();
 

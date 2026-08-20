@@ -9,7 +9,11 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import tools.ShellExecTool;
+import tools.TerminalImageRenderer;
 
+import javax.imageio.ImageIO;
+
+import java.awt.Color;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -583,6 +587,59 @@ class ShellExecToolTest extends UnitTest {
                     "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
             ConfigService.clearCache();
         }
+    }
+
+    @Test
+    void whitespacePaddedOutputDoesNotTriggerImage() {
+        // JCLAW-1097: a progress bar clears its line with a run of spaces, and space
+        // counted as a block glyph — so six cleared lines read as a picture and the
+        // early return handed back a blank PNG instead of the command's real output.
+        // Space still counts toward the 70% fill (it is the white pixel of half-block
+        // encoding), but a line carrying no actual glyph is a blank line, not art.
+        var cmd = "printf '%80s\\n%80s\\n%80s\\n%80s\\n%80s\\n%80s\\n' '' '' '' '' '' ''";
+        ConfigService.set("shell.allowlist",
+                "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep,printf");
+        ConfigService.clearCache();
+        try {
+            var result = tool.execute(
+                    "{\"command\":\"" + cmd.replace("\\", "\\\\") + "\"}", agent);
+            assertTrue(result.contains("\"exitCode\":0"),
+                    "whitespace-padded output must exit normally; got: " + result);
+            assertFalse(result.contains("still running in background"),
+                    "whitespace-padded output must NOT trip the early return; got: " + result);
+        } finally {
+            ConfigService.set("shell.allowlist",
+                    "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
+    void blockArtNeedsAGlyphNotJustFill() {
+        assertFalse(TerminalImageRenderer.isBlockArtLine(" ".repeat(80)),
+                "an all-space line is a blank line, not art (JCLAW-1097)");
+        assertFalse(TerminalImageRenderer.isBlockArtLine("Downloading" + " ".repeat(80)),
+                "a line cleared by trailing padding is still not art");
+        assertTrue(TerminalImageRenderer.isBlockArtLine("  \u2588\u2588\u2580  \u2584\u2588  \u2588\u2580\u2588  "),
+                "a half-block QR row is art even though most of it is white");
+        assertFalse(TerminalImageRenderer.isBlockArtLine("Downloading chapter 12 of 40..."),
+                "prose is not art");
+    }
+
+    @Test
+    void renderedBlockArtCarriesAQuietZone() throws IOException {
+        // The glyph requirement drops a QR code's blank border rows, so the quiet zone
+        // has to be drawn rather than inherited — without it the code will not scan.
+        var line = "\u2588".repeat(12);
+        var md = TerminalImageRenderer.replaceTerminalImagesInOutput((line + "\n").repeat(6), agent);
+        assertTrue(md.startsWith("![QR Code](/api/agents/"), "expected an image link; got: " + md);
+
+        var name = md.substring(md.lastIndexOf('/') + 1, md.length() - 1);
+        var png = ImageIO.read(AgentService.workspacePath(agent.name).resolve(name).toFile());
+        assertTrue(png.getWidth() > line.length() * 8, "no horizontal margin: " + png.getWidth());
+        assertTrue(png.getHeight() > 6 * 16, "no vertical margin: " + png.getHeight());
+        // The art is solid black, so a white corner pixel can only be the quiet zone.
+        assertEquals(Color.WHITE.getRGB(), png.getRGB(0, 0), "corner pixel is not white");
     }
 
     // ==================== Helpers ====================
