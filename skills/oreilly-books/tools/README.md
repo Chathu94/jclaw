@@ -25,7 +25,7 @@ Two environment variables override where the script reads and writes. Both have 
 | `SAFARIBOOKS_COOKIES` | `../credentials/cookies.json` | Session cookies (see below) |
 | `SAFARIBOOKS_OUTPUT` | `./Books` | Where EPUBs and run logs land |
 
-The JClaw skill always sets `SAFARIBOOKS_OUTPUT` to `oreilly-books/` in the agent workspace, so output never accumulates inside the skill directory.
+The JClaw skill always sets `SAFARIBOOKS_OUTPUT` to `books/` in the agent workspace, so output never accumulates inside the skill directory.
 
 ## Usage
 
@@ -51,7 +51,7 @@ Flags:
 
 ## Cookies
 
-Auth is a JSON dict of cookie name → value. The two that matter are `orm-jwt` and `orm-rt`; the `bm_*` / `_abck` Akamai cookies help requests avoid being flagged as bot traffic and are worth including when present.
+Auth is a JSON dict of cookie name → value, or the list-of-objects shape a cookie-export extension produces — the script accepts either. The two that matter are `orm-jwt` and `orm-rt`; the `bm_*` / `_abck` Akamai cookies help requests avoid being flagged as bot traffic and are worth including when present.
 
 `orm-jwt` expires in roughly **30 minutes**, so a stale `cookies.json` is the single most common cause of failures. A run that dies with a 401/403 or an auth error almost always just needs fresh cookies.
 

@@ -337,7 +337,12 @@ class SafariBooks:
                 self.display.exit("Login: unable to find `cookies.json` file.\n"
                                   "    Please use the `--cred` or `--login` options to perform the login.")
 
-            self.session.cookies.update(json.load(open(COOKIES_FILE)))
+            cookies_raw = json.load(open(COOKIES_FILE))
+            # A cookie-export extension emits a list of objects; DevTools copy-paste
+            # gives name -> value. The skill documents both, so accept both.
+            self.session.cookies.update(
+                {c["name"]: c["value"] for c in cookies_raw}
+                if isinstance(cookies_raw, list) else cookies_raw)
 
         else:
             self.display.info("Logging into Safari Books Online...", state=True)
