@@ -69,6 +69,13 @@ play1 {
     frameworkVersion.set(declared)
 }
 
+// The Jenkins pipeline runs `play precompile`, then `play autotest`, then
+// `./gradlew sonar`. None of those emits Gradle's test classes, so sonar.java.test
+// .binaries would point at a directory that never exists on CI. Compiling them here
+// is the cheapest way to keep the analysis property honest; javac output is enough
+// for symbol resolution, which is all the analyzer needs from it.
+tasks.named("sonar") { dependsOn(tasks.named("compileTestJava")) }
+
 sonar {
     properties {
         property("sonar.projectKey", "abundent:jclaw")
@@ -128,6 +135,19 @@ sonar {
         // Override the Gradle plugin's default (build/classes/java/main) to
         // also include Play's template-derived classes from `play precompile`.
         property("sonar.java.binaries", "build/classes/java/main,precompiled/java")
+
+        // Test-side counterpart of sonar.java.binaries. Without resolvable test
+        // binaries the Java analyzer falls back to syntactic checks on test files,
+        // which is the shape of the java:S1128 reports that marked demonstrably-used
+        // static imports as unused.
+        //
+        // Unlike the main path this points at Gradle output rather than precompiled/,
+        // because `play precompile` emits app classes only — no test class is written
+        // anywhere by the CI pipeline's own steps. `play autotest` compiles tests
+        // in-process and leaves nothing behind, so the directory below exists only
+        // because the sonar task is wired to compileTestJava further down. Removing
+        // that wiring makes this property silently point at nothing.
+        property("sonar.java.test.binaries", "build/classes/java/test")
 
         property("sonar.coverage.jacoco.xmlReportPaths", "jacoco.xml")
         property("sonar.javascript.lcov.reportPaths", "frontend/coverage/lcov.info")
