@@ -171,6 +171,44 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return crawl(seed, maxPages, maxDepth, sameHostOnly);
     }
 
+    /**
+     * Fetch one URL exactly as the crawl would: SSRF admission, robots, per-host pacing,
+     * then the shared fetch and extraction (JCLAW-1094).
+     *
+     * <p>Public so {@code ScrapeHarness} can measure this tool as a rung rather than a
+     * replica of it. Returning the observation rather than rendered text keeps the rung
+     * comparable with rung 1 — both hand the same classifier the same raw body, so a
+     * difference in their access rates is a difference in admission, not in how the two
+     * were scored.
+     */
+    public ScrapeObservation fetchSingle(String url) {
+        URI uri;
+        try {
+            uri = URI.create(url);
+            SsrfGuard.assertSafeScheme(uri);
+        } catch (RuntimeException e) {
+            return ScrapeObservation.failed(url, "rejected: " + e.getMessage());
+        }
+        boolean respect = respectRobots();
+        if (respect && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
+            return ScrapeObservation.failed(url, "disallowed by robots.txt");
+        }
+        try {
+            RobotsCache.awaitSlot(uri, respect
+                    ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
+                    : RobotsCache.DEFAULT_DELAY_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return ScrapeObservation.failed(url, "interrupted");
+        }
+        try {
+            var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
+            return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+        } catch (Exception e) {
+            return ScrapeObservation.failed(url, reason(e));
+        }
+    }
+
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly) {
         var deadline = System.nanoTime()
                 + Duration.ofSeconds(configTimeoutSeconds()).toNanos();

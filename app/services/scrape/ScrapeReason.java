@@ -27,6 +27,9 @@ public enum ScrapeReason {
      *  A rendering gap that rung 3 closes, not an anti-bot one, so it is kept distinct
      *  from {@link #TRUST_BLOCK} rather than inflating the blocked count. */
     THIN_CONTENT,
+    /** We declined, the origin did not. Distinct from a block because no rung climbs
+     *  it — the operator can lift it, or not. */
+    ROBOTS_DISALLOWED,
     TIMEOUT,
     /** Transport or extraction failure that is ours, not the origin's. */
     ERROR

@@ -71,11 +71,12 @@ public class ApiScrapeTestController extends Controller {
 
         var rung = switch (rungId) {
             case "1" -> ScrapeHarness.rung1();
+            case "scrape" -> ScrapeHarness.rungScrape();
             default -> null;
         };
         if (rung == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "Unknown rung '%s'. Available: 1. Rungs 2-4 land with JCLAW-1087/1088/1089."
+                    "Unknown rung '%s'. Available: 1, scrape. Rungs 2-4 land with JCLAW-1087/1088/1089."
                             .formatted(rungId));
             throw ApiResponses.unreachable();
         }

@@ -855,7 +855,8 @@ thing being measured is the shipped fetch stack, so a curl-based harness would
 measure curl instead.
 
 Options:
-  --rung N           Rung to measure (default 1). 1 = web_fetch path.
+  --rung ID          Rung to measure (default 1). 1 = shared fetch chain;
+                     scrape = the web_scrape tool's own path (adds robots + pacing).
   --concurrency N    Outbound fan-out, 1-16 (default 8).
   --out FILE         Write the full JSON report to FILE.
 

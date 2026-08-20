@@ -118,11 +118,12 @@ public final class BlockClassifier {
             case TLS_BLOCKED, TRUST_BLOCK -> ScrapeRung.IMPERSONATE;
             case JS_CHALLENGE, THIN_CONTENT -> ScrapeRung.BROWSER;
             case TURNSTILE -> ScrapeRung.PROVIDER;
-            case OK, POLICY_BLOCK, OTHER_WAF, TIMEOUT, ERROR -> ScrapeRung.NONE;
+            case OK, POLICY_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT, ERROR -> ScrapeRung.NONE;
         };
     }
 
     private static ScrapeReason classifyError(String lower) {
+        if (lower.contains("robots.txt")) return ScrapeReason.ROBOTS_DISALLOWED;
         // Both spellings: WebFetchTool wrote "timed out", while the raw
         // SocketTimeoutException the harness now sees says "timeout".
         if (lower.contains("timed out") || lower.contains("timeout")) return ScrapeReason.TIMEOUT;

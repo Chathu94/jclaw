@@ -73,6 +73,20 @@ public final class ScrapeHarness {
     /** {@code detail} carries the head of a failing fetch's output. Without it a run
      *  reports ERROR without saying what the error was, which makes the harness
      *  unfalsifiable — the failure mode it exists to prevent, one level up. */
+    /**
+     * Rung 1s: the shipped {@code web_scrape} tool's own per-URL path — everything rung 1
+     * does, plus SSRF admission, robots.txt and per-host pacing.
+     *
+     * <p>Not a separate capability but a separate <em>policy</em>. Comparing it against
+     * rung 1 answers a question the epic otherwise cannot: what politeness costs in
+     * access. The corpus is crawled at depth 0, one URL per entry, because the harness
+     * scores per-URL reach and a crawl would conflate that with link discovery.
+     */
+    public static Rung rungScrape() {
+        var tool = new tools.WebScrapeTool();
+        return tool::fetchSingle;
+    }
+
     /** {@code detail} carries the head of a failing fetch's output. Without it a run
      *  reports ERROR without saying what the error was, which makes the harness
      *  unfalsifiable — the failure mode it exists to prevent, one level up.
