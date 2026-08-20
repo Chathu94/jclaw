@@ -48,13 +48,17 @@ public final class ScrapeHarness {
     /** {@code detail} carries the head of a failing fetch's output. Without it a run
      *  reports ERROR without saying what the error was, which makes the harness
      *  unfalsifiable — the failure mode it exists to prevent, one level up. */
-    public record Result(String url, String tier, boolean ok, ScrapeReason reason,
+    public record Result(String url, String stratum, String vendor, String outcome,
+                         String rendering, boolean ok, ScrapeReason reason,
                          int chars, boolean titleSeen, long ms, String detail) {}
 
-    public record TierScore(int total, int ok, double rate) {}
+    public record Score(int total, int ok, double rate) {}
 
+    /** {@code byStratum} is what the epic gates on; {@code byVendor} answers "which
+     *  WAFs can we get past", which an aggregate cannot. Both come from one run. */
     public record RungReport(String rung, int attempted, int ok, double rate,
-                             Map<String, TierScore> byTier, Map<String, Integer> byReason,
+                             Map<String, Score> byStratum, Map<String, Score> byVendor,
+                             Map<String, Score> byRendering, Map<String, Integer> byReason,
                              List<Result> results) {}
 
     public static RungReport run(String rungName, Rung rung, ScrapeCorpus.Corpus corpus,
@@ -88,25 +92,33 @@ public final class ScrapeHarness {
         var reason = BlockClassifier.classify(out, e.groundTruth());
         boolean ok = reason == ScrapeReason.OK;
         var text = out == null ? "" : out;
-        return new Result(e.url(), e.tier(), ok, reason, text.length(),
-                e.groundTruth().titleSeen(text), ms,
+        return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
+                ok, reason, text.length(), e.groundTruth().titleSeen(text), ms,
                 ok ? null : text.substring(0, Math.min(200, text.length())).replace('\n', ' '));
     }
 
     private static RungReport report(String rungName, ScrapeCorpus.Corpus corpus,
                                      List<Result> results) {
-        var byTier = new LinkedHashMap<String, TierScore>();
         var byReason = new LinkedHashMap<String, Integer>();
-        for (var r : results) {
-            byReason.merge(r.reason().name(), 1, Integer::sum);
-            var prev = byTier.getOrDefault(r.tier(), new TierScore(0, 0, 0));
-            int total = prev.total() + 1;
-            int ok = prev.ok() + (r.ok() ? 1 : 0);
-            byTier.put(r.tier(), new TierScore(total, ok, rate(ok, total)));
-        }
+        results.forEach(r -> byReason.merge(r.reason().name(), 1, Integer::sum));
         int ok = (int) results.stream().filter(Result::ok).count();
         return new RungReport(rungName, results.size(), ok, rate(ok, results.size()),
-                byTier, byReason, List.copyOf(results));
+                group(results, Result::stratum), group(results, Result::vendor),
+                group(results, Result::rendering), byReason, List.copyOf(results));
+    }
+
+    private static Map<String, Score> group(List<Result> results,
+                                            java.util.function.Function<Result, String> key) {
+        var out = new LinkedHashMap<String, Score>();
+        for (var r : results) {
+            var k = key.apply(r);
+            if (k == null) continue;
+            var prev = out.getOrDefault(k, new Score(0, 0, 0));
+            int total = prev.total() + 1;
+            int ok = prev.ok() + (r.ok() ? 1 : 0);
+            out.put(k, new Score(total, ok, rate(ok, total)));
+        }
+        return out;
     }
 
     private static double rate(int ok, int total) {

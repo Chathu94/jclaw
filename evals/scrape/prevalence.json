@@ -1,20 +1,52 @@
 {
-  "tranco_list_id": "K9LYW",
-  "probed_on": "2026-08-19",
+  "tranco_list_id": "JZ8PY",
+  "probed_on": "2026-08-20",
   "sample_size": 30000,
-  "counts": {
-    "basic": 335,
-    "open": 6556,
-    "unreachable": 8019,
-    "not-cloudflare": 10647,
-    "other-waf": 2819,
-    "managed-challenge": 1510,
-    "turnstile": 114
+  "by_outcome": {
+    "served": 17620,
+    "unreachable": 9463,
+    "challenge": 1410,
+    "interactive": 213,
+    "denied": 1294
   },
-  "cloudflare_tier_share": {
-    "open": 0.7699,
-    "basic": 0.0393,
-    "managed-challenge": 0.1773,
-    "turnstile": 0.0134
+  "by_vendor": {
+    "cloudflare": 8668,
+    "none": 18520,
+    "cloudfront": 1863,
+    "akamai": 695,
+    "sucuri": 41,
+    "imperva": 170,
+    "datadome": 42,
+    "fastly": 1
+  },
+  "by_vendor_outcome": {
+    "cloudflare/served": 6674,
+    "none/unreachable": 9104,
+    "cloudflare/challenge": 1326,
+    "cloudflare/interactive": 128,
+    "none/served": 8810,
+    "cloudfront/denied": 111,
+    "cloudfront/served": 1610,
+    "none/denied": 574,
+    "akamai/denied": 278,
+    "cloudflare/unreachable": 217,
+    "cloudflare/denied": 323,
+    "cloudfront/unreachable": 106,
+    "akamai/served": 402,
+    "sucuri/served": 16,
+    "imperva/served": 101,
+    "none/interactive": 19,
+    "datadome/interactive": 33,
+    "cloudfront/interactive": 33,
+    "sucuri/denied": 5,
+    "none/challenge": 13,
+    "akamai/unreachable": 15,
+    "imperva/challenge": 68,
+    "sucuri/unreachable": 20,
+    "fastly/served": 1,
+    "imperva/unreachable": 1,
+    "datadome/served": 6,
+    "datadome/denied": 3,
+    "cloudfront/challenge": 3
   }
 }

@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Build the CF-100 corpus for ./jclaw.sh scrapetest (JCLAW-1081).
+"""Build the scrape corpus for ./jclaw.sh scrapetest (JCLAW-1081).
 
-Samples domains across Tranco rank bands, probes each one to discover what
-protection is *deployed*, and emits an equal-allocation corpus plus the
-population prevalence needed to post-stratify the harness results.
+Samples domains across Tranco rank bands, probes each one, and classifies it on
+three independent axes — edge vendor, protection outcome, rendering mode — then
+emits an equal-allocation corpus plus the population prevalence needed to
+post-stratify the harness results.
+
+The axes are independent and conflating them is what broke the first corpus:
+CloudFront in front does not mean CloudFront is blocking, and a page with no
+server-rendered text may be a JS gate or an ordinary client-rendered app.
 
 Stdlib only, on purpose: this is one-time data generation, not app code.
 
-    python3 evals/scrape/build_corpus.py --sample 10000 --per-tier 25
+    python3 evals/scrape/build_corpus.py --sample 40000 --per-stratum 25
 """
 
 import argparse, csv, io, json, os, random, re, ssl, sys, time, urllib.request, zipfile
@@ -23,30 +28,71 @@ TRANCO_LATEST = "https://tranco-list.eu/api/lists/date/latest"
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 
-BODY_CAP = 65_536
+# Large enough that a real page is not truncated mid-document. At 64 KiB the cap
+# landed inside <head> for big sites, so visible_text() saw only scripts and meta
+# and reported ~40 characters — nasa.gov, taobao.com, squarespace.com and cnet.com
+# all classified as client-rendered while WebFetchTool extracted thousands of
+# characters from them.
+BODY_CAP = 1_048_576
 
-TIERS = ["open", "basic", "managed-challenge", "turnstile"]
+# Below this many characters of visible text a 200 carrying a gate marker is a gate,
+# not a page. A JS-rendered Turnstile wall returns 200 with an empty body
+# (hxuakdlb.com: 0 chars); a real page that merely embeds the widget returns
+# hundreds (wiley.com: 597).
+SERVED_MIN_TEXT = 200
 
-# Non-Cloudflare WAFs. Kept out of the corpus rather than counted as our failures —
-# a CloudFront 403 says nothing about the target this epic named.
-OTHER_WAF = [
-    ("cloudfront",  lambda h, b: "cloudfront" in h.get("server", "") or "x-amz-cf-id" in h),
-    ("akamai",      lambda h, b: "akamai" in h.get("server", "") or any(k.startswith("x-akamai") for k in h)),
-    ("datadome",    lambda h, b: "x-datadome" in h or "datadome" in h.get("set-cookie", "")),
-    ("imperva",     lambda h, b: "x-iinfo" in h or "incap_ses" in h.get("set-cookie", "")),
-    ("sucuri",      lambda h, b: "x-sucuri-id" in h),
-    ("fastly",      lambda h, b: "fastly" in h.get("server", "")),
+# A served 200 with markup but no text is a client-rendered app
+# (abundent.academy: 68 chars of text behind 5,515 bytes of HTML).
+SPA_MAX_TEXT = 200
+SPA_MIN_HTML = 2_000
+
+# The floor is derived from raw visible text but scored against Readability's
+# extraction, which strips nav and chrome — on a portal page that is nearly all of
+# it. At a 500 ceiling, wikipedia.org (475 extracted) and mozilla.org (363) failed
+# while genuine shells returned 7-15. Any threshold in that 25x gap separates them;
+# 300 sits inside it with margin.
+SERVED_FLOOR_MAX = 300
+GATED_FLOOR = 500
+
+STRATA = ["unprotected-ssr", "unprotected-spa", "edge-served",
+          "denied", "challenge", "interactive"]
+
+# Edge vendors that announce themselves in the response. Detection is
+# fingerprint-based, so "none" means "no vendor I can identify" — an upper bound on
+# unprotected, never a guarantee of it.
+VENDORS = [
+    ("cloudflare", lambda h, b: "cf-ray" in h),
+    ("cloudfront", lambda h, b: "cloudfront" in h.get("server", "") or "x-amz-cf-id" in h),
+    ("akamai",     lambda h, b: "akamai" in h.get("server", "")
+                                or any(k.startswith("x-akamai") for k in h)),
+    ("datadome",   lambda h, b: "x-datadome" in h or "datadome" in h.get("set-cookie", "")),
+    ("imperva",    lambda h, b: "x-iinfo" in h or "incap_ses" in h.get("set-cookie", "")),
+    ("sucuri",     lambda h, b: "x-sucuri-id" in h),
+    ("fastly",     lambda h, b: "fastly" in h.get("server", "")),
 ]
 
-CHALLENGE_MARKERS = ("/cdn-cgi/challenge-platform/", "just a moment", "cf_chl_opt", "cf-please-wait")
-TURNSTILE_MARKERS = ("challenges.cloudflare.com/turnstile", "cf-turnstile")
+CHALLENGE_MARKERS = ("/cdn-cgi/challenge-platform/", "just a moment", "cf_chl_opt",
+                     "cf-please-wait", "_incapsula_resource", "checking your browser")
+INTERACTIVE_MARKERS = ("challenges.cloudflare.com/turnstile", "cf-turnstile",
+                       "captcha-delivery.com", "geo.captcha-delivery",
+                       "g-recaptcha", "hcaptcha.com/1/api.js")
+
+SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S)
+TAG_RE = re.compile(r"<[^>]+>")
+TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
+
+
+def visible_text(body):
+    return " ".join(TAG_RE.sub(" ", SCRIPT_RE.sub("", body)).split())
 
 
 def fetch(url, timeout=12):
     """GET url, returning (status, lowercased-headers, body-prefix). Never raises."""
+    # Verify certificates, because WebFetchTool does. Skipping verification here put
+    # googlevideo.com, windows.net and ezviz7.com into the corpus as "served" when our
+    # own stack cannot reach them at all — a cert mismatch is not a scraping-capability
+    # question, and those entries only depress the score with noise.
     ctx = ssl.create_default_context()
-    ctx.check_hostname = False          # classification only; we never trust this content
-    ctx.verify_mode = ssl.CERT_NONE
     req = urllib.request.Request(url, headers={
         "User-Agent": UA,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -63,8 +109,8 @@ def fetch(url, timeout=12):
         except Exception:
             body = ""
         return ex.code, h, body
-    except Exception as ex:
-        return 0, {}, type(ex).__name__
+    except Exception:
+        return 0, {}, ""
 
 
 def probe(domain):
@@ -81,86 +127,85 @@ def probe(domain):
     return url, status, headers, body
 
 
+def detect_vendor(headers, body):
+    for name, test in VENDORS:
+        if test(headers, body):
+            return name
+    return "none"
+
+
 def classify(status, headers, body, text=None):
-    """Assign a protection tier from what the origin *did*, never from whether we failed.
+    """Return (vendor, outcome, rendering).
 
-    Two guards, and the second was learned the hard way. Circularity: 'we got a 403'
-    alone is not a tier. Marker-presence: a page that *references* Turnstile is not a
-    page *gated by* Turnstile — wiley.com and onetrust.com embed the widget and serve
-    597 and 1574 characters of real content, and labelling them 'turnstile' put five
+    Outcome records what the origin *did*, never whether we failed — a 403 alone is
+    not a tier, and a marker alone is not a gate. wiley.com and onetrust.com embed a
+    Turnstile widget and serve real content; labelling them by marker presence put
     open sites in the hardest tier and inverted the whole benchmark.
-
-    So a marker only names a tier when the origin refused to serve content.
     """
-    if status == 0:
-        return "unreachable", None
     if text is None:
         text = visible_text(body)
-    on_cf = "cf-ray" in headers
-    if not on_cf:
-        for name, test in OTHER_WAF:
-            if test(headers, body):
-                return "other-waf", name
-        return "not-cloudflare", None
+    vendor = detect_vendor(headers, body)
+    if status == 0:
+        return vendor, "unreachable", None
 
-    gated = (any(m in body for m in TURNSTILE_MARKERS)
+    gated = ("cf-mitigated" in headers
              or any(m in body for m in CHALLENGE_MARKERS)
-             or "cf-mitigated" in headers)
+             or any(m in body for m in INTERACTIVE_MARKERS))
 
     # A 200 with no gate marker is a served page at any size — example.com is 142
-    # characters of complete content and is the canonical known-one, so thinness
-    # alone must never read as blocked. It takes a marker *and* a body too thin to
-    # be a page: hxuakdlb.com returns 200 with 0 characters behind a Turnstile
-    # widget, while wiley.com returns 597 and merely embeds one.
+    # characters of complete content. It takes a marker *and* a body too thin to be
+    # a page before this counts as a gate.
     if status == 200 and (not gated or len(text) >= SERVED_MIN_TEXT):
-        return "open", None
+        # A body that hit the read cap was not seen whole, so its text/markup ratio
+        # says nothing about rendering. Call it ssr rather than guess.
+        truncated = len(body) >= BODY_CAP
+        rendering = ("spa" if (not truncated and len(text) < SPA_MAX_TEXT
+                               and len(body) > SPA_MIN_HTML) else "ssr")
+        return vendor, "served", rendering
 
-    if any(m in body for m in TURNSTILE_MARKERS):
-        return "turnstile", None
+    if any(m in body for m in INTERACTIVE_MARKERS):
+        return vendor, "interactive", None
     if "cf-mitigated" in headers or any(m in body for m in CHALLENGE_MARKERS):
-        return "managed-challenge", None
-    if status in (403, 406, 429):
-        return "basic", None
-    return "unreachable", "thin-or-%s" % status
+        return vendor, "challenge", None
+    if status in (401, 403, 406, 429, 451, 503):
+        return vendor, "denied", None
+    return vendor, "unreachable", None
 
 
-TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.S)
-SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S)
-TAG_RE = re.compile(r"<[^>]+>")
-
-# Below this many characters of visible text a 200 is a gate, not a page. A
-# JS-rendered Turnstile wall returns 200 with an empty body (hxuakdlb.com: 0 chars);
-# a real page that merely embeds a Turnstile widget returns hundreds (wiley.com: 597).
-SERVED_MIN_TEXT = 200
+def stratum_of(vendor, outcome, rendering):
+    if outcome == "served":
+        if vendor == "none":
+            return "unprotected-spa" if rendering == "spa" else "unprotected-ssr"
+        return "edge-served"
+    return outcome if outcome in ("denied", "challenge", "interactive") else None
 
 
-def visible_text(body):
-    return " ".join(TAG_RE.sub(" ", SCRIPT_RE.sub("", body)).split())
-
-
-def ground_truth(status, body, tier, text=None):
+def ground_truth(status, body, outcome, text=None):
     """Assertions the harness scores against.
 
-    Negative markers are the load-bearing half: a Cloudflare interstitial is valid
-    HTML that extracts to clean markdown, so without them the harness scores a
-    challenge page as a success. Positive markers are only capturable for origins
-    that already answered us, i.e. the open tier.
+    {reject_markers} is the load-bearing half: a Cloudflare interstitial is valid HTML
+    that extracts to clean markdown, so without it the harness scores "checking your
+    browser" as a success.
 
-    {min_chars} is derived per entry rather than fixed, because a blanket 600 scored
-    example.com - 198 extracted characters, and the canonical known-one - as blocked.
-    A quarter of the observed visible text allows for Readability stripping nav and
-    chrome; the floor and ceiling keep tiny and enormous pages both scoreable.
+    {min_chars} is derived from observed visible text — a blanket 600 scored
+    example.com, 198 extracted characters and the canonical known-one, as blocked.
+    But it is only derived when the origin actually served us: for a gated entry the
+    observation IS the gate, so deriving a floor from it lets a 75-character gate page
+    pass (outschool.com did exactly that). Those get a fixed bar instead.
     """
     if text is None:
         text = visible_text(body)
-    gt = {"min_chars": max(50, min(500, len(text) // 4)),
-          # What the probe actually saw. An origin at the floor with a large HTML
-          # body is a client-rendered app, not a small page - the harness needs that
-          # apart from anti-bot failure.
+    if outcome == "served":
+        floor = max(50, min(SERVED_FLOOR_MAX, len(text) // 4))
+    else:
+        # For a gated entry the observation IS the gate, so no floor can be derived
+        # from it. A fixed bar above what an interstitial extracts to instead.
+        floor = GATED_FLOOR
+    gt = {"min_chars": floor,
           "observed_text": len(text),
           "observed_html": len(body),
-          "reject_markers": list(CHALLENGE_MARKERS + TURNSTILE_MARKERS)}
-    if tier == "open" and status == 200:
+          "reject_markers": list(CHALLENGE_MARKERS + INTERACTIVE_MARKERS)}
+    if outcome == "served" and status == 200:
         m = TITLE_RE.search(body)
         if m:
             title = " ".join(m.group(1).split())[:120]
@@ -189,10 +234,11 @@ def tranco_domains(sample_n, seed):
     ranked = [row[1] for row in csv.reader(io.StringIO(raw)) if len(row) == 2]
 
     # Log-spaced bands, not the head. The top of any popularity list is big-tech
-    # own-infrastructure and carries almost no Cloudflare.
+    # own-infrastructure and carries almost no third-party edge.
     bands, lo = [], 0
     for hi in (1_000, 10_000, 100_000, len(ranked)):
-        bands.append(list(enumerate(ranked[lo:hi], start=lo + 1))); lo = hi
+        bands.append(list(enumerate(ranked[lo:hi], start=lo + 1)))
+        lo = hi
     rng = random.Random(seed)
     per_band = sample_n // len(bands)
     picked = []
@@ -202,14 +248,47 @@ def tranco_domains(sample_n, seed):
     return list_id, picked
 
 
+def select(pool, want):
+    """Best-ranked first, round-robin across vendors.
+
+    Rank order because long-tail domains churn and a corpus that rots between gate
+    runs stops being comparable. Round-robin because a single vendor would otherwise
+    fill a blocked stratum — CloudFront is 25x more common than DataDome — and the
+    per-vendor breakdown would have nothing to say about the rare ones.
+    """
+    by_vendor = {}
+    for r in sorted(pool, key=lambda r: r["rank"]):
+        by_vendor.setdefault(r["vendor"], []).append(r)
+    out, queues = [], list(by_vendor.values())
+    while len(out) < want and any(queues):
+        for q in queues:
+            if q and len(out) < want:
+                out.append(q.pop(0))
+        queues = [q for q in queues if q]
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sample", type=int, default=10_000, help="domains to probe")
-    ap.add_argument("--per-tier", type=int, default=25, help="equal-allocation size per tier")
-    ap.add_argument("--workers", type=int, default=32)
+    ap.add_argument("--sample", type=int, default=40_000)
+    ap.add_argument("--per-stratum", type=int, default=25)
+    ap.add_argument("--workers", type=int, default=64)
     ap.add_argument("--seed", type=int, default=1081)
     ap.add_argument("--out", default=HERE)
+    ap.add_argument("--recompute", action="store_true",
+                    help="rewrite ground-truth floors from stored observations, no re-probe")
     args = ap.parse_args()
+
+    if args.recompute:
+        path = os.path.join(args.out, "corpus.json")
+        doc = json.load(open(path))
+        for e in doc["entries"]:
+            gt = e["ground_truth"]
+            gt["min_chars"] = (max(50, min(SERVED_FLOOR_MAX, gt["observed_text"] // 4))
+                               if e["outcome"] == "served" else GATED_FLOOR)
+        json.dump(doc, open(path, "w"), indent=2)
+        print("==> recomputed floors for %d entries" % len(doc["entries"]), file=sys.stderr)
+        return
 
     list_id, domains = tranco_domains(args.sample, args.seed)
     print("==> Tranco %s, probing %d domains with %d workers"
@@ -222,49 +301,56 @@ def main():
             rank, d = futs[f]
             url, status, headers, body = f.result()
             text = visible_text(body)
-            tier, note = classify(status, headers, body, text)
-            results.append({"domain": d, "url": url, "rank": rank, "status": status,
-                            "tier": tier, "note": note,
-                            "ground_truth": ground_truth(status, body, tier, text)})
+            vendor, outcome, rendering = classify(status, headers, body, text)
+            results.append({
+                "domain": d, "url": url, "rank": rank, "status": status,
+                "vendor": vendor, "outcome": outcome, "rendering": rendering,
+                "stratum": stratum_of(vendor, outcome, rendering),
+                "ground_truth": ground_truth(status, body, outcome, text),
+            })
             done += 1
-            if done % 250 == 0:
-                print("    %d/%d (%.0fs)" % (done, len(domains), time.time() - t0), file=sys.stderr)
+            if done % 1000 == 0:
+                print("    %d/%d (%.0fs)" % (done, len(domains), time.time() - t0),
+                      file=sys.stderr)
 
-    prevalence = {}
+    outcomes, vendors, pairs = {}, {}, {}
     for r in results:
-        prevalence[r["tier"]] = prevalence.get(r["tier"], 0) + 1
-    cf_total = sum(prevalence.get(t, 0) for t in TIERS)
+        outcomes[r["outcome"]] = outcomes.get(r["outcome"], 0) + 1
+        vendors[r["vendor"]] = vendors.get(r["vendor"], 0) + 1
+        key = "%s/%s" % (r["vendor"], r["outcome"])
+        pairs[key] = pairs.get(key, 0) + 1
 
     corpus = []
-    for tier in TIERS:
-        # Best-ranked first, not random: long-tail domains churn, and a corpus that
-        # rots between gate runs silently stops being comparable.
-        pool = sorted((r for r in results if r["tier"] == tier), key=lambda r: r["rank"])
-        take = pool[:args.per_tier]
-        if len(take) < args.per_tier:
-            print("!!  tier %-18s only %d/%d available — widen --sample"
-                  % (tier, len(take), args.per_tier), file=sys.stderr)
+    for stratum in STRATA:
+        pool = [r for r in results if r["stratum"] == stratum]
+        take = select(pool, args.per_stratum)
+        if len(take) < args.per_stratum:
+            print("!!  stratum %-18s only %d/%d — widen --sample"
+                  % (stratum, len(take), args.per_stratum), file=sys.stderr)
         for r in take:
-            corpus.append({k: r[k] for k in ("url", "tier", "rank", "ground_truth")})
+            corpus.append({k: r[k] for k in
+                           ("url", "stratum", "vendor", "outcome", "rendering",
+                            "rank", "ground_truth")})
 
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     json.dump({
         "tranco_list_id": list_id, "probed_on": stamp, "sample_size": len(domains),
-        "seed": args.seed, "allocation": "equal", "per_tier": args.per_tier,
-        "entries": corpus,
-    }, open(os.path.join(args.out, "cf-100.json"), "w"), indent=2)
+        "seed": args.seed, "allocation": "equal", "per_stratum": args.per_stratum,
+        "strata": STRATA, "entries": corpus,
+    }, open(os.path.join(args.out, "corpus.json"), "w"), indent=2)
 
     json.dump({
         "tranco_list_id": list_id, "probed_on": stamp, "sample_size": len(domains),
-        "counts": prevalence,
-        "cloudflare_tier_share": {t: round(prevalence.get(t, 0) / cf_total, 4)
-                                  for t in TIERS} if cf_total else {},
+        "by_outcome": outcomes, "by_vendor": vendors, "by_vendor_outcome": pairs,
     }, open(os.path.join(args.out, "prevalence.json"), "w"), indent=2)
 
     print("\n==> probed %d in %.0fs" % (len(results), time.time() - t0), file=sys.stderr)
-    for k in sorted(prevalence, key=lambda x: -prevalence[x]):
-        print("    %-18s %5d" % (k, prevalence[k]), file=sys.stderr)
-    print("==> corpus: %d entries -> cf-100.json" % len(corpus), file=sys.stderr)
+    print("    outcomes:", dict(sorted(outcomes.items(), key=lambda kv: -kv[1])), file=sys.stderr)
+    print("    vendors :", dict(sorted(vendors.items(), key=lambda kv: -kv[1])), file=sys.stderr)
+    got = {}
+    for e in corpus:
+        got[e["stratum"]] = got.get(e["stratum"], 0) + 1
+    print("==> corpus: %d entries %s -> corpus.json" % (len(corpus), got), file=sys.stderr)
 
 
 if __name__ == "__main__":

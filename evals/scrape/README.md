@@ -1,144 +1,134 @@
-# Scrape corpus — CF-100
+# Scrape corpus
 
-The measuring stick for [JCLAW-1080](https://jira.abundent.com/browse/JCLAW-1080). `cf-100.json`
-is what `./jclaw.sh scrapetest` runs against; `prevalence.json` is what turns its per-tier results
-into a real-world estimate.
+The measuring stick for [JCLAW-1080](https://jira.abundent.com/browse/JCLAW-1080). `corpus.json`
+is what `./jclaw.sh scrapetest` runs against; `prevalence.json` turns its per-stratum results into
+a real-world estimate.
 
-This is **not** an eval suite. `evals/suites/` is deliberately offline — no backend, no network, no
-model call, validated inside `play autotest` by `EvalSuiteConformanceTest`. A corpus of live URLs
-can never be offline, so it lives beside them rather than among them, and the harness follows the
-`loadtest` precedent (live backend, loopback + `X-Loadtest-Auth`) instead.
+The goal it measures is *scrape most websites* — get past WAFs of every vendor, and render
+JavaScript to reach the actual content. Not *get past Cloudflare*, which is a strict subset.
+
+This is **not** an eval suite. `evals/suites/` is deliberately offline — no backend, no network,
+no model call, validated inside `play autotest` by `EvalSuiteConformanceTest`. A corpus of live
+URLs can never be offline, so it lives beside them rather than among them, and the harness follows
+the `loadtest` precedent (live backend, loopback + `X-Loadtest-Auth`) instead.
 
 ## Regenerating
 
 ```bash
-python3 evals/scrape/build_corpus.py --sample 15000 --per-tier 25
+python3 evals/scrape/build_corpus.py --sample 40000 --per-stratum 25
 ```
 
 Stdlib only — one-time data generation, not app code. Downloads the current Tranco list into
 `.cache/` (gitignored, ~22 MB) and probes concurrently. Roughly 20 minutes at `--workers 64`.
 
-## Where the URLs come from
+## Three axes, not one difficulty ladder
 
-No public list of "Cloudflare sites with bot protection enabled" exists — Cloudflare does not
-publish one, and Wappalyzer's commercial dataset records the script's *presence*, not the tier. So
-the corpus is **discovered, not looked up**:
+The first corpus stratified on a single "protection tier" that silently mixed three independent
+properties. That is why its Turnstile tier filled with unprotected sites and scored *better* than
+managed-challenge. Every entry now carries all three:
 
-```
-Tranco top-1M, sampled across log-spaced rank bands   ← popularity list, CF-agnostic
-        ↓  GET, retry once on www.
-   cf-ray header present?                             ← "behind Cloudflare"
-        ↓  read headers + body markers
-   tier assigned from deployed protection             ← never from "we failed"
-        ↓  best-ranked 25 per tier
-   cf-100.json
-```
+| Axis | Values | Determined by |
+|---|---|---|
+| **vendor** | `none`, `cloudflare`, `cloudfront`, `akamai`, `imperva`, `datadome`, `sucuri`, `fastly` | response fingerprints |
+| **outcome** | `served`, `denied`, `challenge`, `interactive`, `unreachable` | what the origin did |
+| **rendering** | `ssr`, `spa` (null unless served) | text vs. markup ratio |
 
-Sampling avoids the head of the list on purpose: the top ranks are big-tech own-infrastructure and
-carry almost no Cloudflare. Within a tier, selection is **best-ranked first, deterministic** —
-long-tail domains churn, and a corpus that rots between gate runs silently stops being comparable.
+They are genuinely independent. CloudFront in front does **not** mean CloudFront is blocking —
+`cloudflare/served` is 20% of the web on its own. `abundent.academy` is `none/served/spa`;
+`twitter.com` is `cloudflare/served/spa`; `nih.gov` is `cloudflare/challenge`.
 
-## Classification
+`vendor: none` means *no vendor this probe can fingerprint*. Plenty of WAFs stay quiet, so treat it
+as an upper bound on unprotected, never a guarantee.
 
-Tier comes from what is *deployed*, never from whether our own client got in. A `403` alone is not
-a tier; if the corpus were labelled by our failures, the benchmark would be circular.
+## Strata
 
-| Tier | Rule |
-|---|---|
-| `open` | `cf-ray`, HTTP 200, real body |
-| `basic` | `cf-ray`, 403/406/429, no challenge markup |
-| `managed-challenge` | `cf-mitigated` header, or `/cdn-cgi/challenge-platform/` in body |
-| `turnstile` | `challenges.cloudflare.com/turnstile` or `cf-turnstile` in body |
-| `other-waf` | no `cf-ray`, but CloudFront / Akamai / DataDome / Imperva / Sucuri / Fastly fingerprint |
-| `not-cloudflare`, `unreachable` | excluded from the corpus |
+Six, 25 each. Stratified on what changes the **fix**, with vendor carried as metadata so the
+per-vendor breakdown falls out of the same run.
 
-`other-waf` is tracked and excluded rather than counted against us — a CloudFront 403 says nothing
-about the target this epic named. `unreachable` is largely Tranco infrastructure domains
-(`gtld-servers.net`, `akamai.net`) that never serve a page; the `www.` retry recovers ~14% of them,
-and those skew to stable well-known sites.
+| Stratum | Meaning | Rung that addresses it |
+|---|---|---|
+| `unprotected-ssr` | no detected WAF, server-rendered | 1 — should be near 100% |
+| `unprotected-spa` | no detected WAF, client-rendered | 3 (rendering) |
+| `edge-served` | behind an edge, serving fine | 1, with fingerprint variance |
+| `denied` | flat 403/406/429 | 2, 4 |
+| `challenge` | interstitial | 2, 3, 4 |
+| `interactive` | Turnstile / DataDome / captcha | 4 |
 
-The probe presents a browser User-Agent, as tech-detection crawlers do: a bot UA trips crude
-UA-based blocking and misreports the tier.
+Within a blocked stratum, selection **round-robins across vendors**. CloudFront is 25× more common
+than DataDome, so rank-order alone would fill `denied` with one vendor and the per-vendor breakdown
+would have nothing to say about the rare ones. Within a vendor, best-ranked first — long-tail
+domains churn, and a corpus that rots between gate runs stops being comparable.
 
 ## Equal allocation, and why the gate depends on it
 
-25 per tier **regardless of natural prevalence**. The corpus is deliberately far more hostile than
-the real web.
+25 per stratum **regardless of natural prevalence**. Measured on 5,500 domains: `interactive` is
+0.3% of the web and `unprotected-ssr` is a large plurality. Proportional sampling would give one or
+two interactive entries — one dashboard change would swing that stratum by 50%.
 
-Proportional sampling would yield 1–4 Turnstile sites. One site changing a dashboard setting would
-swing that tier by 25–100%, and the tiers most worth measuring would be the ones carrying no signal.
+It also makes the aggregate meaningless. Proportionally weighted, rung 1 scores well before any WAF
+capability exists at all, purely off unprotected sites.
 
-This is what makes the epic gate bite. Under equal allocation, 90/100 means a perfect 25/25 on three
-tiers is still only 75 — you need ≥ 60% on the hardest tier to reach 90. Under proportional
-weighting the same threshold is nearly free: if ~75% of Cloudflare origins are unprotected, rung 1
-alone scores ~75 before any Cloudflare capability exists, and you could pass while failing every
-Turnstile site in existence.
+**So: gate on the equal-allocation score, and enforce a per-stratum floor.** An aggregate alone can
+be passed by acing the easy half.
 
-So: **gate on the equal-allocation score. Report the prevalence-weighted score as context.**
-`prevalence.json` carries the observed population distribution for that re-weighting.
-
-## Schema
+## Ground truth
 
 ```jsonc
-// cf-100.json
 {
-  "tranco_list_id": "K9LYW",   // regenerate the identical seed list from this
-  "probed_on": "2026-08-19",   // tiers drift; JCLAW-1091 re-classifies before the gate run
-  "sample_size": 15000,
-  "seed": 1081,
-  "allocation": "equal",
-  "per_tier": 25,
-  "entries": [
-    {
-      "url": "https://example.com",
-      "tier": "open",
-      "rank": 4213,
-      "ground_truth": {
-        "min_chars": 600,
-        "reject_markers": ["/cdn-cgi/challenge-platform/", "just a moment", "..."],
-        "expect_title": "example domain"      // open tier only — see below
-      }
-    }
-  ]
+  "url": "https://example.com",
+  "stratum": "edge-served",
+  "vendor": "cloudflare",
+  "outcome": "served",
+  "rendering": "ssr",
+  "rank": 4213,
+  "ground_truth": {
+    "min_chars": 50,
+    "observed_text": 142,
+    "observed_html": 559,
+    "reject_markers": ["/cdn-cgi/challenge-platform/", "just a moment", "..."],
+    "expect_title": "example domain"
+  }
 }
 ```
 
-### `ground_truth` is the load-bearing field
+**`reject_markers` is the load-bearing field.** A Cloudflare interstitial is valid HTML with a title
+and body text that extracts to a few hundred characters of clean markdown. Without these the
+harness scores "checking your browser" as a success and reports a healthy number while agents
+receive nothing. This is what the known-zero check verifies: a URL that always challenges must
+score 0%, not 60%.
 
-A Cloudflare interstitial is valid HTML. It has a title and body text and extracts to a few hundred
-characters of clean markdown. **Without these assertions the harness scores a challenge page as a
-success** — and would report a healthy number while agents receive nothing but "checking your
-browser".
+**`min_chars` is derived only when the origin served us** — a quarter of observed visible text,
+floor 50, ceiling 500. A blanket 600 scored `example.com` (198 extracted characters, the canonical
+known-one) as blocked. But for a *gated* entry the observation **is the gate**, so deriving a floor
+from it let a 75-character gate page pass — `outschool.com` did exactly that. Those get a fixed
+bar of 500 instead.
 
-`reject_markers` is the half that always applies, and it is what the known-zero validation checks:
-a URL that always challenges must score 0%, not 60%.
+**`observed_text` / `observed_html`** separate a client-rendered app (68 text / 5,515 HTML) from a
+genuinely small page (142 / 559).
 
-`expect_title` is only capturable for origins that already answered the builder, i.e. the `open`
-tier. Protected entries carry negative assertions plus `min_chars`.
-
-`min_chars` is **derived per entry**, at a quarter of the observed visible text (floor 50, ceiling
-500). A blanket 600 scored `example.com` — 198 extracted characters, and the canonical known-one —
-as blocked. `observed_text` and `observed_html` are recorded alongside so a client-rendered app
-(68 text / 5,515 HTML) is distinguishable from a genuinely small page (142 / 559).
-
-## A tier is only assigned when the origin refused
-
-A marker is not a tier. `wiley.com` and `onetrust.com` embed a Turnstile widget and serve 597 and
-1,574 characters of real content; the first corpus labelled them `turnstile`, which put open sites
-in the hardest tier and inverted the whole benchmark — Turnstile scored 60% against
-managed-challenge's 12%.
-
-So a marker names a tier only when the body is also too thin to be a page: `hxuakdlb.com` returns
-200 with **zero** characters behind a Turnstile widget. And thinness alone is not a gate either —
-`example.com` is 142 characters of complete content with no marker at all.
+**`expect_title`** is captured only for served origins and is deliberately **not** gated —
+Readability and the markdown conversion do not reliably preserve it, so gating would manufacture
+failures that say nothing about access. Reported as a secondary signal.
 
 ## What the runtime classifier cannot see
 
 Readability strips scripts, so by the time a page reaches `BlockClassifier` the technical markers
-are gone. A pure-JS Turnstile gate and a client-rendered SPA both extract to nothing and both land
-as `THIN_CONTENT`.
+are gone. A pure-JS gate and a client-rendered SPA both extract to nothing and both land as
+`THIN_CONTENT`.
 
-The corpus tier is the disambiguator: 22 of 28 `THIN_CONTENT` results in the first clean baseline
-sat in the `turnstile` tier (gates), 5 in `open` (genuine SPAs — twitter.com, x.com, roku.com).
-Report reason × tier, never reason alone. JCLAW-1086 gives the classifier the raw response and
-removes the ambiguity at source.
+The corpus axes are the disambiguator — read reason **× stratum**, never reason alone. JCLAW-1086
+gives the classifier the raw response and removes the ambiguity at source.
+
+## The tier is relative to the probe client
+
+Python urllib, curl and OkHttp get different answers from the same origins:
+
+```
+actcklb6.com    python-urllib 200   curl 200   OkHttp → empty
+openai.com      python-urllib 200   curl 403   OkHttp → 403
+```
+
+So `served` means *served to a standard HTTP client with a Chrome UA*. Rung 1 falling short on
+`edge-served` is not a labelling error — it is the fingerprint penalty, and precisely the quantity
+rung 2 exists to recover. Classifying the corpus with the Java stack would make the numbers
+self-consistent and hide the thing worth measuring.

@@ -1,0 +1,4119 @@
+{
+  "tranco_list_id": "JZ8PY",
+  "probed_on": "2026-08-20",
+  "sample_size": 30000,
+  "seed": 1081,
+  "allocation": "equal",
+  "per_stratum": 25,
+  "strata": [
+    "unprotected-ssr",
+    "unprotected-spa",
+    "edge-served",
+    "denied",
+    "challenge",
+    "interactive"
+  ],
+  "entries": [
+    {
+      "url": "https://google.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 1,
+      "ground_truth": {
+        "min_chars": 106,
+        "observed_text": 424,
+        "observed_html": 213168,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://apple.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 10,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 6410,
+        "observed_html": 254250,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://office.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 20,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 2,
+        "observed_html": 79,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.hicloudcam.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 22,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 5,
+        "observed_html": 1728,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://bing.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 29,
+      "ground_truth": {
+        "min_chars": 113,
+        "observed_text": 454,
+        "observed_html": 193028,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "search - microsoft bing"
+      }
+    },
+    {
+      "url": "https://github.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 30,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 7724,
+        "observed_html": 574810,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "github \u00b7 change is constant. github keeps you ahead. \u00b7 github"
+      }
+    },
+    {
+      "url": "https://wikipedia.org",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 31,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 6229,
+        "observed_html": 118274,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "wikipedia"
+      }
+    },
+    {
+      "url": "https://fastly.net",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 33,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 7502,
+        "observed_html": 668039,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "powering the best of the internet | fastly"
+      }
+    },
+    {
+      "url": "https://doubleclick.net",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 37,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 7169,
+        "observed_html": 125234,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "enterprise advertising &amp; analytics solutions - google marketing platform"
+      }
+    },
+    {
+      "url": "https://netflix.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 40,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 3231,
+        "observed_html": 626836,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "netflix malaysia - watch tv shows online, watch movies online"
+      }
+    },
+    {
+      "url": "https://gandi.net",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 44,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 15516,
+        "observed_html": 189320,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "gandi.net - gandi.net: domain names, web hosting, ssl certificates and emails"
+      }
+    },
+    {
+      "url": "https://wordpress.org",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 46,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 3462,
+        "observed_html": 161047,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "blog tool, publishing platform, and cms &#8211; wordpress.org"
+      }
+    },
+    {
+      "url": "https://skype.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 48,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 1408,
+        "observed_html": 61983,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "free online meetings & video calls | microsoft teams"
+      }
+    },
+    {
+      "url": "https://cloud.microsoft",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 50,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 19935,
+        "observed_html": 304881,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "microsoft 365 copilot - sign in"
+      }
+    },
+    {
+      "url": "https://googledomains.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 53,
+      "ground_truth": {
+        "min_chars": 149,
+        "observed_text": 598,
+        "observed_html": 5354,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "google domains"
+      }
+    },
+    {
+      "url": "https://pinterest.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 55,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 467893,
+        "observed_html": 1048508,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "pinterest"
+      }
+    },
+    {
+      "url": "https://yahoo.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 59,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 2668,
+        "observed_html": 507738,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "yahoo! malaysia | mail, weather, search, politics, news, finance, sports and videos"
+      }
+    },
+    {
+      "url": "https://googlesyndication.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 64,
+      "ground_truth": {
+        "min_chars": 106,
+        "observed_text": 424,
+        "observed_html": 213821,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://ntp.org",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 67,
+      "ground_truth": {
+        "min_chars": 289,
+        "observed_text": 1157,
+        "observed_html": 9114,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "ntp: network time protocol"
+      }
+    },
+    {
+      "url": "https://nginx.org",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 75,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 2185,
+        "observed_html": 6468,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://baidu.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 83,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 250717,
+        "observed_html": 687996,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "\u767e\u5ea6\u4e00\u4e0b\uff0c\u4f60\u5c31\u77e5\u9053"
+      }
+    },
+    {
+      "url": "https://windows.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 85,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 5892,
+        "observed_html": 117281,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "experience the power of ai with windows 11 os, computers &amp; apps | microsoft windows"
+      }
+    },
+    {
+      "url": "https://qq.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 90,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 1337,
+        "observed_html": 113521,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.opera.com",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 91,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 3491,
+        "observed_html": 183469,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "opera web browser | faster, safer, smarter | opera"
+      }
+    },
+    {
+      "url": "https://www.mozilla.org",
+      "stratum": "unprotected-ssr",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 92,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 10689,
+        "observed_html": 115081,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "mozilla - internet for people, not profit (us)"
+      }
+    },
+    {
+      "url": "https://youtube.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 9,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 163,
+        "observed_html": 871212,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://instagram.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 11,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 9,
+        "observed_html": 610508,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "instagram"
+      }
+    },
+    {
+      "url": "https://youtu.be",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 47,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 163,
+        "observed_html": 870932,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://icloud.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 57,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 9,
+        "observed_html": 30960,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://msn.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 62,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 3,
+        "observed_html": 46675,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://spotify.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 65,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 20,
+        "observed_html": 156090,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "spotify \u2013 web player"
+      }
+    },
+    {
+      "url": "https://myfritz.net",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 70,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 149,
+        "observed_html": 6883,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "myfritz!net"
+      }
+    },
+    {
+      "url": "https://reddit.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 106,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 6,
+        "observed_html": 8393,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://registrar-servers.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 116,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 81,
+        "observed_html": 2027,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "home - registrar-servers.com"
+      }
+    },
+    {
+      "url": "https://forms.gle",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 145,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 0,
+        "observed_html": 34774,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://tumblr.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 160,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 119,
+        "observed_html": 117098,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://twitch.tv",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 220,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 6,
+        "observed_html": 197784,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://weibo.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 285,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 19,
+        "observed_html": 9038,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "sina visitor system"
+      }
+    },
+    {
+      "url": "https://naver.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 343,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 112,
+        "observed_html": 215222,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.kwai-pro.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 390,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 0,
+        "observed_html": 6474,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://vivoglobal.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 400,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 104,
+        "observed_html": 2165,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "\u7ef4\u6c83\u79fb\u52a8\u901a\u4fe1\u6709\u9650\u516c\u53f8"
+      }
+    },
+    {
+      "url": "https://www.kwaipros.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 426,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 0,
+        "observed_html": 6474,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://360yield.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 563,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 22,
+        "observed_html": 302564,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "improve digital origin"
+      }
+    },
+    {
+      "url": "https://shopee.com.br",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 564,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 0,
+        "observed_html": 156290,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://threads.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 605,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 7,
+        "observed_html": 259230,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://imgur.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 655,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 158,
+        "observed_html": 6675,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "imgur: the magic of the internet"
+      }
+    },
+    {
+      "url": "https://shopee.co.id",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 731,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 0,
+        "observed_html": 158139,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://teads.tv",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 792,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 53,
+        "observed_html": 8345,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "teads.com"
+      }
+    },
+    {
+      "url": "https://daum.net",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 814,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 87,
+        "observed_html": 581464,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://me.com",
+      "stratum": "unprotected-spa",
+      "vendor": "none",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 844,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 9,
+        "observed_html": 30960,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://cloudflare.com",
+      "stratum": "edge-served",
+      "vendor": "cloudflare",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 2,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 2459,
+        "observed_html": 1048228,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "cloudflare: build for the agent era"
+      }
+    },
+    {
+      "url": "https://microsoft.com",
+      "stratum": "edge-served",
+      "vendor": "akamai",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 6,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 2122,
+        "observed_html": 201252,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "your request has been blocked. this could be due to several reasons."
+      }
+    },
+    {
+      "url": "https://amazonaws.com",
+      "stratum": "edge-served",
+      "vendor": "cloudfront",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 8,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 9946,
+        "observed_html": 473880,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "cloud computing services - amazon web services (aws)"
+      }
+    },
+    {
+      "url": "https://digicert.com",
+      "stratum": "edge-served",
+      "vendor": "imperva",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 45,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 5262,
+        "observed_html": 69518,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "tls/ssl certificate authority | leader in digital trust | digicert"
+      }
+    },
+    {
+      "url": "https://fastcompany.com",
+      "stratum": "edge-served",
+      "vendor": "datadome",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 1897,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 87419,
+        "observed_html": 1046276,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "fast company | business news, innovation, technology, work life and design"
+      }
+    },
+    {
+      "url": "https://nngroup.com",
+      "stratum": "edge-served",
+      "vendor": "sucuri",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 6731,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 4732,
+        "observed_html": 107655,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "nielsen norman group: ux training, consulting, &amp; research - nn/g"
+      }
+    },
+    {
+      "url": "https://hygiena.com",
+      "stratum": "edge-served",
+      "vendor": "fastly",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 306502,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 6036,
+        "observed_html": 980479,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "innovative diagnostic solutions for hygiene &amp; food safety | hygiena"
+      }
+    },
+    {
+      "url": "https://twitter.com",
+      "stratum": "edge-served",
+      "vendor": "cloudflare",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 16,
+      "ground_truth": {
+        "min_chars": 109,
+        "observed_text": 436,
+        "observed_html": 35097,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "x. it\u2019s what\u2019s happening / x"
+      }
+    },
+    {
+      "url": "https://azure.com",
+      "stratum": "edge-served",
+      "vendor": "akamai",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 28,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 21648,
+        "observed_html": 486993,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "cloud computing services | microsoft azure"
+      }
+    },
+    {
+      "url": "https://ui.com",
+      "stratum": "edge-served",
+      "vendor": "cloudfront",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 107,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 2095,
+        "observed_html": 423763,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "unifi - rethinking it - ubiquiti"
+      }
+    },
+    {
+      "url": "https://dnsmadeeasy.com",
+      "stratum": "edge-served",
+      "vendor": "imperva",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 315,
+      "ground_truth": {
+        "min_chars": 201,
+        "observed_text": 805,
+        "observed_html": 48569,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "managed dns business services &amp; solutions provider | a digicert company"
+      }
+    },
+    {
+      "url": "https://inc.com",
+      "stratum": "edge-served",
+      "vendor": "datadome",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 2298,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 32039,
+        "observed_html": 1047977,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "inc. | tech and business news for entrepreneurs and leaders"
+      }
+    },
+    {
+      "url": "https://riovagas.com.br",
+      "stratum": "edge-served",
+      "vendor": "sucuri",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 9576,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 3091,
+        "observed_html": 227749,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "riovagas: o maior site de empregos do rio!"
+      }
+    },
+    {
+      "url": "https://linkedin.com",
+      "stratum": "edge-served",
+      "vendor": "cloudflare",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 18,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 5120,
+        "observed_html": 139760,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "linkedin: log in or sign up"
+      }
+    },
+    {
+      "url": "https://tiktok.com",
+      "stratum": "edge-served",
+      "vendor": "akamai",
+      "outcome": "served",
+      "rendering": "spa",
+      "rank": 54,
+      "ground_truth": {
+        "min_chars": 50,
+        "observed_text": 22,
+        "observed_html": 393394,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "tiktok - make your day"
+      }
+    },
+    {
+      "url": "https://www.europa.eu",
+      "stratum": "edge-served",
+      "vendor": "cloudfront",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 114,
+      "ground_truth": {
+        "min_chars": 98,
+        "observed_text": 392,
+        "observed_html": 18133,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "language selection | european union"
+      }
+    },
+    {
+      "url": "https://elconfidencial.com",
+      "stratum": "edge-served",
+      "vendor": "imperva",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 1187,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 26063,
+        "observed_html": 552067,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "el confidencial - el diario de los lectores influyentes"
+      }
+    },
+    {
+      "url": "https://kiabi.com",
+      "stratum": "edge-served",
+      "vendor": "datadome",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 7343,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 8121,
+        "observed_html": 344838,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "kiabi - v\u00eatements, chaussures &amp; accessoires - mode \u00e0 petits prix"
+      }
+    },
+    {
+      "url": "https://archaeology.org",
+      "stratum": "edge-served",
+      "vendor": "sucuri",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 36098,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 323211,
+        "observed_html": 632003,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://x.com",
+      "stratum": "edge-served",
+      "vendor": "cloudflare",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 52,
+      "ground_truth": {
+        "min_chars": 109,
+        "observed_text": 436,
+        "observed_html": 35098,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "x. it\u2019s what\u2019s happening / x"
+      }
+    },
+    {
+      "url": "https://samsung.com",
+      "stratum": "edge-served",
+      "vendor": "akamai",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 93,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 8397,
+        "observed_html": 353045,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "samsung malaysia | smartphones, tvs, home appliances"
+      }
+    },
+    {
+      "url": "https://amazonvideo.com",
+      "stratum": "edge-served",
+      "vendor": "cloudfront",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 121,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 1796,
+        "observed_html": 497596,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "welcome to prime video"
+      }
+    },
+    {
+      "url": "https://proofpoint.com",
+      "stratum": "edge-served",
+      "vendor": "imperva",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 2071,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 9835,
+        "observed_html": 142039,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "enterprise cybersecurity solutions, services &amp; training | proofpoint us"
+      }
+    },
+    {
+      "url": "https://tecnomat.it",
+      "stratum": "edge-served",
+      "vendor": "datadome",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 9694,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 27126,
+        "observed_html": 1006107,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "edilizia, ristrutturazione casa, arredo bagno | tecnomat"
+      }
+    },
+    {
+      "url": "https://df.eu",
+      "stratum": "edge-served",
+      "vendor": "sucuri",
+      "outcome": "served",
+      "rendering": "ssr",
+      "rank": 56124,
+      "ground_truth": {
+        "min_chars": 300,
+        "observed_text": 7397,
+        "observed_html": 68550,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ],
+        "expect_title": "domains, hosting und homepage von domainfactory"
+      }
+    },
+    {
+      "url": "https://appsflyersdk.com",
+      "stratum": "denied",
+      "vendor": "cloudfront",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 36,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 62,
+        "observed_html": 146,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://office365.com",
+      "stratum": "denied",
+      "vendor": "none",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 109,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 108,
+        "observed_html": 1892,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://godaddy.com",
+      "stratum": "denied",
+      "vendor": "akamai",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 151,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 289,
+        "observed_html": 369,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://hostgator.com.br",
+      "stratum": "denied",
+      "vendor": "cloudflare",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 661,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 704,
+        "observed_html": 7229,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://sonobi.com",
+      "stratum": "denied",
+      "vendor": "sucuri",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 2076,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 105,
+        "observed_html": 75193,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://obramat.es",
+      "stratum": "denied",
+      "vendor": "datadome",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 9644,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 0,
+        "observed_html": 621,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://shalltry.com",
+      "stratum": "denied",
+      "vendor": "cloudfront",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 311,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 26,
+        "observed_html": 111,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://comcast.net",
+      "stratum": "denied",
+      "vendor": "none",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 221,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 283,
+        "observed_html": 363,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://webex.com",
+      "stratum": "denied",
+      "vendor": "akamai",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 184,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 287,
+        "observed_html": 367,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://blackhub.team",
+      "stratum": "denied",
+      "vendor": "cloudflare",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 753,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 40,
+        "observed_html": 914,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://pathologyoutlines.com",
+      "stratum": "denied",
+      "vendor": "sucuri",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 49239,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 5396,
+        "observed_html": 56336,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://mining-technology.com",
+      "stratum": "denied",
+      "vendor": "datadome",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 53082,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 125,
+        "observed_html": 417,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://trustpilot.com",
+      "stratum": "denied",
+      "vendor": "cloudfront",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 345,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 185,
+        "observed_html": 991,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://unsplash.com",
+      "stratum": "denied",
+      "vendor": "none",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 398,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 1538,
+        "observed_html": 7701,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://oracle.com",
+      "stratum": "denied",
+      "vendor": "akamai",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 197,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 475,
+        "observed_html": 1450,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://btloader.com",
+      "stratum": "denied",
+      "vendor": "cloudflare",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 979,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 9,
+        "observed_html": 10,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://lofigames.com",
+      "stratum": "denied",
+      "vendor": "sucuri",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 525068,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 105,
+        "observed_html": 75193,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://offshore-technology.com",
+      "stratum": "denied",
+      "vendor": "datadome",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 97023,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 125,
+        "observed_html": 417,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.deviantart.com",
+      "stratum": "denied",
+      "vendor": "cloudfront",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 560,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 553,
+        "observed_html": 919,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://featureassets.org",
+      "stratum": "denied",
+      "vendor": "none",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 464,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 19,
+        "observed_html": 19,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://ebay.com",
+      "stratum": "denied",
+      "vendor": "akamai",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 211,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 207,
+        "observed_html": 1831,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://hollywoodbets.net",
+      "stratum": "denied",
+      "vendor": "cloudflare",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 1333,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 797,
+        "observed_html": 4928,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://lampcommerce.com",
+      "stratum": "denied",
+      "vendor": "sucuri",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 564061,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 765,
+        "observed_html": 2375,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://tremorhub.com",
+      "stratum": "denied",
+      "vendor": "cloudfront",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 1785,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 120,
+        "observed_html": 243,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://behance.net",
+      "stratum": "denied",
+      "vendor": "none",
+      "outcome": "denied",
+      "rendering": null,
+      "rank": 499,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 0,
+        "observed_html": 453,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.roblox.com",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 58,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 6,
+        "observed_html": 64963,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://apa.org",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 1101,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 0,
+        "observed_html": 212,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://bt.com",
+      "stratum": "challenge",
+      "vendor": "cloudfront",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 3180,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 79,
+        "observed_html": 8484,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://itorrents-igruha.org",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 9420,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 141,
+        "observed_html": 902,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://nih.gov",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 134,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 58,
+        "observed_html": 5743,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://ultradns.com",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 1425,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 82,
+        "observed_html": 863,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.nrg.com",
+      "stratum": "challenge",
+      "vendor": "cloudfront",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 86520,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 66,
+        "observed_html": 9377,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://ren.tv",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 12408,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 141,
+        "observed_html": 902,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.epicgames.com",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 159,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 77,
+        "observed_html": 24943,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://acs.org",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 1796,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 83,
+        "observed_html": 846,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://isbns.net",
+      "stratum": "challenge",
+      "vendor": "cloudfront",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 109620,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 130,
+        "observed_html": 6196,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://micro-semiconductor.com",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 44412,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 141,
+        "observed_html": 10206,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://w3.org",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 185,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 58,
+        "observed_html": 5717,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://anses.gob.ar",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 2230,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 82,
+        "observed_html": 954,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://mkhardware.com.my",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 138964,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 179,
+        "observed_html": 1697,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://sciencedirect.com",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 214,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 674,
+        "observed_html": 25903,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://msu.edu",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 2417,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 82,
+        "observed_html": 845,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://hellosole.com",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 207006,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 229,
+        "observed_html": 6192,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://sourceforge.net",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 230,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 58,
+        "observed_html": 5811,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://cox.net",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 3169,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 83,
+        "observed_html": 926,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://component-world.de",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 231644,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 141,
+        "observed_html": 10206,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.hostgator.com",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 316,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 763,
+        "observed_html": 387891,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://unfccc.int",
+      "stratum": "challenge",
+      "vendor": "imperva",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 4078,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 0,
+        "observed_html": 212,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://diyaudiocart.com",
+      "stratum": "challenge",
+      "vendor": "none",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 321138,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 229,
+        "observed_html": 6192,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://cookiedatabase.org",
+      "stratum": "challenge",
+      "vendor": "cloudflare",
+      "outcome": "challenge",
+      "rendering": null,
+      "rank": 376,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 58,
+        "observed_html": 5729,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://researchgate.net",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 217,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 60,
+        "observed_html": 1717,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.etsy.com",
+      "stratum": "interactive",
+      "vendor": "datadome",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 236,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 52,
+        "observed_html": 776,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://reuters.com",
+      "stratum": "interactive",
+      "vendor": "cloudfront",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 274,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 55,
+        "observed_html": 774,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://liquipedia.net",
+      "stratum": "interactive",
+      "vendor": "none",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 2064,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 31,
+        "observed_html": 2059,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://allaboutcookies.org",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 727,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 63,
+        "observed_html": 782,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://yelp.com",
+      "stratum": "interactive",
+      "vendor": "datadome",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 643,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 52,
+        "observed_html": 779,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://wsj.com",
+      "stratum": "interactive",
+      "vendor": "cloudfront",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 350,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 51,
+        "observed_html": 770,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://prom.ua",
+      "stratum": "interactive",
+      "vendor": "none",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 5301,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 102,
+        "observed_html": 2155,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://unhcr.org",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 3941,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 1131,
+        "observed_html": 182504,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://allegro.pl",
+      "stratum": "interactive",
+      "vendor": "datadome",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 771,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 54,
+        "observed_html": 780,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://tripadvisor.com",
+      "stratum": "interactive",
+      "vendor": "cloudfront",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 561,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 59,
+        "observed_html": 778,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://sat.co.id",
+      "stratum": "interactive",
+      "vendor": "none",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 9931,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 159,
+        "observed_html": 20272,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://g2.com",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 4046,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 50,
+        "observed_html": 1707,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://idealista.com",
+      "stratum": "interactive",
+      "vendor": "datadome",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 1242,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 57,
+        "observed_html": 776,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://leboncoin.fr",
+      "stratum": "interactive",
+      "vendor": "cloudfront",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 1188,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 56,
+        "observed_html": 771,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://dvrlists.com",
+      "stratum": "interactive",
+      "vendor": "none",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 11439,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 160,
+        "observed_html": 5838,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://klook.com",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 6223,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 53,
+        "observed_html": 780,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://www.idealista.it",
+      "stratum": "interactive",
+      "vendor": "datadome",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 1386,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 56,
+        "observed_html": 775,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://shutterstock.com",
+      "stratum": "interactive",
+      "vendor": "cloudfront",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 1769,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 60,
+        "observed_html": 787,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://mconvert.net",
+      "stratum": "interactive",
+      "vendor": "none",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 23888,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 31,
+        "observed_html": 1034,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://petco.com",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 8310,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 53,
+        "observed_html": 1707,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://immobiliare.it",
+      "stratum": "interactive",
+      "vendor": "datadome",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 1442,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 58,
+        "observed_html": 774,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://marketwatch.com",
+      "stratum": "interactive",
+      "vendor": "cloudfront",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 1833,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 59,
+        "observed_html": 778,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://mindfactory.de",
+      "stratum": "interactive",
+      "vendor": "none",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 39394,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 183,
+        "observed_html": 2054,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    },
+    {
+      "url": "https://justanswer.com",
+      "stratum": "interactive",
+      "vendor": "cloudflare",
+      "outcome": "interactive",
+      "rendering": null,
+      "rank": 9044,
+      "ground_truth": {
+        "min_chars": 500,
+        "observed_text": 58,
+        "observed_html": 1715,
+        "reject_markers": [
+          "/cdn-cgi/challenge-platform/",
+          "just a moment",
+          "cf_chl_opt",
+          "cf-please-wait",
+          "_incapsula_resource",
+          "checking your browser",
+          "challenges.cloudflare.com/turnstile",
+          "cf-turnstile",
+          "captcha-delivery.com",
+          "geo.captcha-delivery",
+          "g-recaptcha",
+          "hcaptcha.com/1/api.js"
+        ]
+      }
+    }
+  ]
+}

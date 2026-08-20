@@ -122,14 +122,17 @@ public class ScrapeHarnessTest extends UnitTest {
     @Test
     public void harnessScoresACorpusWithoutTouchingTheNetwork() throws Exception {
         var json = """
-                {"tranco_list_id":"TEST","probed_on":"2026-08-19","allocation":"equal","per_tier":1,
+                {"tranco_list_id":"TEST","probed_on":"2026-08-20","allocation":"equal",
+                 "per_stratum":1,"strata":["unprotected-ssr","interactive"],
                  "entries":[
-                  {"url":"https://ok.test","tier":"open","rank":1,
+                  {"url":"https://ok.test","stratum":"unprotected-ssr","vendor":"none",
+                   "outcome":"served","rendering":"ssr","rank":1,
                    "ground_truth":{"min_chars":600,"reject_markers":["just a moment"]}},
-                  {"url":"https://blocked.test","tier":"turnstile","rank":2,
-                   "ground_truth":{"min_chars":600,"reject_markers":["just a moment"]}}]}
+                  {"url":"https://blocked.test","stratum":"interactive","vendor":"datadome",
+                   "outcome":"interactive","rendering":null,"rank":2,
+                   "ground_truth":{"min_chars":500,"reject_markers":["just a moment"]}}]}
                 """;
-        var f = Files.createTempFile("cf-corpus", ".json");
+        var f = Files.createTempFile("scrape-corpus", ".json");
         Files.writeString(f, json);
         var corpus = ScrapeCorpus.load(f);
         assertTrue(corpus.isEqualAllocation());
@@ -140,8 +143,14 @@ public class ScrapeHarnessTest extends UnitTest {
         assertEquals(2, rep.attempted());
         assertEquals(1, rep.ok());
         assertEquals(50.0, rep.rate(), 0.01);
-        assertEquals(100.0, rep.byTier().get("open").rate(), 0.01);
-        assertEquals(0.0, rep.byTier().get("turnstile").rate(), 0.01);
+        assertEquals(100.0, rep.byStratum().get("unprotected-ssr").rate(), 0.01);
+        assertEquals(0.0, rep.byStratum().get("interactive").rate(), 0.01);
+        // Per-vendor is what says which WAFs we get past; an aggregate cannot.
+        assertEquals(0.0, rep.byVendor().get("datadome").rate(), 0.01);
+        assertEquals(100.0, rep.byVendor().get("none").rate(), 0.01);
+        // rendering is null for gated entries and must not become a bucket
+        assertFalse(rep.byRendering().containsKey("null"));
+        assertEquals(1, rep.byRendering().get("ssr").total());
         Files.deleteIfExists(f);
     }
 

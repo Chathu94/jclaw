@@ -860,7 +860,7 @@ Options:
   --out FILE         Write the full JSON report to FILE.
 
 Build or refresh the corpus first:
-  python3 evals/scrape/build_corpus.py --sample 15000 --per-tier 25
+  python3 evals/scrape/build_corpus.py --sample 40000 --per-stratum 25
 USAGE
 }
 
@@ -3481,9 +3481,9 @@ do_scrapetest() {
     done
 
     cd "$SCRIPT_DIR"
-    if [[ ! -f evals/scrape/cf-100.json ]]; then
-        echo "Error: no corpus at evals/scrape/cf-100.json."
-        echo "       Build it: python3 evals/scrape/build_corpus.py --sample 15000 --per-tier 25"
+    if [[ ! -f evals/scrape/corpus.json ]]; then
+        echo "Error: no corpus at evals/scrape/corpus.json."
+        echo "       Build it: python3 evals/scrape/build_corpus.py --sample 40000 --per-stratum 25"
         exit 1
     fi
 
@@ -3508,7 +3508,7 @@ do_scrapetest() {
     [[ -n "$concurrency" ]] && body+=$(printf ',"concurrency":%s' "$concurrency")
     body+='}'
 
-    echo "==> Running CF-100 against rung $rung (this makes ~100 outbound requests)"
+    echo "==> Running corpus against rung $rung"
     local tmp status
     tmp=$(mktemp)
     status=$(curl -s -o "$tmp" -w '%{http_code}' \
@@ -3526,14 +3526,22 @@ do_scrapetest() {
     python3 - "$tmp" <<'PYSUM'
 import json, sys
 r = json.load(open(sys.argv[1]))
+def table(title, d, order=None):
+    keys = [k for k in (order or []) if k in d] + [k for k in d if not order or k not in order]
+    print("  %-20s %6s %6s %8s" % (title, "ok", "total", "rate"))
+    for k in keys:
+        sc = d[k]
+        print("  %-20s %6d %6d %7.1f%%" % (k, sc["ok"], sc["total"], sc["rate"]))
+    print()
+STRATA = ["unprotected-ssr", "unprotected-spa", "edge-served",
+          "denied", "challenge", "interactive"]
 print()
 print("  %-22s %s" % ("rung", r["rung"]))
 print("  %-22s %d/%d = %.1f%%" % ("access rate", r["ok"], r["attempted"], r["rate"]))
 print()
-print("  %-20s %6s %6s %8s" % ("tier", "ok", "total", "rate"))
-for tier, sc in r["byTier"].items():
-    print("  %-20s %6d %6d %7.1f%%" % (tier, sc["ok"], sc["total"], sc["rate"]))
-print()
+table("stratum", r["byStratum"], STRATA)
+table("edge vendor", r["byVendor"])
+table("rendering", r["byRendering"])
 print("  reasons:")
 for reason, n in sorted(r["byReason"].items(), key=lambda kv: -kv[1]):
     print("    %-16s %4d" % (reason, n))
