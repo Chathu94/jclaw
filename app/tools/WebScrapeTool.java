@@ -118,6 +118,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private record Page(String url, String text) {}
 
+    /** A frontier URL the guard declined, kept apart from {@link Page} so a refusal
+     *  never spends a slot in the page budget. */
+    private record Refusal(String url, String why) {}
+
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
@@ -136,6 +140,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 0, configMaxDepth());
         boolean sameHostOnly = !args.has(ARG_SAME_HOST) || args.get(ARG_SAME_HOST).getAsBoolean();
 
+        try {
+            SsrfGuard.assertSafeScheme(seed);
+        } catch (SecurityException e) {
+            return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
+        }
         return crawl(seed, maxPages, maxDepth, sameHostOnly);
     }
 
@@ -145,6 +154,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var queue = new ArrayDeque<Hop>();
         var seen = new LinkedHashSet<String>();
         var pages = new ArrayList<Page>();
+        var refused = new ArrayList<Refusal>();
 
         queue.add(new Hop(seed, 0));
         seen.add(canonical(seed));
@@ -167,6 +177,23 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             }
 
             var hop = queue.poll();
+
+            // Re-check every frontier URL, not just the seed. A crawl takes its next
+            // targets from someone else's markup, so the seed being safe says nothing
+            // about the links on it.
+            //
+            // This is not the primary guard — SsrfGuard.SAFE_DNS is, and it must be,
+            // because a hostname's resolution can change between any check and the
+            // connect that follows it. What this adds is refusing a blocked literal
+            // before a socket is opened, without spending a page slot, and reporting
+            // it as a refusal rather than as a generic fetch failure.
+            try {
+                SsrfGuard.assertSafeScheme(hop.uri());
+            } catch (SecurityException e) {
+                refused.add(new Refusal(hop.uri().toString(), e.getMessage()));
+                continue;
+            }
+
             WebExtraction.FetchResult fetched;
             try {
                 fetched = WebExtraction.fetch(hop.uri().toString(), CLIENT, HEADERS);
@@ -189,7 +216,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (stoppedBecause == null && !queue.isEmpty()) {
             stoppedBecause = "queue exhausted";
         }
-        return render(seed, pages, maxDepth, sameHostOnly, stoppedBecause, queue.size());
+        return render(seed, pages, refused, maxDepth, sameHostOnly, stoppedBecause, queue.size());
     }
 
     private static void enqueueLinks(WebExtraction.FetchResult fetched, URI seed, int depth,
@@ -236,12 +263,22 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return m == null || m.isBlank() ? e.getClass().getSimpleName() : m;
     }
 
-    private static String render(URI seed, List<Page> pages, int maxDepth, boolean sameHostOnly,
+    private static String render(URI seed, List<Page> pages, List<Refusal> refused,
+                                 int maxDepth, boolean sameHostOnly,
                                  String stoppedBecause, int unvisited) {
         var sb = new StringBuilder();
         sb.append("Scraped %d page%s from %s (depth \u2264 %d, %s)\n"
                 .formatted(pages.size(), pages.size() == 1 ? "" : "s", seed,
                         maxDepth, sameHostOnly ? "same host only" : "any host"));
+        if (!refused.isEmpty()) {
+            // Named, not merely counted: an operator debugging an allowlist needs to
+            // know which host was declined and why.
+            sb.append("Refused %d link%s:\n".formatted(
+                    refused.size(), refused.size() == 1 ? "" : "s"));
+            for (var r : refused) {
+                sb.append("  - %s \u2014 %s\n".formatted(r.url(), r.why()));
+            }
+        }
         if (unvisited > 0) {
             // Say what was left behind rather than let the result read as complete.
             sb.append("Stopped: %s \u2014 %d discovered page%s not read.\n"
