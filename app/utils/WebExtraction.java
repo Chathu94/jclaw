@@ -19,6 +19,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -219,6 +221,42 @@ public final class WebExtraction {
 
         // 3. Binary document (PDF / Office / …) → Tika text extraction.
         return extractWithTika(body, contentType, fetched.finalUrl());
+    }
+
+    /**
+     * Absolute http(s) links from an HTML response, in document order, deduplicated.
+     *
+     * <p>Resolved against the response's <em>final</em> URL rather than the requested
+     * one, so relative hrefs on a page reached through a redirect resolve against
+     * where the page actually came from.
+     *
+     * <p>Empty for any non-HTML response — a crawl has nothing to follow out of a PDF.
+     */
+    public static List<URI> links(FetchResult fetched) {
+        if (!isHtml(fetched.contentType(), fetched.body())) {
+            return List.of();
+        }
+        var html = new String(fetched.body(), charsetFor(fetched.contentType()));
+        var out = new LinkedHashSet<URI>();
+        for (var a : Jsoup.parse(html, fetched.finalUrl()).select("a[href]")) {
+            var abs = a.attr("abs:href");
+            if (abs.isBlank()) {
+                continue;
+            }
+            try {
+                var uri = URI.create(abs);
+                var scheme = uri.getScheme();
+                // mailto:, javascript:, tel: and friends are not crawlable, and
+                // SsrfGuard would refuse them one layer down anyway.
+                if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                        && uri.getHost() != null) {
+                    out.add(uri);
+                }
+            } catch (IllegalArgumentException _) {
+                // Malformed href on someone else's page — skip it, don't fail the crawl.
+            }
+        }
+        return List.copyOf(out);
     }
 
     /**

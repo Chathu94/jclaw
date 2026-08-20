@@ -32,6 +32,7 @@ import tools.SubagentYieldTool;
 import tools.TaskTool;
 import tools.UserGuideTool;
 import tools.WebFetchTool;
+import tools.WebScrapeTool;
 import tools.WebSearchTool;
 
 import java.util.ArrayList;
@@ -80,6 +81,9 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new DocumentsTool());
         toolList.add(new AppInstallTool()); // JCLAW-768: sandbox-safe hosted-app stage/validate/install
         toolList.add(new WebFetchTool());
+        // JCLAW-1083: multi-page sibling of web_fetch — same extraction chain,
+        // plus a frontier and a budget.
+        toolList.add(new WebScrapeTool());
         toolList.add(new WebSearchTool());
         // JCLAW-911: printer — mDNS discovery + JVM-native printing (IPP, raw
         // socket, LPD). Registered unconditionally so it appears on the Tools
