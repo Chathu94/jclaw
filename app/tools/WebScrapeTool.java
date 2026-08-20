@@ -12,12 +12,13 @@ import utils.WebExtraction;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 
 /**
  * Read a page and the pages it links to, as one block of Markdown.
@@ -60,6 +61,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_MAX_DEPTH = "web_scrape.max-depth";
     private static final String CFG_TIMEOUT_SECONDS = "web_scrape.timeout-seconds";
     private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
+    private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
 
     /** Ceilings an operator can lower but the model cannot raise. This is a tool call
      *  inside a conversation, not a background crawler: the caller is waiting, and the
@@ -67,6 +69,17 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final int DEFAULT_MAX_PAGES = 25;
     private static final int DEFAULT_MAX_DEPTH = 2;
     private static final int DEFAULT_TIMEOUT_SECONDS = 60;
+
+    /** Outbound fan-out. Deliberately operator config and never a tool argument:
+     *  fan-out is a resource knob, not a task-shaping one, so it belongs beside
+     *  {@code dispatcher.llm.maxRequestsPerHost} rather than in a model-supplied
+     *  argument. Raising it cannot make a crawl ruder — per-host pacing
+     *  ({@link RobotsCache#awaitSlot}) claims slots atomically, so concurrent
+     *  workers on one host queue onto consecutive slots instead of firing together.
+     *  What it buys is overlapping round-trip time, turning a latency-bound crawl
+     *  into a pacing-bound one. */
+    private static final int DEFAULT_CONCURRENCY = 4;
+    private static final int MAX_CONCURRENCY = 16;
 
     /** Total budget across every page, matching what one web_fetch may return. */
     private static final int MAX_TOTAL_CHARS = WebExtraction.MAX_TEXT_LENGTH;
@@ -121,8 +134,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Holds no handles between calls and writes nothing to disk. */
     @Override public boolean parallelSafe() { return true; }
 
-    private record Hop(URI uri, int depth) {}
-
     private record Page(String url, String text) {}
 
     /** A frontier URL the guard declined, kept apart from {@link Page} so a refusal
@@ -158,103 +169,150 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly) {
         var deadline = System.nanoTime()
                 + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
-        var queue = new ArrayDeque<Hop>();
         var seen = new LinkedHashSet<String>();
         var pages = new ArrayList<Page>();
         var refused = new ArrayList<Refusal>();
+        boolean respectRobots = respectRobots();
 
-        queue.add(new Hop(seed, 0));
+        var level = new ArrayList<URI>(List.of(seed));
         seen.add(canonical(seed));
-
+        int depth = 0;
         String stoppedBecause = null;
         int totalChars = 0;
+        int unvisited = 0;
 
-        while (!queue.isEmpty()) {
-            if (pages.size() >= maxPages) {
-                stoppedBecause = "page budget (%d) reached".formatted(maxPages);
-                break;
-            }
-            if (System.nanoTime() > deadline) {
-                stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
-                break;
-            }
-            if (totalChars >= MAX_TOTAL_CHARS) {
-                stoppedBecause = "content budget (%d characters) reached".formatted(MAX_TOTAL_CHARS);
-                break;
-            }
+        try (var pool = Executors.newFixedThreadPool(configConcurrency())) {
+            while (!level.isEmpty()) {
+                // Admission runs single-threaded, before any work is submitted. Both
+                // checks are cheap and rejecting here keeps `seen`, the refusal list
+                // and the budget free of synchronisation.
+                var admitted = new ArrayList<URI>();
+                for (var uri : level) {
+                    try {
+                        SsrfGuard.assertSafeScheme(uri);
+                    } catch (SecurityException e) {
+                        refused.add(new Refusal(uri.toString(), e.getMessage()));
+                        continue;
+                    }
+                    if (respectRobots && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
+                        refused.add(new Refusal(uri.toString(), "disallowed by robots.txt"));
+                        continue;
+                    }
+                    admitted.add(uri);
+                }
 
-            var hop = queue.poll();
+                // Slice to the remaining budget before submitting, so the page count is
+                // exact without workers racing on a shared counter.
+                int room = maxPages - pages.size();
+                if (room <= 0) {
+                    stoppedBecause = "page budget (%d) reached".formatted(maxPages);
+                    unvisited += admitted.size();
+                    break;
+                }
+                if (admitted.size() > room) {
+                    // Truncating a level to the remaining budget IS the stop reason.
+                    // Leaving it unset reported "Stopped: null" alongside a non-zero
+                    // unread count.
+                    unvisited += admitted.size() - room;
+                    admitted = new ArrayList<>(admitted.subList(0, room));
+                    stoppedBecause = "page budget (%d) reached".formatted(maxPages);
+                }
+                if (admitted.isEmpty()) {
+                    break;
+                }
 
-            // Re-check every frontier URL, not just the seed. A crawl takes its next
-            // targets from someone else's markup, so the seed being safe says nothing
-            // about the links on it.
-            //
-            // This is not the primary guard — SsrfGuard.SAFE_DNS is, and it must be,
-            // because a hostname's resolution can change between any check and the
-            // connect that follows it. What this adds is refusing a blocked literal
-            // before a socket is opened, without spending a page slot, and reporting
-            // it as a refusal rather than as a generic fetch failure.
-            try {
-                SsrfGuard.assertSafeScheme(hop.uri());
-            } catch (SecurityException e) {
-                refused.add(new Refusal(hop.uri().toString(), e.getMessage()));
-                continue;
-            }
+                var futures = admitted.stream()
+                        .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots)))
+                        .toList();
 
-            // Robots and pacing are separate controls on purpose. respect-robots=false
-            // says "ignore this site's directives", not "hammer it" — so the per-host
-            // pacing stays on either way. Getting banned is the failure mode both exist
-            // to prevent, and only one of them is a matter of the site's opinion.
-            boolean respectRobots = respectRobots();
-            if (respectRobots && !RobotsCache.isAllowed(hop.uri(), CLIENT, IDENTITY)) {
-                refused.add(new Refusal(hop.uri().toString(), "disallowed by robots.txt"));
-                continue;
-            }
-            try {
-                RobotsCache.awaitSlot(hop.uri(), respectRobots
-                        ? RobotsCache.delayMillis(hop.uri(), CLIENT, IDENTITY)
-                        : RobotsCache.DEFAULT_DELAY_MS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                stoppedBecause = "interrupted";
-                break;
-            }
+                // Collected in submission order, never completion order: the JCLAW-1091
+                // harness compares runs, and a result whose page order varies per run is
+                // not comparable.
+                var fetchedLevel = new ArrayList<WebExtraction.FetchResult>();
+                for (int i = 0; i < futures.size(); i++) {
+                    var uri = admitted.get(i);
+                    try {
+                        var outcome = futures.get(i).get();
+                        if (outcome.error() != null) {
+                            pages.add(new Page(uri.toString(),
+                                    "[Could not fetch: %s]".formatted(outcome.error())));
+                            continue;
+                        }
+                        pages.add(new Page(outcome.fetched().finalUrl(), outcome.text()));
+                        totalChars += outcome.text().length();
+                        fetchedLevel.add(outcome.fetched());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        stoppedBecause = "interrupted";
+                        break;
+                    } catch (ExecutionException e) {
+                        pages.add(new Page(uri.toString(),
+                                "[Could not fetch: %s]".formatted(reason(e))));
+                    }
+                }
 
-            WebExtraction.FetchResult fetched;
-            try {
-                fetched = WebExtraction.fetch(hop.uri().toString(), CLIENT, HEADERS);
-            } catch (Exception e) {
-                // One unreachable page must not end the crawl — the caller asked for a
-                // site, and a broken link on it is the site's problem, not the run's.
-                pages.add(new Page(hop.uri().toString(), "[Could not fetch: %s]".formatted(reason(e))));
-                continue;
-            }
+                if (stoppedBecause != null) {
+                    break;
+                }
+                if (System.nanoTime() > deadline) {
+                    stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
+                    break;
+                }
+                if (totalChars >= MAX_TOTAL_CHARS) {
+                    stoppedBecause = "content budget (%d characters) reached".formatted(MAX_TOTAL_CHARS);
+                    break;
+                }
+                if (depth >= maxDepth) {
+                    break;
+                }
 
-            var text = WebExtraction.toText(fetched);
-            pages.add(new Page(fetched.finalUrl(), text));
-            totalChars += text.length();
-
-            if (hop.depth() < maxDepth) {
-                enqueueLinks(fetched, seed, hop.depth(), sameHostOnly, seen, queue);
+                var next = new ArrayList<URI>();
+                for (var fetched : fetchedLevel) {
+                    collectLinks(fetched, seed, sameHostOnly, seen, next);
+                }
+                level = next;
+                depth++;
             }
         }
 
-        if (stoppedBecause == null && !queue.isEmpty()) {
-            stoppedBecause = "queue exhausted";
-        }
-        return render(seed, pages, refused, maxDepth, sameHostOnly, stoppedBecause, queue.size());
+        return render(seed, pages, refused, maxDepth, sameHostOnly, stoppedBecause, unvisited);
     }
 
-    private static void enqueueLinks(WebExtraction.FetchResult fetched, URI seed, int depth,
+    /** One page's work, as it runs on the pool. Pacing happens here so the wait for a
+     *  host's next slot overlaps other hosts' fetches instead of blocking the crawl. */
+    private record Outcome(WebExtraction.FetchResult fetched, String text, String error) {}
+
+    private Outcome fetchOne(URI uri, boolean respectRobots) {
+        try {
+            RobotsCache.awaitSlot(uri, respectRobots
+                    ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
+                    : RobotsCache.DEFAULT_DELAY_MS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new Outcome(null, null, "interrupted");
+        }
+        try {
+            var fetched = WebExtraction.fetch(uri.toString(), CLIENT, HEADERS);
+            return new Outcome(fetched, WebExtraction.toText(fetched), null);
+        } catch (Exception e) {
+            // One unreachable page must not end the crawl — the caller asked for a
+            // site, and a broken link on it is the site's problem, not the run's.
+            return new Outcome(null, null, reason(e));
+        }
+    }
+
+    /** Runs after a level completes, single-threaded, so {@code seen} needs no
+     *  synchronisation and the next level's order is deterministic. */
+    private static void collectLinks(WebExtraction.FetchResult fetched, URI seed,
                                      boolean sameHostOnly, LinkedHashSet<String> seen,
-                                     ArrayDeque<Hop> queue) {
+                                     List<URI> next) {
         for (var link : WebExtraction.links(fetched)) {
             if (sameHostOnly && !sameHost(link, seed)) {
                 continue;
             }
             // Dedup on the canonical form, so ?a=1#frag and ?a=1 are one page.
             if (seen.add(canonical(link))) {
-                queue.add(new Hop(link, depth + 1));
+                next.add(link);
             }
         }
     }
@@ -282,6 +340,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return "%s://%s%s%s".formatted(
                 uri.getScheme() == null ? "https" : uri.getScheme().toLowerCase(Locale.ROOT),
                 host(uri), path, query);
+    }
+
+    private static int configConcurrency() {
+        return Math.clamp(
+                services.ConfigService.getInt(CFG_CONCURRENCY, DEFAULT_CONCURRENCY),
+                1, MAX_CONCURRENCY);
     }
 
     private static String reason(Exception e) {
