@@ -55,11 +55,6 @@ Add `--kindle` when the user mentions a Kindle or e-reader — it adds CSS that 
 
 A run takes anywhere from under a minute to several minutes depending on book size. It prints progress as it fetches chapters.
 
-**Ignore any `terminal-image-*.png` in the output.** The progress bar clears itself with a line of
-padding spaces, which JClaw currently mistakes for terminal block art and renders as an image
-(JCLAW-1097). Those PNGs are blank artefacts of the progress display, not book content — never
-surface one to the user. Report the EPUB link and nothing else.
-
 ### 3. Report the result
 
 On success the EPUB is at:
