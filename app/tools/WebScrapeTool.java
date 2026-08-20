@@ -61,6 +61,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String ARG_MAX_PAGES = "maxPages";
     private static final String ARG_MAX_DEPTH = "maxDepth";
     private static final String ARG_SAME_HOST = "sameHostOnly";
+    private static final String ARG_RESPECT_ROBOTS = "respectRobots";
 
     private static final String CFG_MAX_PAGES = "web_scrape.max-pages";
     private static final String CFG_MAX_DEPTH = "web_scrape.max-depth";
@@ -130,7 +131,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                         .formatted(DEFAULT_MAX_DEPTH)),
                         ARG_SAME_HOST, Map.of(SchemaKeys.TYPE, "boolean",
                                 SchemaKeys.DESCRIPTION,
-                                "Stay on the starting URL's host (default true)")
+                                "Stay on the starting URL's host (default true)"),
+                        ARG_RESPECT_ROBOTS, Map.of(SchemaKeys.TYPE, "boolean",
+                                SchemaKeys.DESCRIPTION,
+                                "Honour the site's robots.txt (default true). Set false ONLY when "
+                                + "the user explicitly asks to ignore robots.txt for this request; "
+                                + "never choose it yourself to work around a refusal.")
                 ),
                 SchemaKeys.REQUIRED, List.of(ARG_URL)
         );
@@ -162,13 +168,19 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 args.has(ARG_MAX_DEPTH) ? args.get(ARG_MAX_DEPTH).getAsInt() : configMaxDepth(),
                 0, configMaxDepth());
         boolean sameHostOnly = !args.has(ARG_SAME_HOST) || args.get(ARG_SAME_HOST).getAsBoolean();
+        // Config supplies the default; the argument overrides it per call. An operator
+        // who wants robots ignored everywhere sets the config once, and one who leaves
+        // it on can still say "ignore robots for this" in a single request.
+        boolean respectRobots = args.has(ARG_RESPECT_ROBOTS)
+                ? args.get(ARG_RESPECT_ROBOTS).getAsBoolean()
+                : respectRobotsDefault();
 
         try {
             SsrfGuard.assertSafeScheme(seed);
         } catch (SecurityException e) {
             return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
         }
-        return crawl(seed, maxPages, maxDepth, sameHostOnly);
+        return crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots);
     }
 
     /**
@@ -189,7 +201,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         } catch (RuntimeException e) {
             return ScrapeObservation.failed(url, "rejected: " + e.getMessage());
         }
-        boolean respect = respectRobots();
+        boolean respect = respectRobotsDefault();
         if (respect && !RobotsCache.isAllowed(uri, CLIENT, IDENTITY)) {
             return ScrapeObservation.failed(url, "disallowed by robots.txt");
         }
@@ -209,13 +221,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
     }
 
-    private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly) {
+    private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
+                         boolean respectRobots) {
         var deadline = System.nanoTime()
                 + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
         var seen = new LinkedHashSet<String>();
         var pages = new ArrayList<Page>();
         var refused = new ArrayList<Refusal>();
-        boolean respectRobots = respectRobots();
 
         var level = new ArrayList<URI>(List.of(seed));
         seen.add(canonical(seed));
@@ -466,10 +478,18 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return (int) PlayConfig.longOr(CFG_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
     }
 
-    /** Default-on. An operator turning this off is making a deliberate choice about
-     *  someone else's site, so it has to be a config edit rather than a tool argument
-     *  the model can set. */
-    private static boolean respectRobots() {
+    /**
+     * Default for the {@code respectRobots} argument when a call omits it.
+     *
+     * <p>Default-on. Ignoring a site's robots.txt is a deliberate choice about someone
+     * else's server, so it is opt-out per call rather than something that happens by
+     * omission — and an operator who wants it off everywhere sets this key once.
+     *
+     * <p>Note what the override does <em>not</em> change: per-host pacing stays on
+     * either way. "Ignore this site's directives" and "hammer this site" are different
+     * requests, and only the first is available.
+     */
+    private static boolean respectRobotsDefault() {
         return !"false".equalsIgnoreCase(
                 services.ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
     }

@@ -186,6 +186,44 @@ public class RobotsCacheTest extends UnitTest {
     }
 
     @Test
+    public void aPerCallOverrideIgnoresRobotsWithoutTouchingConfig() {
+        // The operator asking in chat is the case this exists for: config stays on, one
+        // request opts out.
+        ConfigService.set(CFG_RESPECT, "true");
+        routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /\n", "text/plain");
+        routes.put(HOST + "/", page("Home", "/private/secret"));
+        routes.put(HOST + "/private/secret", page("Secret"));
+
+        var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1,\"respectRobots\":false}");
+        assertTrue(out.contains("# Secret"), "the override reaches a disallowed path");
+        assertFalse(out.contains("disallowed by robots.txt"));
+    }
+
+    @Test
+    public void omittingTheArgumentKeepsRobotsHonoured() {
+        // Opt-out per call, never by omission.
+        ConfigService.set(CFG_RESPECT, "true");
+        routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
+        routes.put(HOST + "/", page("Home", "/private/secret"));
+        routes.put(HOST + "/private/secret", page("Secret"));
+
+        var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");
+        assertFalse(out.contains("# Secret"));
+        assertTrue(out.contains("disallowed by robots.txt"));
+    }
+
+    @Test
+    public void theArgumentCanAlsoRestoreRobotsWhenConfigTurnedThemOff() {
+        ConfigService.set(CFG_RESPECT, "false");
+        routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
+        routes.put(HOST + "/", page("Home", "/private/secret"));
+        routes.put(HOST + "/private/secret", page("Secret"));
+
+        var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1,\"respectRobots\":true}");
+        assertFalse(out.contains("# Secret"), "the argument overrides config in both directions");
+    }
+
+    @Test
     public void turningOffRespectRobotsIgnoresTheRulesButStillPaces() {
         ConfigService.set(CFG_RESPECT, "false");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /\n", "text/plain");
