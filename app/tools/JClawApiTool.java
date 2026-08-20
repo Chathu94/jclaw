@@ -102,6 +102,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             "/api/tailscale",             // network-funnel infra config
             "/api/logs",                  // raw app logs can leak secrets/PII
             "/api/metrics/loadtest",      // load-test harness -- resource/cost abuse
+            "/api/scrape/harness",        // scrape harness -- 150 outbound fetches per call
             "/api/memories"               // cross-agent personal data; the scoped `memory` tool is the agent path
     );
 
