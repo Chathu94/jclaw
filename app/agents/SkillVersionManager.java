@@ -23,8 +23,10 @@ public final class SkillVersionManager {
 
     /** Semver returned when a SKILL.md has no parseable {@code version:} frontmatter entry. */
     private static final String DEFAULT_VERSION = "0.0.0";
-    /** Initial version stamped onto a fresh SKILL.md whose frontmatter omits {@code version:}. */
-    private static final String INITIAL_VERSION = "1.0.0";
+    /** Initial version stamped onto a fresh SKILL.md whose frontmatter omits {@code version:}.
+     *  Public so the promotion path ({@code SkillConformanceService}) stamps the same value
+     *  the write path does, rather than carrying a second copy of the literal. */
+    public static final String INITIAL_VERSION = "1.0.0";
 
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
             "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);

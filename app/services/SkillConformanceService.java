@@ -1,6 +1,7 @@
 package services;
 
 import agents.SkillLoader;
+import agents.SkillVersionManager;
 import agents.ToolCatalog;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -71,16 +72,24 @@ public final class SkillConformanceService {
     public record ProposedSkill(String name, String description, String icon, List<String> tools) {}
 
     /** A skill that passed the deterministic gate, ready to render as SKILL.md. */
-    public record ConformedSkill(String name, String description, String icon,
+    public record ConformedSkill(String name, String description, String version, String icon,
                                  List<String> tools, List<String> commands, String author, String body) {
-        /** Render the conforming SKILL.md (frontmatter + body) in the skill-creator
-         *  field order. {@code version:} is intentionally omitted — it is
-         *  system-managed and auto-bumped by the write path. */
+        /**
+         * Render the conforming SKILL.md (frontmatter + body) in the skill-creator field
+         * order, with {@code version:} directly after {@code description:} — the slot
+         * skill-creator reserves for the system-managed field.
+         *
+         * <p>It used to be omitted here on the reasoning that the write path injects it.
+         * That held only for skills written through the filesystem tool: this method's
+         * output is written straight to disk by {@link #conform}, so a promoted skill
+         * reached the global registry with no version at all.
+         */
         public String toSkillMd() {
             return """
                    ---
                    name: %s
                    description: %s
+                   version: %s
                    author: %s
                    tools: [%s]
                    commands: [%s]
@@ -88,7 +97,7 @@ public final class SkillConformanceService {
                    ---
 
                    %s
-                   """.formatted(name, description, author,
+                   """.formatted(name, description, version, author,
                     String.join(", ", tools), String.join(", ", commands), icon,
                     body == null ? "" : body.strip());
         }
@@ -136,7 +145,14 @@ public final class SkillConformanceService {
         }
         var proposed = proposedOpt.get();
 
-        var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance, originalBody);
+        // The incoming version, if any — preserved so re-conforming an already-promoted
+        // skill keeps its history instead of dropping back to 1.0.0.
+        var declaredVersion = split != null && split.frontmatter() != null
+                ? SkillLoader.extractYamlValue(split.frontmatter(), "version")
+                : null;
+
+        var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance,
+                originalBody, declaredVersion);
         if (!gate.ok()) return ConformanceResult.fail(gate.reason());
 
         try {
@@ -165,6 +181,19 @@ public final class SkillConformanceService {
      */
     public static GateOutcome applyHardGates(ProposedSkill proposed, String fallbackName,
                                              Set<String> stagedBinaries, String author, String body) {
+        return applyHardGates(proposed, fallbackName, stagedBinaries, author, body, null);
+    }
+
+    /**
+     * @param declaredVersion the {@code version:} the incoming SKILL.md declared, or
+     *                        {@code null}. A parseable value is preserved so re-conforming
+     *                        an already-versioned skill does not reset its history;
+     *                        anything else is stamped
+     *                        {@link SkillVersionManager#INITIAL_VERSION}.
+     */
+    public static GateOutcome applyHardGates(ProposedSkill proposed, String fallbackName,
+                                             Set<String> stagedBinaries, String author, String body,
+                                             String declaredVersion) {
         if (proposed == null) return GateOutcome.reject("empty conformance proposal");
 
         var name = kebabOrNull(proposed.name());
@@ -191,7 +220,8 @@ public final class SkillConformanceService {
 
         var safeBody = body != null ? body : "";
         var safeAuthor = author != null && !author.isBlank() ? author.strip() : "imported";
-        return GateOutcome.accept(new ConformedSkill(name, description, icon, tools, commands, safeAuthor, safeBody));
+        return GateOutcome.accept(new ConformedSkill(name, description,
+                resolveVersion(declaredVersion), icon, tools, commands, safeAuthor, safeBody));
     }
 
     // --- generation (LLM) ---
@@ -301,6 +331,30 @@ public final class SkillConformanceService {
             EventLogger.warn(CATEGORY, "Conformance: could not list staged binaries: " + e.getMessage());
         }
         return bins;
+    }
+
+    /**
+     * The version a conformed skill ships with: the declared one when it parses, and
+     * {@link SkillVersionManager#INITIAL_VERSION} otherwise.
+     *
+     * <p>{@code parseVersion} answers all-zero for both "absent" and "unparseable", and
+     * 0.0.0 is the sentinel the loader uses for "no version" — so stamping it here would
+     * write the absence rather than fix it. Normalising through the parser also repairs
+     * near-misses: {@code v2.1} renders as {@code 2.1.0}.
+     */
+    public static String resolveVersion(String declaredVersion) {
+        if (declaredVersion == null || declaredVersion.isBlank()) {
+            return SkillVersionManager.INITIAL_VERSION;
+        }
+        // parseVersion strips trailing non-digits, not leading ones, so a "v" prefix
+        // would zero the major component and turn v2.1 into 0.1.0 — a lower version
+        // than stamping a fresh 1.0.0, and one the all-zero guard below would not catch.
+        var declared = declaredVersion.strip().replaceFirst("^[vV]", "");
+        var p = SkillVersionManager.parseVersion(declared);
+        if (p[0] == 0 && p[1] == 0 && p[2] == 0) {
+            return SkillVersionManager.INITIAL_VERSION;
+        }
+        return "%d.%d.%d".formatted(p[0], p[1], p[2]);
     }
 
     static String kebabCase(String s) {

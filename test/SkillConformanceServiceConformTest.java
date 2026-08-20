@@ -160,7 +160,7 @@ class SkillConformanceServiceConformTest extends UnitTest {
 
     @Test
     void toSkillMdRendersParseableFrontmatterWhenBodyIsNull() {
-        var skill = new ConformedSkill("bodyless-skill", "desc", "🛠️",
+        var skill = new ConformedSkill("bodyless-skill", "desc", "1.0.0", "🛠️",
                 List.of(), List.of(), "o/r", null);
         var rendered = skill.toSkillMd();
         assertFalse(rendered.contains("null"), "null body must not leak into the render: " + rendered);
