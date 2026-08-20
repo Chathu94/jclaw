@@ -316,14 +316,13 @@ class WebFetchToolTest extends UnitTest {
         }
     }
 
-    // --- extractText branch coverage (reflection) ---
+    // --- extractText branch coverage ---
 
-    private String extractText(String html, String url) throws Exception {
-        var tool = new tools.WebFetchTool();
-        var m = tools.WebFetchTool.class.getDeclaredMethod(
-                "extractText", String.class, String.class);
-        m.setAccessible(true);
-        return (String) m.invoke(tool, html, url);
+    /** JCLAW-1082 moved the extraction chain to {@link utils.WebExtraction}, where it
+     *  is public — so these cases call it directly instead of reflecting into a
+     *  private method. */
+    private String extractText(String html, String url) {
+        return utils.WebExtraction.extractText(html, url);
     }
 
     @Test

@@ -3,35 +3,18 @@ package tools;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
-import com.vladsch.flexmark.html2md.converter.FlexmarkHtmlConverter;
-import com.vladsch.flexmark.util.data.MutableDataSet;
 import models.Agent;
-import net.dankito.readability4j.Readability4J;
-import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.ResponseBody;
-import org.apache.tika.Tika;
-import org.apache.tika.metadata.HttpHeaders;
-import org.apache.tika.metadata.Metadata;
-import org.apache.tika.metadata.TikaCoreProperties;
-import org.jsoup.Jsoup;
 import services.AgentService;
-import services.ConfigService;
-import utils.PlayConfig;
 import utils.SsrfGuard;
+import utils.WebExtraction;
 
 import javax.net.ssl.SSLException;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
-import java.nio.charset.Charset;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -45,6 +28,11 @@ import java.util.Map;
  *   <li>"html": Return raw HTML. Best for saving the actual page to a file.</li>
  * </ul>
  *
+ * <p>The fetch and extraction chain lives in {@link WebExtraction}, shared with
+ * {@code web_scrape} (JCLAW-1082). What stays here is what is specific to this
+ * tool: the schema, the html-mode workspace save, and the mapping of failures
+ * onto LLM-facing error strings.
+ *
  * <p>Because this tool consumes URLs emitted by the LLM, every request goes
  * through {@link SsrfGuard}: the scheme is pinned to http/https and the DNS
  * resolver rejects loopback, link-local (cloud metadata), RFC-1918, and
@@ -55,50 +43,19 @@ import java.util.Map;
  * <p>{@link SsrfGuard} only constrains which hosts are reachable, not what
  * leaves: a prompt-injected agent can still encode conversation content into a
  * URL on a host it is allowed to reach. An operator who wants that contained
- * sets {@code web_fetch.allowlist} — see {@link #assertHostAllowed(URI)}.
+ * sets {@code web_fetch.allowlist}.
  */
 public class WebFetchTool implements ToolRegistry.Tool {
 
-    private static final int MAX_TEXT_LENGTH = 50_000;
     private static final int MAX_HTML_LENGTH = 100_000;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int TIMEOUT_SECONDS = 30;
-    private static final int MAX_REDIRECTS = 5;
 
-    /** Cap on the raw response bytes buffered into the heap per fetch. The body
-     *  comes from an untrusted, LLM-supplied URL and the {@link SsrfGuard} client
-     *  sets no read/body limit, so a large or slow response — multiplied across
-     *  the parallel virtual-thread fetches — could OOM the shared JVM. 10 MiB by
-     *  default: comfortably above {@link #MAX_HTML_LENGTH} and a typical article
-     *  PDF, yet small enough that many concurrent fetches can't exhaust the heap.
-     *  Operators can override via {@code web_fetch.max-body-bytes}. */
-    private static final long DEFAULT_MAX_BODY_BYTES = 10L * 1024 * 1024;
-    private static final String CFG_MAX_BODY_BYTES = "web_fetch.max-body-bytes";
-
-    /** Comma-separated outbound host allowlist; see {@link #assertHostAllowed(URI)}. */
-    private static final String CFG_ALLOWLIST = "web_fetch.allowlist";
-
-    /** Below this many extracted characters the Readability pass is treated as a
-     *  miss and the Jsoup boilerplate-strip fallback runs instead — small pages
-     *  and non-article fragments aren't article-shaped enough to score well. */
-    private static final int MIN_READABILITY_CHARS = 200;
-
-    private static final FlexmarkHtmlConverter HTML_TO_MARKDOWN =
-            FlexmarkHtmlConverter.builder(new MutableDataSet()
-                    // Suppress the {#id} inline-attribute annotations flexmark emits
-                    // for element ids. Parsoid-rendered HTML (e.g. Wikipedia) tags
-                    // nearly every node with an id, which is pure noise in LLM-facing
-                    // Markdown and carries no semantic value.
-                    .set(FlexmarkHtmlConverter.OUTPUT_ATTRIBUTES_ID, false))
-                    .build();
-
-    /** Shared Tika facade for non-HTML document extraction. {@code maxStringLength}
-     *  is set once here (never mutated per-call) so {@code parseToString} stays
-     *  thread-safe under the parallel tool dispatch. */
-    private static final Tika TIKA = new Tika();
-    static {
-        TIKA.setMaxStringLength(MAX_TEXT_LENGTH + 10_000);
-    }
+    /** Identifies this client honestly. A per-request value in
+     *  {@link WebExtraction#fetch} so a caller can present differently without
+     *  forking the redirect loop. */
+    private static final Map<String, String> HEADERS =
+            Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
 
     /**
      * Package-private and non-final so {@code WebFetchToolTest} can substitute
@@ -108,11 +65,6 @@ public class WebFetchTool implements ToolRegistry.Tool {
      */
     static OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(
             CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
-
-    /** Raw fetch result: undecoded body bytes plus the response Content-Type and
-     *  the final (post-redirect) URL. Bytes — not a decoded String — so binary
-     *  documents (PDF, Office) reach Tika intact. */
-    private record FetchResult(byte[] body, String contentType, String finalUrl) {}
 
     @Override
     public String name() { return "web_fetch"; }
@@ -169,9 +121,9 @@ public class WebFetchTool implements ToolRegistry.Tool {
         var mode = args.has("mode") ? args.get("mode").getAsString() : "text";
 
         try {
-            var fetched = fetchUrl(url);
-            return processResponse(fetched, mode, url, agent);
-        } catch (HostNotAllowedException e) {
+            var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
+            return "html".equals(mode) ? rawHtml(fetched, url, agent) : WebExtraction.toText(fetched);
+        } catch (WebExtraction.HostNotAllowedException e) {
             return e.getMessage();
         } catch (SecurityException e) {
             // SsrfGuard rejected a scheme or host — surface plainly so the LLM
@@ -194,319 +146,21 @@ public class WebFetchTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Fetch a URL through the {@link SsrfGuard}ed client. Redirects are
-     * followed manually, up to {@link #MAX_REDIRECTS}, so each hop is
-     * re-validated through {@link SsrfGuard#assertSafeScheme(URI)} and
-     * re-resolved through the guarded DNS.
-     *
-     * <p>Only the final (non-redirect) response body is read, and it is read as
-     * raw bytes — never a decoded String — so binary documents survive intact
-     * for Tika. The read is size-bounded through {@link #readBounded} so an
-     * oversized or unbounded body can't OOM the shared JVM. The SSRF
-     * scheme/redirect logic is unchanged.
+     * Raw HTML mode. Large pages are written to the agent workspace instead of
+     * returned, so hundreds of KB of markup can't flood the LLM context.
      */
-    private FetchResult fetchUrl(String url) throws IOException {
-        var current = URI.create(url);
-        SsrfGuard.assertSafeScheme(current);
-        assertHostAllowed(current);
-
-        for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
-            var request = new Request.Builder()
-                    .url(current.toString())
-                    .header("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)")
-                    .get()
-                    .build();
-
-            try (var response = CLIENT.newCall(request).execute()) {
-                int code = response.code();
-
-                // Follow 3xx manually so every hop re-enters SsrfGuard.
-                if (code >= 300 && code < 400) {
-                    var location = response.header("Location");
-                    if (location == null || location.isBlank()) {
-                        throw new IOException(
-                                "HTTP %d with no Location header for %s".formatted(code, current));
-                    }
-                    current = current.resolve(location);
-                    SsrfGuard.assertSafeScheme(current);
-                    assertHostAllowed(current);
-                    continue;
-                }
-
-                if (code >= 400) {
-                    throw new IOException("HTTP %d fetching %s".formatted(code, current));
-                }
-
-                var bytes = readBounded(response.body(), current);
-                var contentType = response.header("Content-Type", "");
-                return new FetchResult(bytes, contentType, current.toString());
-            }
+    private String rawHtml(WebExtraction.FetchResult fetched, String url, Agent agent) {
+        var html = new String(fetched.body(), WebExtraction.charsetFor(fetched.contentType()));
+        if (html.length() > WebExtraction.MAX_TEXT_LENGTH && agent != null) {
+            var filename = URI.create(url).getHost().replaceAll("[^a-zA-Z0-9.-]", "_") + ".html";
+            AgentService.writeWorkspaceFile(agent.name, filename, html);
+            return "HTML saved to workspace as '%s' (%d characters from %s)"
+                    .formatted(filename, html.length(), url);
         }
-        throw new IOException("Too many redirects (>%d) fetching %s"
-                .formatted(MAX_REDIRECTS, url));
-    }
-
-    /**
-     * Refuse an outbound host that is absent from the operator's allowlist
-     * ({@link #CFG_ALLOWLIST}, comma-separated). Unset or blank means no
-     * restriction — the shipped default, because deny-by-default would break
-     * web_fetch on every existing install. An entry matches that host and any
-     * subdomain of it. Enforced on every redirect hop, so a listed host can't
-     * bounce the fetch onward to one the operator never listed.
-     */
-    private static void assertHostAllowed(URI uri) {
-        var raw = ConfigService.get(CFG_ALLOWLIST, "").strip();
-        if (raw.isEmpty()) {
-            return;
+        if (html.length() > MAX_HTML_LENGTH) {
+            return html.substring(0, MAX_HTML_LENGTH)
+                    + "\n\n[Truncated: HTML exceeds %d characters]".formatted(MAX_HTML_LENGTH);
         }
-        var host = uri.getHost().toLowerCase(Locale.ROOT);
-        for (var entry : raw.split(",")) {
-            var allowed = entry.strip().toLowerCase(Locale.ROOT);
-            if (!allowed.isEmpty() && (host.equals(allowed) || host.endsWith("." + allowed))) {
-                return;
-            }
-        }
-        throw new HostNotAllowedException(host);
-    }
-
-    /** Signals an outbound host the operator's allowlist doesn't cover; caught in
-     *  {@link #execute} and rendered as its tool result. A distinct type from the
-     *  {@link SecurityException} {@link SsrfGuard} throws, which reports a
-     *  different refusal. */
-    private static final class HostNotAllowedException extends RuntimeException {
-        HostNotAllowedException(String host) {
-            super(("Error: host '%s' is not on the operator's web_fetch allowlist (config %s). "
-                    + "Ask the operator to add it if this fetch is intended.")
-                    .formatted(host, CFG_ALLOWLIST));
-        }
-    }
-
-    /**
-     * Buffer at most {@link #maxBodyBytes()} of an untrusted response body into
-     * the heap, so a large or slow LLM-supplied URL can't OOM the shared JVM.
-     * Two layered guards:
-     * <ol>
-     *   <li>a declared {@code Content-Length} over the cap is rejected before a
-     *       single body byte is read;</li>
-     *   <li>the read itself is bounded — okio buffers only {@code cap + 1} bytes
-     *       (rounded up to its segment size), so a server that omits or lies
-     *       about {@code Content-Length} still can't push more than ~cap onto
-     *       the heap. The kept prefix flows into the existing text/HTML
-     *       character-truncation, which fires here because the byte cap sits far
-     *       above {@link #MAX_TEXT_LENGTH} / {@link #MAX_HTML_LENGTH}.</li>
-     * </ol>
-     */
-    private static byte[] readBounded(ResponseBody body, URI url) throws IOException {
-        long cap = maxBodyBytes();
-        long declared = body.contentLength();
-        if (declared > cap) {
-            throw new IOException(
-                    "Response body too large (%d bytes, limit %d) fetching %s"
-                            .formatted(declared, cap, url));
-        }
-        var source = body.source();
-        // request(cap + 1) reads segment by segment only until the buffer holds
-        // cap + 1 bytes (or the source is exhausted) — never the whole stream.
-        if (source.request(cap + 1)) {
-            return source.readByteArray(cap); // more than the cap available → keep the capped prefix
-        }
-        return source.readByteArray(); // whole body fit under the cap
-    }
-
-    /** Per-fetch heap cap for the raw response body ({@link #CFG_MAX_BODY_BYTES},
-     *  default {@link #DEFAULT_MAX_BODY_BYTES}). */
-    private static long maxBodyBytes() {
-        return PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
-    }
-
-    private String processResponse(FetchResult fetched, String mode, String url, Agent agent) {
-        var contentType = fetched.contentType();
-        var body = fetched.body();
-
-        if ("html".equals(mode)) {
-            // Raw HTML mode — for large pages, auto-save to workspace to avoid
-            // flooding the LLM context with hundreds of KB of HTML.
-            var html = new String(body, charsetFor(contentType));
-            if (html.length() > MAX_TEXT_LENGTH && agent != null) {
-                var filename = URI.create(url).getHost().replaceAll("[^a-zA-Z0-9.-]", "_") + ".html";
-                AgentService.writeWorkspaceFile(agent.name, filename, html);
-                return "HTML saved to workspace as '%s' (%d characters from %s)"
-                        .formatted(filename, html.length(), url);
-            }
-            if (html.length() > MAX_HTML_LENGTH) {
-                return html.substring(0, MAX_HTML_LENGTH)
-                        + "\n\n[Truncated: HTML exceeds %d characters]".formatted(MAX_HTML_LENGTH);
-            }
-            return html;
-        }
-
-        // Text mode — route by content type.
-        // 1. HTML → Readability main-content pass → Markdown.
-        if (isHtml(contentType, body)) {
-            return extractText(new String(body, charsetFor(contentType)), fetched.finalUrl());
-        }
-
-        // 2. Textual (JSON / XML / CSV / plain text) → pass through unchanged.
-        if (isTextual(contentType) || (contentType.isBlank() && !looksBinary(body))) {
-            return truncate(new String(body, charsetFor(contentType)), "content");
-        }
-
-        // 3. Binary document (PDF / Office / …) → Tika text extraction.
-        return extractWithTika(body, contentType, url);
-    }
-
-    /**
-     * Extract readable content from HTML and render it as Markdown.
-     *
-     * <p>A Readability main-content pass runs first; if it finds no substantial
-     * article (or throws on malformed input) the original Jsoup boilerplate
-     * strip runs as a fallback, so this never returns empty for a page that has
-     * body content. The chosen content HTML is converted to Markdown, prefixed
-     * with the page title as an H1 when present.
-     */
-    private String extractText(String html, String url) {
-        String contentHtml = null;
-        String title = null;
-
-        // 1. Readability main-content pass.
-        try {
-            var article = new Readability4J(url, html).parse();
-            var articleText = article.getTextContent();
-            if (articleText != null && articleText.strip().length() >= MIN_READABILITY_CHARS) {
-                contentHtml = article.getContent();
-                title = article.getTitle();
-            }
-        } catch (Exception _) {
-            // fall through to the Jsoup boilerplate-strip fallback
-        }
-
-        // 2. Fallback: strip non-content elements and keep the body HTML.
-        if (contentHtml == null || contentHtml.isBlank()) {
-            var doc = Jsoup.parse(html, url);
-            doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
-                       "header, aside, form, button, input, select, textarea, " +
-                       "[role=navigation], [role=banner], [role=complementary], " +
-                       "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
-            title = doc.title();
-            // jsoup always yields a <body> (creating an empty one if absent), so no null guard is needed.
-            contentHtml = doc.body().html();
-        }
-
-        // 3. HTML → Markdown.
-        var markdown = HTML_TO_MARKDOWN.convert(contentHtml).strip();
-
-        // 4. Assemble with an optional title heading.
-        var result = new StringBuilder();
-        if (title != null && !title.isBlank()) {
-            result.append("# ").append(title.strip()).append("\n\n");
-        }
-        result.append(markdown);
-
-        if (result.length() > MAX_TEXT_LENGTH) {
-            return result.substring(0, MAX_TEXT_LENGTH)
-                    + "\n\n[Truncated: extracted text exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
-        }
-        return result.toString();
-    }
-
-    /** Extract text from a non-HTML document (PDF, Office, EPUB, …) with Tika. */
-    private String extractWithTika(byte[] body, String contentType, String url) {
-        try {
-            var metadata = new Metadata();
-            if (!contentType.isBlank()) {
-                metadata.set(HttpHeaders.CONTENT_TYPE, contentType);
-            }
-            // Resource-name hint lets Tika fall back to extension-based detection.
-            metadata.set(TikaCoreProperties.RESOURCE_NAME_KEY, url);
-            var text = TIKA.parseToString(new ByteArrayInputStream(body), metadata);
-            return truncate(text.strip(), "content");
-        } catch (Exception e) {
-            return "Error: could not extract text from %s: %s".formatted(url, e.getMessage());
-        }
-    }
-
-    /** True when the response is HTML: an explicit html content type, or — when
-     *  the content type is absent — a body whose first non-whitespace char opens
-     *  a tag that isn't an XML declaration. */
-    private static boolean isHtml(String contentType, byte[] body) {
-        if (contentType.toLowerCase().contains("html")) {
-            return true;
-        }
-        if (contentType.isBlank()) {
-            var head = new String(body, 0, Math.min(body.length, 256), StandardCharsets.UTF_8).stripLeading();
-            return head.startsWith("<") && !head.regionMatches(true, 0, "<?xml", 0, 5);
-        }
-        return false;
-    }
-
-    /** True for content types that are already human-readable and must pass
-     *  through untouched (JSON, XML, CSV, plain text, source). */
-    private static boolean isTextual(String contentType) {
-        if (contentType.isBlank()) {
-            return false;
-        }
-        var ct = contentType.toLowerCase();
-        return ct.startsWith("text/")
-                || ct.contains("json")
-                || ct.contains("xml")
-                || ct.contains("csv")
-                || ct.contains("javascript")
-                || ct.contains("yaml");
-    }
-
-    /** Heuristic used only when the content type is absent: magic numbers for
-     *  common binary documents, or a NUL byte early in the stream. */
-    private static boolean looksBinary(byte[] body) {
-        if (body.length == 0) {
-            return false;
-        }
-        if (startsWith(body, "%PDF")) {                                   // PDF
-            return true;
-        }
-        if (body.length >= 4 && body[0] == 'P' && body[1] == 'K'
-                && body[2] == 3 && body[3] == 4) {                        // ZIP (docx/xlsx/pptx/odf)
-            return true;
-        }
-        if (body.length >= 2 && (body[0] & 0xFF) == 0xD0 && (body[1] & 0xFF) == 0xCF) {
-            return true;                                                  // OLE2 (legacy .doc/.xls/.ppt)
-        }
-        int n = Math.min(body.length, 512);
-        for (int i = 0; i < n; i++) {
-            if (body[i] == 0) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static boolean startsWith(byte[] body, String ascii) {
-        if (body.length < ascii.length()) {
-            return false;
-        }
-        for (int i = 0; i < ascii.length(); i++) {
-            if (body[i] != ascii.charAt(i)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /** Parse the charset from a Content-Type header, defaulting to UTF-8 — the
-     *  same rule OkHttp's {@code ResponseBody.string()} applied before the
-     *  switch to raw bytes. */
-    private static Charset charsetFor(String contentType) {
-        if (contentType.isBlank()) {
-            return StandardCharsets.UTF_8;
-        }
-        var mediaType = MediaType.parse(contentType);
-        return mediaType != null ? mediaType.charset(StandardCharsets.UTF_8) : StandardCharsets.UTF_8;
-    }
-
-    private static String truncate(String text, String label) {
-        if (text.length() > MAX_TEXT_LENGTH) {
-            return text.substring(0, MAX_TEXT_LENGTH)
-                    + "\n\n[Truncated: %s exceeds %d characters]".formatted(label, MAX_TEXT_LENGTH);
-        }
-        return text;
+        return html;
     }
 }
