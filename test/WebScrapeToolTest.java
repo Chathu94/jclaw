@@ -175,7 +175,7 @@ public class WebScrapeToolTest extends UnitTest {
         routes.put("https://site.test/good", page("Good"));
         var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
 
-        assertTrue(out.contains("Could not fetch"), "the failure is reported");
+        assertTrue(out.contains("Not retrieved"), "the failure is reported");
         assertTrue(out.contains("connection reset"));
         assertTrue(out.contains("# Good"), "the crawl continues past a broken link");
     }

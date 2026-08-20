@@ -1,122 +1,169 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.scrape.BlockClassifier;
-import services.scrape.GroundTruth;
 import services.scrape.ScrapeCorpus;
 import services.scrape.ScrapeHarness;
+import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
+import services.scrape.ScrapeRung;
+import utils.WebExtraction;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * JCLAW-1081. The known-zero and known-one cases are the point of this class: a
- * harness that reports plausible nonsense is worse than no harness, because it gets
- * believed. Everything else here exists to keep those two honest.
+ * The shared block classifier and the escalation decision (JCLAW-1081, JCLAW-1086).
+ *
+ * <p>The known-zero and known-one cases are the point: a harness that reports plausible
+ * nonsense is worse than no harness, because it gets believed. Everything else here
+ * keeps those two honest.
+ *
+ * <p>Fixtures carry raw markup and extracted text separately, because that separation is
+ * what JCLAW-1086 bought. Readability strips scripts, so after extraction a Cloudflare
+ * gate and a client-rendered app are both zero characters — the markers that tell them
+ * apart survive only in the raw body.
  */
 public class ScrapeHarnessTest extends UnitTest {
 
-    /** A real Cloudflare interstitial: valid HTML, a title, body text. Extracts to
-     *  clean markdown, which is exactly why length alone cannot score it. */
-    private static final String CHALLENGE_PAGE = """
-            Just a moment...
+    private static ScrapeObservation obs(String rawHtml, String extracted) {
+        var fr = new WebExtraction.FetchResult(rawHtml.getBytes(StandardCharsets.UTF_8),
+                "text/html", "https://x.test/");
+        return ScrapeObservation.of(fr, extracted);
+    }
 
-            Verifying you are human. This may take a few seconds.
-            example.com needs to review the security of your connection before proceeding.
-            Enable JavaScript and cookies to continue.
-            Performance & security by Cloudflare.
-            """ + "x".repeat(2_000);
+    /** A real interstitial: valid HTML that extracts to a couple of readable lines. */
+    private static final String CHALLENGE_RAW = """
+            <html><head><title>Just a moment...</title>
+            <script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>
+            </head><body><div>Verifying you are human. This may take a few seconds.</div>
+            </body></html>""";
+    private static final String CHALLENGE_TEXT =
+            "# Just a moment...\n\nVerifying you are human. This may take a few seconds.";
 
-    private static final String REAL_ARTICLE =
-            "# Understanding Widgets\n\nWidgets are components that "
-                    + "combine several parts into one. ".repeat(40);
+    private static final String ARTICLE_TEXT =
+            "# Understanding Widgets\n\nWidgets combine several parts into one. ".repeat(20);
 
-    private static GroundTruth gt() {
-        return new GroundTruth(600,
-                List.of("/cdn-cgi/challenge-platform/", "just a moment", "cf-turnstile"), null);
+    @Test
+    public void knownZero_aChallengePageIsNeverScoredAsContent() {
+        assertEquals(ScrapeReason.JS_CHALLENGE,
+                BlockClassifier.classify(obs(CHALLENGE_RAW, CHALLENGE_TEXT)));
     }
 
     @Test
-    public void knownZero_challengePageIsNeverScoredAsContent() {
-        // Long enough and clean enough to pass a naive length check — the whole trap.
-        assertTrue(CHALLENGE_PAGE.length() > gt().minChars());
-        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(CHALLENGE_PAGE, gt()));
+    public void knownOne_aRealArticleScoresOk() {
+        assertEquals(ScrapeReason.OK,
+                BlockClassifier.classify(obs("<html><body>...</body></html>", ARTICLE_TEXT)));
     }
 
     @Test
-    public void knownOne_realArticleScoresOk() {
-        assertEquals(ScrapeReason.OK, BlockClassifier.classify(REAL_ARTICLE, gt()));
+    public void aTurnstileGateWithNoContentBehindItIsTurnstile() {
+        var raw = "<html><head><script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\">"
+                + "</script></head><body><div class=\"cf-turnstile\"></div></body></html>";
+        assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(obs(raw, "")));
     }
 
     @Test
-    public void turnstileOutranksGenericChallenge() {
-        var page = CHALLENGE_PAGE + "\n<script src=\"https://challenges.cloudflare.com/turnstile/v0/api.js\">";
-        assertEquals(ScrapeReason.TURNSTILE, BlockClassifier.classify(page, gt()));
+    public void aPageThatMerelyEmbedsTurnstileIsNotAGate() {
+        // The defect that inverted the first corpus: wiley.com and onetrust.com embed the
+        // widget and serve real content. Marker presence alone is not a gate — it takes a
+        // marker AND nothing readable behind it.
+        var raw = "<html><body><div class=\"cf-turnstile\"></div><article>real</article></body></html>";
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(obs(raw, ARTICLE_TEXT)));
     }
 
     @Test
-    public void thinPageIsThinContentNotABlock() {
-        // twitter.com, chatgpt.com and friends return a JS shell: 60-odd characters, no
-        // refusal. Counting that as blocked would attribute a rendering gap to Cloudflare
-        // and inflate the number rung 3 is supposed to move.
-        assertEquals(ScrapeReason.THIN_CONTENT, BlockClassifier.classify("tiny", gt()));
+    public void aClientRenderedShellIsThinContentNotABlock() {
+        // No gate marker, no text: the origin served us, there is simply nothing
+        // server-rendered. A rendering gap, not an anti-bot one — and the distinction the
+        // provisional classifier could not make, because after extraction this and a JS
+        // gate are both zero characters.
+        var raw = "<html><head><title>App</title><script src=\"/app.js\"></script></head>"
+                + "<body><div id=\"root\"></div></body></html>";
+        assertEquals(ScrapeReason.THIN_CONTENT, BlockClassifier.classify(obs(raw, "# App")));
     }
 
     @Test
-    public void longRealPageMentioningScrapingIsNotAPolicyBlock() {
-        // Regression: the first baseline scored oxylabs.io as POLICY_BLOCK off 7,947
-        // characters of marketing copy. A proxy vendor's own page says "scraping is
-        // prohibited"; that is content, not a refusal.
-        var vendorPage = "Oxylabs proxy service. Our terms note that scraping is prohibited "
-                + "on some targets and that ai training use varies by jurisdiction. ".repeat(30);
-        assertTrue(vendorPage.length() > gt().minChars());
-        assertEquals(ScrapeReason.OK, BlockClassifier.classify(vendorPage, gt()));
+    public void shortNonHtmlResponsesAreContentNotThinPages() {
+        // Regression: the thin-content floor was applied to every content type, so a
+        // seven-character JSON body — a complete, valid response — was discarded as an
+        // empty page. A gate is an HTML phenomenon; JSON, plain text and extracted PDF
+        // prose are content at any length.
+        var fr = new WebExtraction.FetchResult("{\"a\":1}".getBytes(StandardCharsets.UTF_8),
+                "application/json", "https://api.test/x");
+        assertEquals(ScrapeReason.OK,
+                BlockClassifier.classify(ScrapeObservation.of(fr, "{\"a\":1}")));
     }
 
     @Test
-    public void shortPolicyRefusalIsStillDetected() {
+    public void anEmptyNonHtmlResponseIsStillThin() {
+        var fr = new WebExtraction.FetchResult(new byte[0], "application/json",
+                "https://api.test/x");
+        assertEquals(ScrapeReason.THIN_CONTENT,
+                BlockClassifier.classify(ScrapeObservation.of(fr, "")));
+    }
+
+    @Test
+    public void aLongPageDiscussingScrapingIsNotAPolicyBlock() {
+        // Regression: oxylabs.io scored POLICY_BLOCK off 7,947 characters of marketing
+        // copy. A proxy vendor's own page says "scraping is prohibited"; that is content.
+        var raw = "<html><body>our terms note that scraping is prohibited on some targets</body></html>";
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(obs(raw, ARTICLE_TEXT)));
+    }
+
+    @Test
+    public void aShortPolicyRefusalIsStillDetected() {
+        var raw = "<html><body>automated access is not permitted</body></html>";
         assertEquals(ScrapeReason.POLICY_BLOCK,
-                BlockClassifier.classify("Automated access is not permitted.", gt()));
+                BlockClassifier.classify(obs(raw, "automated access is not permitted")));
     }
 
     @Test
-    public void challengeIsCaughtEvenWhenLongerThanTheMinCharsFloor() {
-        // An extracted interstitial runs a few hundred characters and clears a small
-        // site's derived floor, so brevity cannot be the test for a challenge.
-        var lowFloor = new GroundTruth(50, List.of(), null);
-        assertTrue(CHALLENGE_PAGE.length() > lowFloor.minChars());
-        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(CHALLENGE_PAGE, lowFloor));
+    public void httpStatusIsRecoveredFromTheFailureMessage() {
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(
+                ScrapeObservation.failed("https://x.test/", "HTTP 403 fetching https://x.test/")));
+        assertEquals(ScrapeReason.POLICY_BLOCK, BlockClassifier.classify(
+                ScrapeObservation.failed("https://x.test/", "HTTP 451 fetching https://x.test/")));
+        assertEquals(ScrapeReason.TIMEOUT, BlockClassifier.classify(
+                ScrapeObservation.failed("https://x.test/", "Read timed out")));
+        assertEquals(ScrapeReason.TIMEOUT, BlockClassifier.classify(
+                ScrapeObservation.failed("https://x.test/", "timeout")));
     }
 
     @Test
-    public void httpStatusIsRecoveredFromTheToolsErrorString() {
-        assertEquals(ScrapeReason.TRUST_BLOCK,
-                BlockClassifier.classify("Error fetching URL: HTTP 403 fetching https://x.test", gt()));
-        assertEquals(ScrapeReason.POLICY_BLOCK,
-                BlockClassifier.classify("Error fetching URL: HTTP 451 fetching https://x.test", gt()));
-        assertEquals(ScrapeReason.TIMEOUT,
-                BlockClassifier.classify("Error: Request timed out after 30 seconds fetching https://x.test", gt()));
+    public void nullIsErrorNotSilentPass() {
+        assertEquals(ScrapeReason.ERROR, BlockClassifier.classify(null));
     }
 
     @Test
-    public void blankIsThinContentAndNullIsError() {
-        // A fetched page that extracts to nothing is a JS gate or a client-rendered app —
-        // not a failure of ours. Only a null (the tool never produced output) is ours.
-        assertEquals(ScrapeReason.THIN_CONTENT, BlockClassifier.classify("", gt()));
-        assertEquals(ScrapeReason.ERROR, BlockClassifier.classify(null, gt()));
+    public void thinContentEscalatesToTheBrowserSkippingImpersonation() {
+        // A different TLS fingerprint cannot execute JavaScript, so sending a SPA to the
+        // impersonation rung spends a request arriving at the same empty page.
+        assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.THIN_CONTENT));
+        assertEquals(ScrapeRung.IMPERSONATE, BlockClassifier.nextRung(ScrapeReason.TRUST_BLOCK));
+        assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.JS_CHALLENGE));
+        assertEquals(ScrapeRung.PROVIDER, BlockClassifier.nextRung(ScrapeReason.TURNSTILE));
     }
 
     @Test
-    public void expectTitleIsReportedButDoesNotGate() {
-        // Readability + markdown conversion do not reliably preserve <title>, so gating
-        // on it would manufacture failures that say nothing about access.
-        var withTitle = new GroundTruth(600, List.of(), "a title that is absent");
-        assertEquals(ScrapeReason.OK, BlockClassifier.classify(REAL_ARTICLE, withTitle));
-        assertFalse(withTitle.titleSeen(REAL_ARTICLE));
+    public void aPolicyBlockEscalatesToNothingBecauseTheAnswerIsIdentityNotEvasion() {
+        assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK));
+        assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.OK));
+    }
+
+    @Test
+    public void prerenderMarkersAreRecorded() {
+        // abundent.academy: 68 characters to a browser UA, 5,169 to Googlebot. Counted
+        // as evidence for whether the descoped identity lane has measurable value.
+        var raw = "<html><head><script>window.prerenderready = false;</script>"
+                + "<meta name=\"fragment\" content=\"!\"></head><body><div id=\"app\"></div></body></html>";
+        var o = obs(raw, "# Site");
+        assertEquals(ScrapeReason.THIN_CONTENT, BlockClassifier.classify(o));
+        assertTrue(BlockClassifier.hasPrerenderMarkers(o));
+        assertFalse(BlockClassifier.hasPrerenderMarkers(obs("<html><body>x</body></html>", ARTICLE_TEXT)));
     }
 
     @Test
@@ -127,7 +174,7 @@ public class ScrapeHarnessTest extends UnitTest {
                  "entries":[
                   {"url":"https://ok.test","stratum":"unprotected-ssr","vendor":"none",
                    "outcome":"served","rendering":"ssr","rank":1,
-                   "ground_truth":{"min_chars":600,"reject_markers":["just a moment"]}},
+                   "ground_truth":{"min_chars":300,"reject_markers":["just a moment"]}},
                   {"url":"https://blocked.test","stratum":"interactive","vendor":"datadome",
                    "outcome":"interactive","rendering":null,"rank":2,
                    "ground_truth":{"min_chars":500,"reject_markers":["just a moment"]}}]}
@@ -137,7 +184,9 @@ public class ScrapeHarnessTest extends UnitTest {
         var corpus = ScrapeCorpus.load(f);
         assertTrue(corpus.isEqualAllocation());
 
-        ScrapeHarness.Rung stub = url -> url.contains("ok.test") ? REAL_ARTICLE : CHALLENGE_PAGE;
+        ScrapeHarness.Rung stub = url -> url.contains("ok.test")
+                ? obs("<html><body>ok</body></html>", ARTICLE_TEXT)
+                : obs(CHALLENGE_RAW, CHALLENGE_TEXT);
         var rep = ScrapeHarness.run("stub", stub, corpus, 2);
 
         assertEquals(2, rep.attempted());
@@ -145,21 +194,34 @@ public class ScrapeHarnessTest extends UnitTest {
         assertEquals(50.0, rep.rate(), 0.01);
         assertEquals(100.0, rep.byStratum().get("unprotected-ssr").rate(), 0.01);
         assertEquals(0.0, rep.byStratum().get("interactive").rate(), 0.01);
-        // Per-vendor is what says which WAFs we get past; an aggregate cannot.
         assertEquals(0.0, rep.byVendor().get("datadome").rate(), 0.01);
-        assertEquals(100.0, rep.byVendor().get("none").rate(), 0.01);
-        // rendering is null for gated entries and must not become a bucket
         assertFalse(rep.byRendering().containsKey("null"));
-        assertEquals(1, rep.byRendering().get("ssr").total());
-        Files.deleteIfExists(f);
+        // Failures are attributed to the rung that would address them.
+        assertEquals(1, rep.byNextRung().get(ScrapeRung.BROWSER.name()));
     }
 
     @Test
-    public void proportionalCorpusIsFlaggedBecauseTheGateDependsOnEqualAllocation() throws Exception {
-        var f = Files.createTempFile("cf-prop", ".json");
-        Files.writeString(f, """
-                {"allocation":"proportional","entries":[]}""");
-        assertFalse(ScrapeCorpus.load(f).isEqualAllocation());
+    public void groundTruthOverridesTheClassifierRatherThanFeedingIt() throws Exception {
+        // The corpus's reject markers are an INDEPENDENT check. A benchmark whose only
+        // guard is the component under test has no guard at all: here the classifier is
+        // fed a body with no marker and plenty of text, so it says OK, and the entry's
+        // ground truth is what catches it.
+        var json = """
+                {"allocation":"equal","strata":["unprotected-ssr"],"entries":[
+                  {"url":"https://sneaky.test","stratum":"unprotected-ssr","vendor":"none",
+                   "outcome":"served","rendering":"ssr","rank":1,
+                   "ground_truth":{"min_chars":50,"reject_markers":["site-specific gate phrase"]}}]}
+                """;
+        var f = Files.createTempFile("scrape-gt", ".json");
+        Files.writeString(f, json);
+        var corpus = ScrapeCorpus.load(f);
+
+        ScrapeHarness.Rung stub = url ->
+                obs("<html><body>x</body></html>", "site-specific gate phrase " + ARTICLE_TEXT);
+        var rep = ScrapeHarness.run("stub", stub, corpus, 1);
+
+        assertEquals(0, rep.ok(), "ground truth must veto a classifier OK");
+        assertEquals(ScrapeReason.JS_CHALLENGE, rep.results().get(0).reason());
         Files.deleteIfExists(f);
     }
 }

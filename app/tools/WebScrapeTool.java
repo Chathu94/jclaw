@@ -5,6 +5,11 @@ import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
+import services.EventLogger;
+import services.scrape.BlockClassifier;
+import services.scrape.ScrapeObservation;
+import services.scrape.ScrapeReason;
+import services.scrape.ScrapeRung;
 import utils.PlayConfig;
 import utils.RobotsCache;
 import utils.SsrfGuard;
@@ -233,9 +238,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     var uri = admitted.get(i);
                     try {
                         var outcome = futures.get(i).get();
-                        if (outcome.error() != null) {
-                            pages.add(new Page(uri.toString(),
-                                    "[Could not fetch: %s]".formatted(outcome.error())));
+                        if (!outcome.usable()) {
+                            // Name the reason and the rung that would address it, rather
+                            // than a bare failure. An agent reading "TURNSTILE" knows not
+                            // to retry; "[Could not fetch]" invites a retry loop.
+                            pages.add(new Page(uri.toString(), "[Not retrieved \u2014 %s%s%s]"
+                                    .formatted(outcome.reason(),
+                                            outcome.detail() == null ? "" : ": " + outcome.detail(),
+                                            outcome.nextRung() == ScrapeRung.NONE ? ""
+                                                    : "; needs " + outcome.nextRung())));
                             continue;
                         }
                         pages.add(new Page(outcome.fetched().finalUrl(), outcome.text()));
@@ -247,7 +258,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                         break;
                     } catch (ExecutionException e) {
                         pages.add(new Page(uri.toString(),
-                                "[Could not fetch: %s]".formatted(reason(e))));
+                                "[Not retrieved \u2014 %s]".formatted(reason(e))));
                     }
                 }
 
@@ -280,7 +291,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     /** One page's work, as it runs on the pool. Pacing happens here so the wait for a
      *  host's next slot overlaps other hosts' fetches instead of blocking the crawl. */
-    private record Outcome(WebExtraction.FetchResult fetched, String text, String error) {}
+    private record Outcome(WebExtraction.FetchResult fetched, String text,
+                           ScrapeReason reason, ScrapeRung nextRung, String detail) {
+        boolean usable() {
+            return reason == ScrapeReason.OK;
+        }
+    }
 
     private Outcome fetchOne(URI uri, boolean respectRobots) {
         try {
@@ -289,16 +305,31 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     : RobotsCache.DEFAULT_DELAY_MS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return new Outcome(null, null, "interrupted");
+            return classified(uri, null, ScrapeObservation.failed(uri.toString(), "interrupted"));
         }
         try {
             var fetched = WebExtraction.fetch(uri.toString(), CLIENT, HEADERS);
-            return new Outcome(fetched, WebExtraction.toText(fetched), null);
+            var text = WebExtraction.toText(fetched);
+            return classified(uri, fetched, ScrapeObservation.of(fetched, text));
         } catch (Exception e) {
             // One unreachable page must not end the crawl — the caller asked for a
             // site, and a broken link on it is the site's problem, not the run's.
-            return new Outcome(null, null, reason(e));
+            return classified(uri, null, ScrapeObservation.failed(uri.toString(), reason(e)));
         }
+    }
+
+    /** Runs the shared classifier and records the outcome, so a live install produces
+     *  the same telemetry the offline harness does. */
+    private static Outcome classified(URI uri, WebExtraction.FetchResult fetched,
+                                      ScrapeObservation obs) {
+        var reason = BlockClassifier.classify(obs);
+        var next = BlockClassifier.nextRung(reason);
+        if (reason != ScrapeReason.OK) {
+            EventLogger.info("scrape",
+                    "%s: %s (would need %s)".formatted(uri, reason, next),
+                    obs.failed() ? obs.error() : "extracted %d chars".formatted(obs.textLength()));
+        }
+        return new Outcome(fetched, obs.extractedText(), reason, next, obs.error());
     }
 
     /** Runs after a level completes, single-threaded, so {@code seen} needs no

@@ -140,7 +140,7 @@ public class WebScrapeSsrfTest extends UnitTest {
 
         assertFalse(routes.pageHits().contains("http://127.0.0.1:9000/api/status"),
                 "the redirect target must never be requested: " + routes.pageHits());
-        assertTrue(out.contains("Could not fetch") || out.contains("Refused"),
+        assertTrue(out.contains("Not retrieved") || out.contains("Refused"),
                 "the refusal is surfaced, not swallowed");
     }
 

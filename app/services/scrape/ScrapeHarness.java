@@ -1,6 +1,8 @@
 package services.scrape;
 
-import tools.WebFetchTool;
+import okhttp3.OkHttpClient;
+import utils.SsrfGuard;
+import utils.WebExtraction;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,27 +31,58 @@ public final class ScrapeHarness {
 
     private ScrapeHarness() {}
 
-    /** One rung's fetch: URL in, LLM-visible text out. Errors are returned, not thrown,
-     *  because an error string is itself a classifiable outcome. */
+    /** One rung's attempt. Failures are returned as observations, not thrown, because
+     *  a failure is itself a classifiable outcome. */
     @FunctionalInterface
     public interface Rung {
-        String fetch(String url);
+        ScrapeObservation fetch(String url);
     }
 
-    /** Rung 1: the shipped {@code web_fetch} path — OkHttp, SsrfGuard, Readability,
-     *  markdown. A null agent is intentional: {@code WebFetchTool} only uses one for
-     *  the oversize-workspace-write branch, so the harness exercises fetch and
-     *  extraction without dragging agent state into the measurement. */
+    private static final Map<String, String> HEADERS =
+            Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
+
+    /** The harness's own guarded client. {@code WebFetchTool.CLIENT} is package-private
+     *  in {@code tools}, and duplicating its construction here is the smaller cost —
+     *  same {@link SsrfGuard#buildGuardedClient} call, same timeouts. */
+    private static final OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(10, 30);
+
+    /**
+     * Rung 1: the shipped fetch-and-extract chain — OkHttp, SsrfGuard, manual
+     * redirects, Readability, markdown.
+     *
+     * <p>Calls {@link WebExtraction} directly rather than {@code WebFetchTool.execute}.
+     * Since JCLAW-1082 the tool is a thin wrapper over this chain, and the wrapper's
+     * contribution is presentation — error strings and the html-mode branch — which the
+     * classifier would then have to parse back out. Going direct also gives the raw
+     * body, without which JCLAW-1086's classifier cannot tell a gate from a SPA. It is
+     * the same code path {@code web_scrape} uses per page.
+     */
     public static Rung rung1() {
-        var tool = new WebFetchTool();
-        return url -> tool.execute("{\"url\":\"%s\",\"mode\":\"text\"}".formatted(url), null);
+        return url -> {
+            try {
+                var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
+                return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+            } catch (Exception e) {
+                var m = e.getMessage();
+                return ScrapeObservation.failed(url,
+                        m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+            }
+        };
     }
 
     /** {@code detail} carries the head of a failing fetch's output. Without it a run
      *  reports ERROR without saying what the error was, which makes the harness
      *  unfalsifiable — the failure mode it exists to prevent, one level up. */
+    /** {@code detail} carries the head of a failing fetch's output. Without it a run
+     *  reports ERROR without saying what the error was, which makes the harness
+     *  unfalsifiable — the failure mode it exists to prevent, one level up.
+     *
+     *  <p>{@code nextRung} is what the aggregate cannot say: which rung would have to
+     *  exist for this failure to become a success. {@code prerender} counts origins that
+     *  would serve a declared crawler more than they served us. */
     public record Result(String url, String stratum, String vendor, String outcome,
                          String rendering, boolean ok, ScrapeReason reason,
+                         ScrapeRung nextRung, boolean prerender,
                          int chars, boolean titleSeen, long ms, String detail) {}
 
     public record Score(int total, int ok, double rate) {}
@@ -59,6 +92,7 @@ public final class ScrapeHarness {
     public record RungReport(String rung, int attempted, int ok, double rate,
                              Map<String, Score> byStratum, Map<String, Score> byVendor,
                              Map<String, Score> byRendering, Map<String, Integer> byReason,
+                             Map<String, Integer> byNextRung, int prerenderCapable,
                              List<Result> results) {}
 
     public static RungReport run(String rungName, Rung rung, ScrapeCorpus.Corpus corpus,
@@ -82,29 +116,52 @@ public final class ScrapeHarness {
 
     private static Result measure(Rung rung, ScrapeCorpus.Entry e) {
         long t0 = System.nanoTime();
-        String out;
+        ScrapeObservation obs;
         try {
-            out = rung.fetch(e.url());
+            obs = rung.fetch(e.url());
         } catch (RuntimeException ex) {
-            out = "Error: " + ex;
+            obs = ScrapeObservation.failed(e.url(), String.valueOf(ex));
         }
         long ms = (System.nanoTime() - t0) / 1_000_000;
-        var reason = BlockClassifier.classify(out, e.groundTruth());
+
+        var gt = e.groundTruth();
+        var reason = BlockClassifier.classify(obs, gt.minChars());
+
+        // The corpus's reject markers stay in play as an INDEPENDENT check on the
+        // classifier rather than as its input. If a run ever scores an interstitial as
+        // content, this is what catches it — and a benchmark whose only guard is the
+        // component under test has no guard at all.
+        var text = obs.extractedText() == null ? "" : obs.extractedText();
+        if (reason == ScrapeReason.OK && gt.rejected(text)) {
+            reason = ScrapeReason.JS_CHALLENGE;
+        }
+
         boolean ok = reason == ScrapeReason.OK;
-        var text = out == null ? "" : out;
+        var detail = obs.failed() ? obs.error() : text;
         return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
-                ok, reason, text.length(), e.groundTruth().titleSeen(text), ms,
-                ok ? null : text.substring(0, Math.min(200, text.length())).replace('\n', ' '));
+                ok, reason, BlockClassifier.nextRung(reason),
+                BlockClassifier.hasPrerenderMarkers(obs),
+                text.length(), gt.titleSeen(text), ms,
+                ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '));
     }
 
     private static RungReport report(String rungName, ScrapeCorpus.Corpus corpus,
                                      List<Result> results) {
         var byReason = new LinkedHashMap<String, Integer>();
-        results.forEach(r -> byReason.merge(r.reason().name(), 1, Integer::sum));
+        var byNextRung = new LinkedHashMap<String, Integer>();
+        for (var r : results) {
+            byReason.merge(r.reason().name(), 1, Integer::sum);
+            if (!r.ok()) {
+                byNextRung.merge(r.nextRung().name(), 1, Integer::sum);
+            }
+        }
         int ok = (int) results.stream().filter(Result::ok).count();
+        int prerender = (int) results.stream()
+                .filter(r -> !r.ok() && r.prerender()).count();
         return new RungReport(rungName, results.size(), ok, rate(ok, results.size()),
                 group(results, Result::stratum), group(results, Result::vendor),
-                group(results, Result::rendering), byReason, List.copyOf(results));
+                group(results, Result::rendering), byReason, byNextRung, prerender,
+                List.copyOf(results));
     }
 
     private static Map<String, Score> group(List<Result> results,

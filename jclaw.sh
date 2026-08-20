@@ -3546,6 +3546,18 @@ print("  reasons:")
 for reason, n in sorted(r["byReason"].items(), key=lambda kv: -kv[1]):
     print("    %-16s %4d" % (reason, n))
 print()
+if r.get("byNextRung"):
+    # What the aggregate cannot say: which rung would have to exist for these
+    # failures to become successes.
+    print("  failures by rung that would address them:")
+    for rung, n in sorted(r["byNextRung"].items(), key=lambda kv: -kv[1]):
+        print("    %-16s %4d" % (rung, n))
+    print()
+pc = r.get("prerenderCapable", 0)
+if pc:
+    print("  %d failed origin(s) carry prerendering markers \u2014 they would serve a" % pc)
+    print("  declared crawler more than they served us (evidence for JCLAW-1091).")
+    print()
 PYSUM
 
     if [[ -n "$out" ]]; then
