@@ -62,6 +62,23 @@ DEFAULT_IDENTITY = "patchright-chromium"
 # the default is what the JVM gets; --max-concurrent exists for standalone runs.
 DEFAULT_MAX_CONCURRENT = 4
 
+# Chromium's headless builds put "HeadlessChrome" in the User-Agent. Patchright
+# removes the CDP artifacts a JS challenge inspects, but the UA is plain text that
+# any WAF reads first — measured as 52 TRUST_BLOCKs on a corpus run, including
+# origins the cheaper impersonation rung fetched without trouble. The default UA is
+# read once from the browser itself and the token corrected, so the platform and
+# version stay exactly what this build really is.
+#
+# Sec-CH-UA still names HeadlessChrome and is NOT fixable from the route interceptor:
+# rewriting it in continue_(headers=...) is accepted and then discarded, because
+# Chromium regenerates browser-managed client hints after interception. Verified by
+# sending an x-probe header through the same call — the probe arrives, the brand list
+# does not change. Fixing it needs Emulation.setUserAgentOverride with
+# userAgentMetadata; deferred until measurement shows the brand list is what is
+# actually costing access.
+_UA_LOCK = threading.Lock()
+_REAL_UA = None
+
 from ssrf import is_public_host
 
 try:
@@ -188,6 +205,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    @staticmethod
+    def _headful_user_agent(browser):
+        """The browser's own UA with the headless token corrected, cached per process."""
+        global _REAL_UA
+        with _UA_LOCK:
+            if _REAL_UA is None:
+                probe = browser.new_context()
+                try:
+                    ua = probe.new_page().evaluate("navigator.userAgent")
+                finally:
+                    probe.close()
+                _REAL_UA = ua.replace("HeadlessChrome/", "Chrome/")
+            return _REAL_UA
+
     def _render(self, url, pins, timeout_ms, settle_ms, wait_until):
         args = []
         if pins:
@@ -219,7 +250,8 @@ class Handler(BaseHTTPRequestHandler):
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=args)
             try:
-                page = browser.new_page()
+                context = browser.new_context(user_agent=self._headful_user_agent(browser))
+                page = context.new_page()
                 page.route("**/*", gate)
                 response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                 if settle_ms > 0:
