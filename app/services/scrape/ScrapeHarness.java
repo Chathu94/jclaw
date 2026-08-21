@@ -4,6 +4,7 @@ import okhttp3.OkHttpClient;
 import utils.SsrfGuard;
 import utils.WebExtraction;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -173,7 +174,13 @@ public final class ScrapeHarness {
 
     /** {@code byStratum} is what the epic gates on; {@code byVendor} answers "which
      *  WAFs can we get past", which an aggregate cannot. Both come from one run. */
+    /** {@code prevalenceWeighted} answers "what will an agent actually experience",
+     *  {@code rate} answers "did we do the hard work". Both are reported because either
+     *  alone is misleading: the corpus over-samples difficulty by design, and the web
+     *  under-samples it. {@code prevalenceNote} carries the unreachable exclusion, which
+     *  is worth about thirty points and must never travel separately from the number. */
     public record RungReport(String rung, int attempted, int ok, double rate,
+                             double prevalenceWeighted, String prevalenceNote,
                              Map<String, Score> byStratum, Map<String, Score> byVendor,
                              Map<String, Score> byRendering, Map<String, Integer> byReason,
                              Map<String, Integer> byNextRung, int prerenderCapable,
@@ -272,7 +279,20 @@ public final class ScrapeHarness {
         int ok = (int) results.stream().filter(Result::ok).count();
         int prerender = (int) results.stream()
                 .filter(r -> !r.ok() && r.prerender()).count();
+        double weighted = 0;
+        var note = "prevalence weighting unavailable";
+        try {
+            var weights = ScrapePrevalence.load();
+            note = weights.note();
+            for (var byOutcome : group(results, Result::outcome).entrySet()) {
+                weighted += weights.weight(byOutcome.getKey()) * byOutcome.getValue().rate();
+            }
+        } catch (IOException _) {
+            // A missing prevalence file must not fail a run: the equal-allocation score
+            // is the gate, and this number is context alongside it.
+        }
         return new RungReport(rungName, results.size(), ok, rate(ok, results.size()),
+                Math.round(weighted * 10) / 10.0, note,
                 group(results, Result::stratum), group(results, Result::vendor),
                 group(results, Result::rendering), byReason, byNextRung, prerender,
                 List.copyOf(results));

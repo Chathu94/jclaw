@@ -16,6 +16,7 @@ Stdlib only, on purpose: this is one-time data generation, not app code.
 """
 
 import argparse, csv, io, json, os, random, re, ssl, sys, time, urllib.request, zipfile
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
@@ -296,6 +297,71 @@ def select(pool, want):
     return out
 
 
+def reclassify(path, workers):
+    """Re-probe the corpus's own entries and refresh their labels in place (JCLAW-1091).
+
+    Protection tiers drift — the epic carries this as risk R3 — so a gate scored against
+    labels captured weeks earlier is scoring a corpus that no longer exists. This differs
+    from a rebuild on purpose: the URL set is held fixed, because changing which sites are
+    measured would make the baseline-versus-final delta meaningless.
+
+    Equal allocation is a property of the labels, not of the file, so drift can break it.
+    That is reported rather than repaired: silently rebalancing would hide exactly the
+    drift this pass exists to surface, and the harness already refuses a corpus that is no
+    longer equally allocated.
+    """
+    doc = json.load(open(path))
+    entries = doc["entries"]
+    print("==> re-probing %d entries with %d workers" % (len(entries), workers), file=sys.stderr)
+
+    def one(e):
+        host = e["url"].split("//", 1)[1].split("/", 1)[0]
+        url, status, headers, body, truncated = probe(host)
+        text = visible_text(body)
+        vendor, outcome, rendering = classify(status, headers, body, text, truncated)
+        return e, url, status, body, text, vendor, outcome, rendering
+
+    changes, before = [], Counter(e["stratum"] for e in entries)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for f in as_completed([ex.submit(one, e) for e in entries]):
+            e, url, status, body, text, vendor, outcome, rendering = f.result()
+            new_stratum = stratum_of(vendor, outcome, rendering)
+            if new_stratum is None:
+                # Unclassifiable now (usually an origin that stopped answering). Keep the
+                # stored label rather than drop the entry: losing a row would change the
+                # denominator and quietly flatter every rate computed against it.
+                changes.append((e["url"], e["stratum"], "UNCLASSIFIABLE — label kept"))
+                continue
+            if (new_stratum, vendor, outcome) != (e["stratum"], e["vendor"], e["outcome"]):
+                changes.append((e["url"], "%s/%s" % (e["stratum"], e["vendor"]),
+                                "%s/%s" % (new_stratum, vendor)))
+            e["stratum"], e["vendor"], e["outcome"], e["rendering"] = \
+                new_stratum, vendor, outcome, rendering
+            e["ground_truth"] = ground_truth(status, body, outcome, text)
+
+    after = Counter(e["stratum"] for e in entries)
+    doc["reclassified_on"] = time.strftime("%Y-%m-%d")
+    # "allocation" describes the SAMPLING DESIGN and stays "equal": the corpus was drawn
+    # 25-per-stratum and the URL set is unchanged. Exact equality of the resulting counts
+    # cannot survive re-classification — a site that stops challenging genuinely belongs
+    # in a different stratum — so requiring it would make AC1 (re-classify before the run)
+    # and the equal-allocation check mutually exclusive. The realised spread is recorded
+    # instead, and every floor is scored against its own stratum's n.
+    doc["realised_strata"] = dict(sorted(after.items()))
+    spread = max(after.values()) - min(after.values())
+    doc["allocation_spread"] = spread
+    if spread > 0:
+        print("!!  strata no longer exactly equal (spread %d) — design stays 'equal', "
+              "realised counts recorded" % spread, file=sys.stderr)
+    json.dump(doc, open(path, "w"), indent=2)
+
+    print("==> %d of %d entries changed label" % (len(changes), len(entries)), file=sys.stderr)
+    for url, was, now in sorted(changes):
+        print("    %-38s %-28s -> %s" % (url, was, now), file=sys.stderr)
+    print("==> strata before: %s" % dict(sorted(before.items())), file=sys.stderr)
+    print("==> strata after : %s" % dict(sorted(after.items())), file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sample", type=int, default=40_000)
@@ -305,7 +371,14 @@ def main():
     ap.add_argument("--out", default=HERE)
     ap.add_argument("--recompute", action="store_true",
                     help="rewrite ground-truth floors from stored observations, no re-probe")
+    ap.add_argument("--reclassify", action="store_true",
+                    help="re-probe the EXISTING entries and refresh their labels, keeping "
+                         "the same URL set so the baseline stays comparable (JCLAW-1091)")
     args = ap.parse_args()
+
+    if args.reclassify:
+        reclassify(os.path.join(args.out, "corpus.json"), args.workers)
+        return
 
     if args.recompute:
         path = os.path.join(args.out, "corpus.json")
