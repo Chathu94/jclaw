@@ -79,6 +79,28 @@ DEFAULT_MAX_CONCURRENT = 4
 _UA_LOCK = threading.Lock()
 _REAL_UA = None
 
+# Prefer the operator's real Google Chrome over the bundled Chromium. This is the
+# single largest stealth difference available and almost none of it is code: measured
+# against a headful Chrome on the same probe, bundled Chromium differs on eleven
+# signals and Chrome-headless on two. Chrome supplies a real GPU string
+# ("Google Inc. (Apple)" rather than SwiftShader), a populated navigator.plugins and
+# mimeTypes, window.chrome with loadTimes, the operator's real language list,
+# Notification.permission "default" rather than "denied", pdfViewerEnabled, and — the
+# one this started with — userAgentData brands reading "Google Chrome" instead of
+# "HeadlessChrome", which is what Sec-CH-UA is generated from.
+#
+# Falls back to bundled Chromium when Chrome is absent, because a server without a
+# desktop browser must still render rather than fail.
+_CHANNEL_LOCK = threading.Lock()
+_CHANNEL = None  # None = undetermined, "" = bundled Chromium
+
+# One signal still separates us from a headful Chrome: outerWidth/outerHeight equal
+# the viewport, because headless has no window chrome to add. It is NOT fixable here —
+# Patchright disables add_init_script (verified: a marker set in one is absent from the
+# page, at both context and page level), which is the only hook that runs early enough
+# for a detector reading the value during load. It is also a weak tell; a real browser
+# in fullscreen or kiosk mode reports the same thing.
+
 from ssrf import is_public_host
 
 try:
@@ -148,6 +170,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "model": self.state.identity,
                 "patchright": sync_playwright is not None,
+                "channel": _CHANNEL if _CHANNEL is not None else "undetermined",
                 "browser_ready": capability()["runnable"],
             })
         elif self.path == "/capability":
@@ -206,6 +229,22 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     @staticmethod
+    def _channel(pw):
+        """"chrome" when the real browser is installed, "" for bundled Chromium."""
+        global _CHANNEL
+        with _CHANNEL_LOCK:
+            if _CHANNEL is None:
+                try:
+                    probe = pw.chromium.launch(headless=True, channel="chrome")
+                    probe.close()
+                    _CHANNEL = "chrome"
+                except Exception as exc:
+                    sys.stderr.write("[stealth-sidecar] real Chrome unavailable (%s) — "
+                                     "falling back to bundled Chromium\n" % type(exc).__name__)
+                    _CHANNEL = ""
+            return _CHANNEL
+
+    @staticmethod
     def _headful_user_agent(browser):
         """The browser's own UA with the headless token corrected, cached per process."""
         global _REAL_UA
@@ -248,7 +287,11 @@ class Handler(BaseHTTPRequestHandler):
             route.continue_()
 
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True, args=args)
+            channel = self._channel(p)
+            launch = {"headless": True, "args": args}
+            if channel:
+                launch["channel"] = channel
+            browser = p.chromium.launch(**launch)
             try:
                 context = browser.new_context(user_agent=self._headful_user_agent(browser))
                 page = context.new_page()

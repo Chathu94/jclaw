@@ -73,6 +73,43 @@ that keeps polling never goes idle, so waiting for it hangs on exactly the pages
 rung exists for. A fixed `settleMs` window afterwards gives the challenge time to
 resolve itself.
 
+## Looking like a real browser
+
+The browser is the operator's installed **Google Chrome** (`channel="chrome"`) rather
+than the Chromium that ships with Patchright, falling back to the bundled build when
+Chrome is absent so a server without a desktop browser still renders. That one choice
+is most of the stealth, and almost none of it is code. Measured against a headful
+Chrome on the same probe:
+
+| Signal | bundled Chromium | real Chrome |
+|---|---|---|
+| `userAgentData.brands` | `HeadlessChrome` | `Google Chrome` |
+| `navigator.plugins` / `mimeTypes` | 0 / 0 | 5 / 2 |
+| `window.chrome` | `undefined` | object, with `loadTimes` |
+| WebGL renderer | SwiftShader | the real GPU |
+| `languages` | `en-US` | the operator's real list |
+| `Notification.permission` | `denied` | `default` |
+| `pdfViewerEnabled` | false | true |
+
+`Sec-CH-UA` is generated from `userAgentData.brands`, so the Chrome channel fixes the
+header at its source — no `Emulation.setUserAgentOverride` needed. The User-Agent
+string still says `HeadlessChrome` even on the Chrome channel, and is corrected
+separately.
+
+That leaves **one** signal differing from a headful Chrome — `outerWidth`/`outerHeight`
+equal the viewport, because headless has no window chrome to add — and zero failures
+on `bot.sannysoft.com`.
+
+**This is not indistinguishability, and should not be described as such.** Every
+*static* fingerprint matches because the browser largely is a real Chrome. What remains
+distinguishable is behaviour: a page is loaded, settles, and is read — no mouse
+movement, no scrolling, no dwell time. A detector scoring behaviour rather than
+fingerprints can still tell, and a render-only rung structurally cannot produce those
+signals.
+
+Access measured on the 150-site corpus: 82/150 with bundled Chromium, 87/150 with the
+UA token corrected, **107/150 with the Chrome channel**.
+
 ## Concurrency
 
 A browser is launched per render, because the DNS pin is a launch argument and cannot
