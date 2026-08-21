@@ -10,6 +10,7 @@ import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
+import tools.scrape.ScrapeLadder;
 import utils.PlayConfig;
 import utils.RobotsCache;
 import utils.SsrfGuard;
@@ -69,6 +70,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_TIMEOUT_SECONDS = "web_scrape.timeout-seconds";
     private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
     private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
+    private static final String CFG_MAX_ESCALATIONS = "web_scrape.max-escalations";
+
+    /** Escalated pages allowed per crawl. Deliberately well below max-pages: a rung-3
+     *  render costs seconds where a plain fetch costs milliseconds, so a crawl that
+     *  escalated every page would be unusable. Five buys the pages most likely to
+     *  matter — a blocked entry page, a client-rendered section — without turning a
+     *  25-page crawl into a multi-minute one. */
+    private static final int DEFAULT_MAX_ESCALATIONS = 5;
 
     private static final String INTERRUPTED = "interrupted";
     private static final String ROBOTS_REFUSAL = "disallowed by robots.txt";
@@ -149,7 +158,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Holds no handles between calls and writes nothing to disk. */
     @Override public boolean parallelSafe() { return true; }
 
-    private record Page(String url, String text) {}
+    /** {@code servedBy} is the rung that produced this text. PLAIN for the ordinary
+     *  case; anything higher means the ladder was climbed for this page. */
+    private record Page(String url, String text, ScrapeRung servedBy) {}
 
     /** A frontier URL the guard declined, kept apart from {@link Page} so a refusal
      *  never spends a slot in the page budget. */
@@ -234,6 +245,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         int totalChars;
         int unvisited;
         String stoppedBecause;
+        /** Remaining escalation budget, and what refusing it cost — reported rather
+         *  than silently dropped, so a thin result is never mistaken for a blocked one. */
+        int escalationsLeft = maxEscalations();
+        int escalationsUsed;
+        int escalationsSuppressed;
     }
 
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
@@ -321,7 +337,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private List<WebExtraction.FetchResult> fetchLevel(ExecutorService pool, List<URI> admitted,
                                                        boolean respectRobots, CrawlState state) {
         var futures = admitted.stream()
-                .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots)))
+                .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots, state)))
                 .toList();
         var fetched = new ArrayList<WebExtraction.FetchResult>();
         for (int i = 0; i < futures.size(); i++) {
@@ -334,7 +350,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 return fetched;
             } catch (ExecutionException e) {
                 state.pages.add(new Page(uri.toString(),
-                        "[Not retrieved \u2014 %s]".formatted(reason(e))));
+                        "[Not retrieved \u2014 %s]".formatted(reason(e)), ScrapeRung.PLAIN));
             }
         }
         return fetched;
@@ -350,10 +366,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     .formatted(outcome.reason(),
                             outcome.detail() == null ? "" : ": " + outcome.detail(),
                             outcome.nextRung() == ScrapeRung.NONE ? ""
-                                    : "; needs " + outcome.nextRung())));
+                                    : "; needs " + outcome.nextRung()), outcome.servedBy()));
             return;
         }
-        state.pages.add(new Page(outcome.fetched().finalUrl(), outcome.text()));
+        state.pages.add(new Page(outcome.fetched().finalUrl(), outcome.text(),
+                outcome.servedBy()));
         state.totalChars += outcome.text().length();
         fetched.add(outcome.fetched());
     }
@@ -384,13 +401,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** One page's work, as it runs on the pool. Pacing happens here so the wait for a
      *  host's next slot overlaps other hosts' fetches instead of blocking the crawl. */
     private record Outcome(WebExtraction.FetchResult fetched, String text,
-                           ScrapeReason reason, ScrapeRung nextRung, String detail) {
+                           ScrapeReason reason, ScrapeRung nextRung, String detail,
+                           ScrapeRung servedBy) {
         boolean usable() {
             return reason == ScrapeReason.OK;
         }
     }
 
-    private Outcome fetchOne(URI uri, boolean respectRobots) {
+    private Outcome fetchOne(URI uri, boolean respectRobots, CrawlState state) {
         try {
             RobotsCache.awaitSlot(uri, respectRobots
                     ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
@@ -399,15 +417,46 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             Thread.currentThread().interrupt();
             return classified(uri, null, ScrapeObservation.failed(uri.toString(), INTERRUPTED));
         }
+        Outcome plain;
         try {
             var fetched = WebExtraction.fetch(uri.toString(), CLIENT, HEADERS);
             var text = WebExtraction.toText(fetched);
-            return classified(uri, fetched, ScrapeObservation.of(fetched, text));
+            plain = classified(uri, fetched, ScrapeObservation.of(fetched, text));
         } catch (Exception e) {
             // One unreachable page must not end the crawl — the caller asked for a
             // site, and a broken link on it is the site's problem, not the run's.
-            return classified(uri, null, ScrapeObservation.failed(uri.toString(), reason(e)));
+            plain = classified(uri, null, ScrapeObservation.failed(uri.toString(), reason(e)));
         }
+        return escalate(uri, plain, state);
+    }
+
+    /**
+     * Climb the ladder for a page rung 1 could not read, if the crawl's escalation
+     * budget allows.
+     *
+     * <p>The budget is claimed before the attempt and never refunded on failure: a rung
+     * that failed still spent the seconds, and refunding would let one pathological host
+     * consume the whole crawl one retry at a time.
+     */
+    private Outcome escalate(URI uri, Outcome plain, CrawlState state) {
+        if (plain.usable() || !ScrapeLadder.available()) return plain;
+        synchronized (state) {
+            if (state.escalationsLeft <= 0) {
+                state.escalationsSuppressed++;
+                return plain;
+            }
+            state.escalationsLeft--;
+            state.escalationsUsed++;
+        }
+        var best = ScrapeLadder.climb(uri.toString(),
+                new ScrapeLadder.Attempt(ScrapeRung.PLAIN, plain.fetched(), plain.text(),
+                        plain.reason(), plain.detail()));
+        if (best.servedBy() == ScrapeRung.PLAIN) return plain;
+        EventLogger.info("scrape", "%s: served by %s after %s at PLAIN"
+                .formatted(uri, best.servedBy(), plain.reason()), null);
+        return new Outcome(best.fetched(), best.text(), best.reason(),
+                BlockClassifier.nextRung(best.reason(), best.servedBy()),
+                best.detail(), best.servedBy());
     }
 
     /** Runs the shared classifier and records the outcome, so a live install produces
@@ -421,7 +470,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     "%s: %s (would need %s)".formatted(uri, reason, next),
                     obs.failed() ? obs.error() : "extracted %d chars".formatted(obs.textLength()));
         }
-        return new Outcome(fetched, obs.extractedText(), reason, next, obs.error());
+        return new Outcome(fetched, obs.extractedText(), reason, next, obs.error(),
+                ScrapeRung.PLAIN);
     }
 
     /** Runs after a level completes, single-threaded, so {@code seen} needs no
@@ -495,13 +545,28 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 sb.append("  - %s \u2014 %s\n".formatted(r.url(), r.why()));
             }
         }
+        if (state.escalationsUsed > 0 || state.escalationsSuppressed > 0) {
+            sb.append("Escalated %d page%s beyond the plain fetch".formatted(
+                    state.escalationsUsed, state.escalationsUsed == 1 ? "" : "s"));
+            if (state.escalationsSuppressed > 0) {
+                // Never a silent truncation: a caller reading thin text needs to know
+                // whether the page resisted or whether we simply stopped trying.
+                sb.append("; %d more could have been but the escalation budget (%d) was spent"
+                        .formatted(state.escalationsSuppressed, maxEscalations()));
+            }
+            sb.append(".\n");
+        }
         if (unvisited > 0) {
             // Say what was left behind rather than let the result read as complete.
             sb.append("Stopped: %s \u2014 %d discovered page%s not read.\n"
                     .formatted(stoppedBecause, unvisited, unvisited == 1 ? "" : "s"));
         }
         for (var p : pages) {
-            sb.append("\n\n---\n\n## ").append(p.url()).append("\n\n").append(p.text());
+            sb.append("\n\n---\n\n## ").append(p.url());
+            if (p.servedBy() != ScrapeRung.PLAIN) {
+                sb.append(" _(via ").append(p.servedBy()).append(")_");
+            }
+            sb.append("\n\n").append(p.text());
         }
         if (sb.length() > MAX_TOTAL_CHARS) {
             return sb.substring(0, MAX_TOTAL_CHARS)
@@ -517,6 +582,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static int configMaxDepth() {
         return (int) PlayConfig.longOr(CFG_MAX_DEPTH, DEFAULT_MAX_DEPTH);
+    }
+
+    private static int maxEscalations() {
+        return (int) PlayConfig.longOr(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
     }
 
     private static int configTimeoutSeconds() {

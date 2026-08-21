@@ -7,6 +7,10 @@ import models.Agent;
 import okhttp3.OkHttpClient;
 import services.AgentService;
 import utils.SsrfGuard;
+import services.scrape.BlockClassifier;
+import services.scrape.ScrapeObservation;
+import services.scrape.ScrapeRung;
+import tools.scrape.ScrapeLadder;
 import utils.WebExtraction;
 
 import javax.net.ssl.SSLException;
@@ -122,7 +126,11 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
         try {
             var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
-            return "html".equals(mode) ? rawHtml(fetched, url, agent) : WebExtraction.toText(fetched);
+            var text = WebExtraction.toText(fetched);
+            var best = climb(url, fetched, text, null);
+            var body = best.fetched() == null ? fetched : best.fetched();
+            return "html".equals(mode) ? rawHtml(body, url, agent)
+                    : (best.text() == null ? text : best.text());
         } catch (WebExtraction.HostNotAllowedException e) {
             return e.getMessage();
         } catch (SecurityException e) {
@@ -141,8 +149,29 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 return "Error: SSL/TLS certificate verification failed for %s: %s. The site may have an expired, self-signed, or invalid certificate."
                         .formatted(url, sslEx.getMessage());
             }
+            // A refusal is the case escalation exists for — an HTTP 403 arrives here as
+            // an IOException, and giving up on it is exactly what left the higher rungs
+            // unreachable (JCLAW-1099). The SSRF, host-allowlist and TLS branches above
+            // deliberately do NOT escalate: those are our own refusals, and retrying
+            // them through a different transport would be a way around the guard.
+            var escalated = climb(url, null, null, e.getMessage());
+            if (escalated.usable()) {
+                return "html".equals(mode) && escalated.fetched() != null
+                        ? rawHtml(escalated.fetched(), url, agent) : escalated.text();
+            }
             return "Error fetching URL: %s".formatted(e.getMessage());
         }
+    }
+
+    /** Hand one URL to the ladder, classifying the plain attempt the way the crawler and
+     *  the harness both do so all three agree on what counts as a failure. */
+    private static ScrapeLadder.Attempt climb(String url, WebExtraction.FetchResult fetched,
+                                              String text, String error) {
+        var obs = fetched == null
+                ? ScrapeObservation.failed(url, error == null ? "fetch failed" : error)
+                : ScrapeObservation.of(fetched, text);
+        return ScrapeLadder.climb(url, new ScrapeLadder.Attempt(
+                ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error));
     }
 
     /**

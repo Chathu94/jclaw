@@ -101,7 +101,7 @@ public final class ScrapeHarness {
     public static Rung rung2() {
         return url -> {
             try {
-                var fetched = tools.scrape.ImpersonatedFetcher.fetch(url, IMPERSONATED_HEADERS);
+                var fetched = tools.scrape.ImpersonatedFetcher.fetch(url, tools.scrape.ScrapeLadder.IMPERSONATED_HEADERS);
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
                 var m = e.getMessage();
@@ -134,10 +134,28 @@ public final class ScrapeHarness {
         };
     }
 
-    /** Accept headers only; the profile supplies its own User-Agent (see {@link #rung2()}). */
-    private static final Map<String, String> IMPERSONATED_HEADERS = Map.of(
-            "Accept", "text/html,application/xhtml+xml",
-            "Accept-Language", "en-US,en;q=0.9");
+    /**
+     * The escalation ladder as the tools actually run it (JCLAW-1099).
+     *
+     * <p>The other rungs measure one transport in isolation, which is what per-rung
+     * attribution needs. This one measures what a caller gets, and it exists because the
+     * union of three separate rung runs was being quoted as a ladder figure while no
+     * caller could obtain it. A number that has to be computed by hand across three runs
+     * is not a measurement of anything shipped.
+     */
+    public static Rung rungLadder() {
+        return url -> {
+            var plain = rung1().fetch(url);
+            var first = new tools.scrape.ScrapeLadder.Attempt(
+                    ScrapeRung.PLAIN, null, plain.extractedText(),
+                    BlockClassifier.classify(plain), plain.error());
+            var best = tools.scrape.ScrapeLadder.climb(url, first);
+            if (best.servedBy() == ScrapeRung.PLAIN) return plain;
+            return best.fetched() == null
+                    ? ScrapeObservation.failed(url, best.detail())
+                    : ScrapeObservation.of(best.fetched(), best.text());
+        };
+    }
 
     /** {@code detail} carries the head of a failing fetch's output. Without it a run
      *  reports ERROR without saying what the error was, which makes the harness

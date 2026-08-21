@@ -74,6 +74,7 @@ public class ApiScrapeTestController extends Controller {
             case "1" -> ScrapeHarness.rung1();
             case "2" -> ScrapeHarness.rung2();
             case "3" -> ScrapeHarness.rung3();
+            case "ladder" -> ScrapeHarness.rungLadder();
             case "scrape" -> ScrapeHarness.rungScrape();
             default -> null;
         };
@@ -81,12 +82,12 @@ public class ApiScrapeTestController extends Controller {
         // politeness, so it must not be told to escalate past impersonation.
         var attempted = switch (rungId) {
             case "2" -> ScrapeRung.IMPERSONATE;
-            case "3" -> ScrapeRung.BROWSER;
+            case "3", "ladder" -> ScrapeRung.BROWSER;
             default -> ScrapeRung.PLAIN;
         };
         if (rung == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "Unknown rung '%s'. Available: 1, 2, 3, scrape. Rung 4 lands with JCLAW-1089."
+                    "Unknown rung '%s'. Available: 1, 2, 3, ladder, scrape."
                             .formatted(rungId));
             throw ApiResponses.unreachable();
         }
