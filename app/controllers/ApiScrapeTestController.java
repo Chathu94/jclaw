@@ -4,6 +4,7 @@ import play.mvc.Before;
 import play.mvc.Controller;
 import services.scrape.ScrapeCorpus;
 import services.scrape.ScrapeHarness;
+import services.scrape.ScrapeRung;
 import utils.ApiResponses;
 
 import java.io.IOException;
@@ -71,16 +72,21 @@ public class ApiScrapeTestController extends Controller {
 
         var rung = switch (rungId) {
             case "1" -> ScrapeHarness.rung1();
+            case "2" -> ScrapeHarness.rung2();
             case "scrape" -> ScrapeHarness.rungScrape();
             default -> null;
         };
+        // Ladder position, not rung id: "scrape" is rung 1's transport wearing the tool's
+        // politeness, so it must not be told to escalate past impersonation.
+        var attempted = "2".equals(rungId) ? ScrapeRung.IMPERSONATE : ScrapeRung.PLAIN;
         if (rung == null) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "Unknown rung '%s'. Available: 1, scrape. Rungs 2-4 land with JCLAW-1087/1088/1089."
+                    "Unknown rung '%s'. Available: 1, 2, scrape. Rungs 3-4 land with JCLAW-1088/1089."
                             .formatted(rungId));
             throw ApiResponses.unreachable();
         }
 
-        renderJSON(GSON.toJson(ScrapeHarness.run("rung" + rungId, rung, corpus, concurrency)));
+        renderJSON(GSON.toJson(
+                ScrapeHarness.run("rung" + rungId, rung, attempted, corpus, concurrency)));
     }
 }

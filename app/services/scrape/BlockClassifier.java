@@ -113,6 +113,25 @@ public final class BlockClassifier {
      * and the answer to that is identification, not evasion — which is the lane the epic
      * descoped.
      */
+    /**
+     * The rung to try after {@code reason} was observed <em>on {@code attempted}</em>.
+     *
+     * <p>The single-argument form maps a reason to the rung that addresses it, which is
+     * only correct for a rung-1 observation. On a rung-2 report it answered
+     * {@code IMPERSONATE} for every {@code TRUST_BLOCK} — recommending the rung that had
+     * just failed, and making 39 of one run's failures read as "needs impersonation"
+     * when impersonation is exactly what produced them. The suggestion never points at
+     * or below the rung already attempted; when the ladder is exhausted it says
+     * {@link ScrapeRung#NONE} rather than inventing a rung.
+     */
+    public static ScrapeRung nextRung(ScrapeReason reason, ScrapeRung attempted) {
+        var suggested = nextRung(reason);
+        if (suggested == ScrapeRung.NONE) return ScrapeRung.NONE;
+        if (suggested.ordinal() > attempted.ordinal()) return suggested;
+        int next = attempted.ordinal() + 1;
+        return next < ScrapeRung.NONE.ordinal() ? ScrapeRung.values()[next] : ScrapeRung.NONE;
+    }
+
     public static ScrapeRung nextRung(ScrapeReason reason) {
         return switch (reason) {
             case TLS_BLOCKED, TRUST_BLOCK -> ScrapeRung.IMPERSONATE;

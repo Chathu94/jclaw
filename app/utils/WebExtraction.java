@@ -131,40 +131,107 @@ public final class WebExtraction {
      * @param headers request headers, so a caller can present a different client
      *                identity without forking this loop
      */
+    /**
+     * One HTTP exchange with redirects <em>not</em> followed — the transport a fetch
+     * lane plugs in. Rung 1 supplies OkHttp; rung 2 supplies the TLS-impersonation
+     * sidecar (JCLAW-1087).
+     *
+     * <p>The redirect walk deliberately lives in {@link #fetch(String, Map, Transport)}
+     * rather than in each transport, so both lanes share one SsrfGuard-per-hop loop.
+     * A transport that followed redirects itself would hide hops from the guard.
+     */
+    @FunctionalInterface
+    public interface Transport {
+        Exchange exchange(URI uri, Map<String, String> headers) throws IOException;
+    }
+
+    /**
+     * A single completed exchange. {@code location} is the raw {@code Location}
+     * header and is non-null only on a 3xx; {@code body} is empty on one, because
+     * the redirect walk never reads it.
+     *
+     * <p>Explicit {@code equals}/{@code hashCode}/{@code toString} for the same
+     * reason {@link FetchResult} has them: a {@code byte[]} component would
+     * otherwise get reference equality that reads as value equality.
+     */
+    public record Exchange(int status, byte[] body, String contentType, String location) {
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Exchange(int st, byte[] b, String ct, String loc)
+                    && status == st
+                    && Arrays.equals(body, b)
+                    && Objects.equals(contentType, ct)
+                    && Objects.equals(location, loc);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(status, Arrays.hashCode(body), contentType, location);
+        }
+
+        @Override
+        public String toString() {
+            return "Exchange[status=%d, body=%d bytes, contentType=%s, location=%s]"
+                    .formatted(status, body == null ? 0 : body.length, contentType, location);
+        }
+    }
+
+    /** The shipped rung-1 transport: OkHttp, redirects left to the caller. */
+    public static Transport okHttpTransport(OkHttpClient client) {
+        return (uri, headers) -> {
+            var builder = new Request.Builder().url(uri.toString()).get();
+            headers.forEach(builder::header);
+            try (var response = client.newCall(builder.build()).execute()) {
+                int code = response.code();
+                var contentType = response.header("Content-Type", "");
+                // A redirect's body is never read: the walk only needs Location, and
+                // reading it would buffer a page we are about to discard.
+                var body = code >= 300 && code < 400
+                        ? new byte[0]
+                        : readBounded(response.body(), uri);
+                return new Exchange(code, body, contentType, response.header("Location"));
+            }
+        };
+    }
+
     public static FetchResult fetch(String url, OkHttpClient client, Map<String, String> headers)
+            throws IOException {
+        return fetch(url, headers, okHttpTransport(client));
+    }
+
+    /**
+     * Walk redirects manually, re-validating every hop against {@link SsrfGuard} and
+     * the outbound allowlist, and return the first non-redirect response.
+     */
+    public static FetchResult fetch(String url, Map<String, String> headers, Transport transport)
             throws IOException {
         var current = URI.create(url);
         SsrfGuard.assertSafeScheme(current);
         assertHostAllowed(current);
 
         for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
-            var builder = new Request.Builder().url(current.toString()).get();
-            headers.forEach(builder::header);
+            var exchange = transport.exchange(current, headers);
+            int code = exchange.status();
 
-            try (var response = client.newCall(builder.build()).execute()) {
-                int code = response.code();
-
-                // Follow 3xx manually so every hop re-enters SsrfGuard.
-                if (code >= 300 && code < 400) {
-                    var location = response.header("Location");
-                    if (location == null || location.isBlank()) {
-                        throw new IOException(
-                                "HTTP %d with no Location header for %s".formatted(code, current));
-                    }
-                    current = current.resolve(location);
-                    SsrfGuard.assertSafeScheme(current);
-                    assertHostAllowed(current);
-                    continue;
+            // Follow 3xx here, never in the transport, so every hop re-enters SsrfGuard.
+            if (code >= 300 && code < 400) {
+                var location = exchange.location();
+                if (location == null || location.isBlank()) {
+                    throw new IOException(
+                            "HTTP %d with no Location header for %s".formatted(code, current));
                 }
-
-                if (code >= 400) {
-                    throw new IOException("HTTP %d fetching %s".formatted(code, current));
-                }
-
-                var bytes = readBounded(response.body(), current);
-                var contentType = response.header("Content-Type", "");
-                return new FetchResult(bytes, contentType, current.toString());
+                current = current.resolve(location);
+                SsrfGuard.assertSafeScheme(current);
+                assertHostAllowed(current);
+                continue;
             }
+
+            if (code >= 400) {
+                throw new IOException("HTTP %d fetching %s".formatted(code, current));
+            }
+
+            return new FetchResult(exchange.body(), exchange.contentType(), current.toString());
         }
         throw new IOException("Too many redirects (>%d) fetching %s".formatted(MAX_REDIRECTS, url));
     }
@@ -222,8 +289,9 @@ public final class WebExtraction {
     }
 
     /** Per-fetch heap cap for the raw response body ({@link #CFG_MAX_BODY_BYTES},
-     *  default {@link #DEFAULT_MAX_BODY_BYTES}). */
-    private static long maxBodyBytes() {
+     *  default {@link #DEFAULT_MAX_BODY_BYTES}). Public so an out-of-process
+     *  transport can be told the same cap and enforce it at its own end. */
+    public static long maxBodyBytes() {
         return PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
     }
 

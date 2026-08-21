@@ -85,6 +85,37 @@ public final class ScrapeHarness {
         return tool::fetchSingle;
     }
 
+    /**
+     * Rung 2: the TLS-impersonating fetch sidecar (JCLAW-1087). Same extraction chain
+     * as rung 1 — only the transport differs, which is what keeps the two reports
+     * comparable.
+     *
+     * <p>Sends no {@code User-Agent}. curl_cffi fills in the header set that matches the
+     * profile it is impersonating, and overriding it with rung 1's {@code JClaw/1.0}
+     * would announce a Chrome ClientHello alongside a non-Chrome agent string — a
+     * mismatch WAFs check for directly, and one that would waste the handshake this
+     * rung exists to forge. The consequence for the comparison is stated plainly: rung 2
+     * differs from rung 1 in headers as well as fingerprint, because a rung that sent
+     * rung 1's headers is not the rung we would ship.
+     */
+    public static Rung rung2() {
+        return url -> {
+            try {
+                var fetched = tools.scrape.ImpersonatedFetcher.fetch(url, IMPERSONATED_HEADERS);
+                return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+            } catch (Exception e) {
+                var m = e.getMessage();
+                return ScrapeObservation.failed(url,
+                        m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+            }
+        };
+    }
+
+    /** Accept headers only; the profile supplies its own User-Agent (see {@link #rung2()}). */
+    private static final Map<String, String> IMPERSONATED_HEADERS = Map.of(
+            "Accept", "text/html,application/xhtml+xml",
+            "Accept-Language", "en-US,en;q=0.9");
+
     /** {@code detail} carries the head of a failing fetch's output. Without it a run
      *  reports ERROR without saying what the error was, which makes the harness
      *  unfalsifiable — the failure mode it exists to prevent, one level up.
@@ -112,11 +143,18 @@ public final class ScrapeHarness {
 
     public static RungReport run(String rungName, Rung rung, ScrapeCorpus.Corpus corpus,
                                  int concurrency) {
+        return run(rungName, rung, ScrapeRung.PLAIN, corpus, concurrency);
+    }
+
+    /** {@code attempted} is the ladder position this rung occupies, so the report can say
+     *  what to try <em>next</em> rather than re-suggesting the rung that just ran. */
+    public static RungReport run(String rungName, Rung rung, ScrapeRung attempted,
+                                 ScrapeCorpus.Corpus corpus, int concurrency) {
         var entries = corpus.entries();
         var results = new ArrayList<Result>();
         try (var pool = Executors.newFixedThreadPool(Math.max(1, concurrency))) {
             var futures = entries.stream()
-                    .map(e -> pool.submit(() -> measure(rung, e)))
+                    .map(e -> pool.submit(() -> measure(rung, attempted, e)))
                     .toList();
             for (int i = 0; i < futures.size(); i++) {
                 var entry = entries.get(i);
@@ -150,7 +188,7 @@ public final class ScrapeHarness {
         return m == null || m.isBlank() ? cause.getClass().getSimpleName() : m;
     }
 
-    private static Result measure(Rung rung, ScrapeCorpus.Entry e) {
+    private static Result measure(Rung rung, ScrapeRung attempted, ScrapeCorpus.Entry e) {
         long t0 = System.nanoTime();
         ScrapeObservation obs;
         try {
@@ -175,7 +213,7 @@ public final class ScrapeHarness {
         boolean ok = reason == ScrapeReason.OK;
         var detail = obs.failed() ? obs.error() : text;
         return new Result(e.url(), e.stratum(), e.vendor(), e.outcome(), e.rendering(),
-                ok, reason, BlockClassifier.nextRung(reason),
+                ok, reason, BlockClassifier.nextRung(reason, attempted),
                 BlockClassifier.hasPrerenderMarkers(obs),
                 text.length(), gt.titleSeen(text), ms,
                 ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '));

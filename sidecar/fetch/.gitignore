@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.venv/
+# Resolved per machine — curl_cffi ships platform-specific wheels, so a lock
+# committed from one host misresolves on another.
+uv.lock

@@ -1,0 +1,19 @@
+[project]
+name = "jclaw-fetch-sidecar"
+version = "0.1.0"
+description = "TLS-impersonating fetch sidecar for jclaw — escalation rung 2 (JCLAW-1087)"
+requires-python = ">=3.10"
+# curl_cffi binds curl-impersonate, which reproduces a real browser's TLS
+# ClientHello and HTTP/2 SETTINGS frame. That is the whole reason this process
+# exists: both fingerprints are emitted before our request is sent, and JSSE
+# cannot be configured to forge either. Nothing else is needed — the server is
+# stdlib http.server, matching the other five sidecars.
+dependencies = [
+    "curl_cffi>=0.13",
+    # curl_cffi's built-in CA store rejects chains the JVM and openssl both accept
+    # (gandi.net, europa.eu and dnsmadeeasy.com all failed with "unable to get local
+    # issuer certificate" while `openssl s_client` reported Verification: OK).
+    # certifi's bundle accepts them. Verification stays ON — the answer to a CA-store
+    # gap is a better store, never verify=False.
+    "certifi>=2024.2.2",
+]
