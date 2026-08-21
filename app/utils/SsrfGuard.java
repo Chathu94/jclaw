@@ -397,6 +397,9 @@ public final class SsrfGuard {
                 .dns(SAFE_DNS)
                 .followRedirects(false)
                 .followSslRedirects(false)
+                // Transient failures are retried below the redirect walk, so each hop is
+                // retried on its own and the guard still sees every one (JCLAW-1099).
+                .addInterceptor(new TransientRetryInterceptor())
                 .connectTimeout(connectTimeoutSeconds, TimeUnit.SECONDS)
                 .callTimeout(callTimeoutSeconds, TimeUnit.SECONDS)
                 .build();

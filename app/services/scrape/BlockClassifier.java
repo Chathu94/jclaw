@@ -108,6 +108,10 @@ public final class BlockClassifier {
      * escalating a client-rendered page to the impersonation rung spends a request to
      * arrive at the same empty page.
      *
+     * <p>{@link ScrapeReason#TIMEOUT} stays at {@link ScrapeRung#NONE}: an origin too
+     * slow to answer a plain fetch will not answer a browser faster, and a render is the
+     * most expensive way to wait.
+     *
      * <p>{@link ScrapeReason#POLICY_BLOCK} maps to {@link ScrapeRung#NONE} rather than
      * to a stealth rung. An origin that states it blocks agents is refusing on identity,
      * and the answer to that is identification, not evasion — which is the lane the epic
@@ -137,7 +141,13 @@ public final class BlockClassifier {
             case TLS_BLOCKED, TRUST_BLOCK -> ScrapeRung.IMPERSONATE;
             case JS_CHALLENGE, THIN_CONTENT -> ScrapeRung.BROWSER;
             case TURNSTILE -> ScrapeRung.PROVIDER;
-            case OK, POLICY_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT, ERROR -> ScrapeRung.NONE;
+            // ERROR reaches here only after TransientRetryInterceptor has already
+            // retried the retryable statuses, so what is left is structural — a
+            // persistent 400, a redirect loop — and a browser handles those natively
+            // where a different TLS fingerprint cannot. Skips IMPERSONATE for the same
+            // reason THIN_CONTENT does.
+            case ERROR -> ScrapeRung.BROWSER;
+            case OK, POLICY_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT -> ScrapeRung.NONE;
         };
     }
 

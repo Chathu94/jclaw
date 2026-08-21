@@ -84,6 +84,31 @@ class ScrapeLadderTest extends UnitTest {
     }
 
     @Test
+    void aStructuralErrorEscalatesButATimeoutDoesNot() {
+        // ERROR only reaches the ladder after TransientRetryInterceptor has retried the
+        // retryable statuses, so what is left is structural — a persistent 400, a
+        // redirect loop — which a browser handles natively.
+        assertEquals(ScrapeRung.BROWSER,
+                services.scrape.BlockClassifier.nextRung(ScrapeReason.ERROR, ScrapeRung.PLAIN));
+        // A slow origin will not answer a browser faster, and a render is the most
+        // expensive possible way to wait.
+        assertEquals(ScrapeRung.NONE,
+                services.scrape.BlockClassifier.nextRung(ScrapeReason.TIMEOUT, ScrapeRung.PLAIN));
+    }
+
+    @Test
+    void aStatedPolicyRefusalIsNeverEscalated() {
+        // Load-bearing, and not a metric decision: an origin that says it blocks agents
+        // is refusing on identity. Rung 3 demonstrably reads several of these — the
+        // ladder declines to. Four corpus entries sit behind this and stay there.
+        for (var attempted : java.util.List.of(ScrapeRung.PLAIN, ScrapeRung.IMPERSONATE)) {
+            assertEquals(ScrapeRung.NONE,
+                    services.scrape.BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK, attempted),
+                    "policy refusals must not be escalated to a stealth rung");
+        }
+    }
+
+    @Test
     void escalationIsAvailableWhenEitherSidecarIs() {
         ConfigService.set(FetchSidecarManager.CFG_ENABLED, "true");
         ConfigService.set(StealthSidecarManager.CFG_ENABLED, "false");
