@@ -1521,7 +1521,7 @@ class TelegramChannelTest extends UnitTest {
     }
 
     @Test
-    void setMessageReaction_returnsFalseOnNullArgsAndServerError() throws Exception {
+    void setMessageReaction_returnsFalseOnNullArgsAndServerError() {
         String token = "react-fail-" + System.nanoTime();
         try {
             TelegramChannel.installForTest(token, mock.telegramUrl());

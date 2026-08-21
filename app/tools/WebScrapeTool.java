@@ -327,7 +327,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         for (int i = 0; i < futures.size(); i++) {
             var uri = admitted.get(i);
             try {
-                record(futures.get(i).get(), uri, state, fetched);
+                recordOutcome(futures.get(i).get(), uri, state, fetched);
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 state.stoppedBecause = INTERRUPTED;
@@ -343,8 +343,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Name the reason and the rung that would address it rather than reporting a bare
      *  failure. An agent reading "TURNSTILE" knows not to retry; "[Could not fetch]"
      *  invites a retry loop. */
-    private static void record(Outcome outcome, URI uri, CrawlState state,
-                               List<WebExtraction.FetchResult> fetched) {
+    private static void recordOutcome(Outcome outcome, URI uri, CrawlState state,
+                                      List<WebExtraction.FetchResult> fetched) {
         if (!outcome.usable()) {
             state.pages.add(new Page(uri.toString(), "[Not retrieved \u2014 %s%s%s]"
                     .formatted(outcome.reason(),

@@ -6,10 +6,6 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
 
 /**
  * JCLAW-930: the vector settings come from the config store, and changing one rebuilds

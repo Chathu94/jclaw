@@ -8,8 +8,6 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import utils.CircuitBreaker;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * JCLAW-920 + JCLAW-922: the capture-time dedup pool. Runs with the Lucene index

@@ -151,7 +151,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 4: adaptive 429 throttle ratchet (wire-level) ====================
 
     @Test
-    void throttleRatchetsUpOnMockTelegram429() throws Exception {
+    void throttleRatchetsUpOnMockTelegram429() {
         // Mock returns 429 with retry_after=1 on every sendMessage. The
         // real flush path catches TelegramApiRequestException and invokes
         // recordFlushFailure which ratchets currentThrottleMs. Previously
@@ -355,7 +355,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== JCLAW-325: residual coverage ====================
 
     @Test
-    void sealHappyPathEditsPlaceholderToFinalHtml() throws Exception {
+    void sealHappyPathEditsPlaceholderToFinalHtml() {
         // Drives the EDIT_IN_PLACE happy path in seal(): a flush set
         // messageId, the final response fits the cap, no media refs, so
         // seal calls editMessage with html=true (line 441). One placeholder
@@ -380,7 +380,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     }
 
     @Test
-    void sealWithMediaReferencesDeletesPlaceholderAndRoutesThroughPlanner() throws Exception {
+    void sealWithMediaReferencesDeletesPlaceholderAndRoutesThroughPlanner() {
         // Drives lines 411-422: messageId != null + containsMediaOrFileRefs
         // → delete placeholder then route via planner. Seed a workspace file
         // so the planner has something concrete to dispatch as a photo.
@@ -403,7 +403,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     }
 
     @Test
-    void errorFallbackDeletesPlaceholderAndSendsErrorMessage() throws Exception {
+    void errorFallbackDeletesPlaceholderAndSendsErrorMessage() {
         // Drives lines 517-523: errorFallback with a placeholder already
         // sent. Must delete and emit the fixed error string. Distinct from
         // seal's notifier path — error text differs.
@@ -466,7 +466,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== JCLAW-369: reply target + topic-aware sink ====================
 
     @Test
-    void placeholderSendCarriesReplyTargetAndTopicThread() throws Exception {
+    void placeholderSendCarriesReplyTargetAndTopicThread() {
         // The streaming placeholder is the turn's first message, so under the
         // default reply mode (first) it must carry reply_parameters for the
         // inbound message id, and message_thread_id for the (non-General) topic.
@@ -490,7 +490,7 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     }
 
     @Test
-    void placeholderSendOmitsReplyAndThreadForLegacySink() throws Exception {
+    void placeholderSendOmitsReplyAndThreadForLegacySink() {
         // AC4 wire proof: a legacy sink (no reply target, no topic) sends a
         // plain placeholder with neither field — unchanged behavior.
         var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 12L, "private");

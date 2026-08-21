@@ -11,7 +11,6 @@ import utils.CircuitBreaker;
 
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * JCLAW-922 semantic tier: a restatement sharing too little wording for any safe
