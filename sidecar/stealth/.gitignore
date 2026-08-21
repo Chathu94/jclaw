@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.venv/
+# Resolved per machine — patchright pins a platform-specific browser build.
+uv.lock

@@ -1,0 +1,13 @@
+[project]
+name = "jclaw-stealth-sidecar"
+version = "0.1.0"
+description = "Stealth rendering sidecar for jclaw — escalation rung 3 (JCLAW-1088)"
+requires-python = ">=3.10"
+# Patchright, not Playwright. Its patches are DRIVER-side — it avoids issuing
+# Runtime.enable and disables Console.enable — so the stealth only exists when
+# Patchright itself drives the browser. Attaching a stock client over CDP
+# bypasses them entirely, which is why the JVM asks this process to render a URL
+# rather than connecting to a browser it launched.
+dependencies = [
+    "patchright>=1.52",
+]

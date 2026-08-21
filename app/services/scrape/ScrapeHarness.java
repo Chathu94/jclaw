@@ -111,6 +111,29 @@ public final class ScrapeHarness {
         };
     }
 
+    /**
+     * Rung 3: render through the stealth browser sidecar (JCLAW-1088).
+     *
+     * <p>Serves two failure modes the epic keeps separate on purpose. {@code THIN_CONTENT}
+     * is a rendering problem and occurs at every protection tier including none;
+     * {@code JS_CHALLENGE}/{@code TURNSTILE} is a fingerprint gate. The report separates
+     * them structurally rather than by annotation: {@code byRendering} scores against the
+     * corpus's client-rendered axis, {@code byStratum} against its protection axis, so a
+     * rendering fix can never be credited to anti-bot work or the reverse.
+     */
+    public static Rung rung3() {
+        return url -> {
+            try {
+                var fetched = tools.scrape.RenderedFetcher.fetch(url);
+                return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
+            } catch (Exception e) {
+                var m = e.getMessage();
+                return ScrapeObservation.failed(url,
+                        m == null || m.isBlank() ? e.getClass().getSimpleName() : m);
+            }
+        };
+    }
+
     /** Accept headers only; the profile supplies its own User-Agent (see {@link #rung2()}). */
     private static final Map<String, String> IMPERSONATED_HEADERS = Map.of(
             "Accept", "text/html,application/xhtml+xml",

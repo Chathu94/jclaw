@@ -10,6 +10,7 @@ import play.jobs.OnApplicationStop;
 import services.EventLogger;
 import services.TailscaleFunnel;
 import services.FetchSidecarManager;
+import services.StealthSidecarManager;
 import services.imagegen.LocalImageSidecarManager;
 import services.search.LuceneIndexer;
 import services.transcription.AsrSidecarManager;
@@ -77,6 +78,7 @@ public class ShutdownJob extends Job<Void> {
                 new Component("imagegen-sidecar", LocalImageSidecarManager::stop),
                 new Component("videogen-sidecar", LocalVideoSidecarManager::stop),
                 new Component("fetch-sidecar", FetchSidecarManager::stop),
+                new Component("stealth-sidecar", StealthSidecarManager::stop),
                 new Component("mcp-connections", McpConnectionManager::shutdown),
                 new Component("lucene-index", LuceneIndexer::close),
                 new Component("tailscale-funnel", TailscaleFunnel::disableIfEnabled)
