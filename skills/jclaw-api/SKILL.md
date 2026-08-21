@@ -2,6 +2,7 @@
 name: jclaw-api
 description: Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, toggle tools/skills on agents, read or write config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 version: 0.1.0
+author: Tarun Sukhani
 tools: [jclaw_api]
 icon: ⚙️
 ---

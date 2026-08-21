@@ -2,7 +2,7 @@
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
 version: 1.1.2
-author: main
+author: Tarun Sukhani
 tools: [filesystem]
 icon: 🛠️
 ---

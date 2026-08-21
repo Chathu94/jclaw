@@ -9,7 +9,7 @@ description: >-
   (charts, morph transitions, state slides, ken-burns, motion paths) instead
   of static text slides, then writes the document JSON in place. Full schema +
   recipes at https://bento.page/agents.md.
-author: main
+author: Tarun Sukhani
 tools: [exec, filesystem, web_fetch, browser]
 commands: []
 icon: 🍱

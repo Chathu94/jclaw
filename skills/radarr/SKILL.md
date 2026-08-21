@@ -2,7 +2,7 @@
 name: radarr
 icon: 📺
 description: Download movies via Radarr API with automated download monitoring and import handling.
-author: main
+author: Tarun Sukhani
 tools: [exec, subagent_spawn, subagent_yield, message, filesystem]
 commands: []
 version: 1.3.0

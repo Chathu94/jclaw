@@ -2,7 +2,7 @@
 name: hotel-finder
 description: Search the web for best hotels in a specified city and provide findings directly in chat with names, ratings, prices, amenities, and contact information.
 version: 1.0.0
-author: main
+author: Tarun Sukhani
 tools: [web_search, web_fetch]
 commands: []
 icon: 🏨

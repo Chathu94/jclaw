@@ -3,7 +3,7 @@ name: radarr-delete
 icon: 📺
 description: Delete movies from Radarr library. Owner-only with full verification and cleanup.
 version: 1.0.5
-author: main
+author: Tarun Sukhani
 tools: [exec]
 commands: []
 ---

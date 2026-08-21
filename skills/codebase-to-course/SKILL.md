@@ -2,7 +2,7 @@
 name: codebase-to-course
 description: Turn any codebase into a beautiful, interactive, single-page HTML course that teaches how the code works to non-technical vibe coders. Trigger on phrases like "turn this into a course", "explain this codebase interactively", "teach me how this code works", "make a course from this project", or "interactive tutorial from this code". Produces a self-contained HTML file with scroll-based modules, animated visualizations, embedded quizzes, and code↔plain-English side-by-side translations. Adapted from zarazhangrui/codebase-to-course.
 version: 1.0.0
-author: main
+author: Tarun Sukhani
 tools: [filesystem, exec, web_fetch, documents]
 commands: []
 icon: 🎓
