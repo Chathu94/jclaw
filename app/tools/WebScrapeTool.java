@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -73,6 +74,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
     private static final String CFG_MAX_ESCALATIONS = "web_scrape.max-escalations";
     private static final String CFG_SEED_FROM_SITEMAP = "web_scrape.seed-from-sitemap";
+    private static final String CFG_LANGUAGE = "web_scrape.language";
+    private static final String ARG_LANGUAGE = "language";
+
+    /** Preferred language for pages that declare translations. English by default; the
+     *  per-call {@code language} argument overrides it, following the respectRobots
+     *  precedent from JCLAW-1095 rather than being config-only. */
+    private static final String DEFAULT_LANGUAGE = "en";
 
     /** Escalated pages allowed per crawl. Deliberately well below max-pages: a rung-3
      *  render costs seconds where a plain fetch costs milliseconds, so a crawl that
@@ -151,7 +159,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION,
                                 "Honour the site's robots.txt (default true). Set false ONLY when "
                                 + "the user explicitly asks to ignore robots.txt for this request; "
-                                + "never choose it yourself to work around a refusal.")
+                                + "never choose it yourself to work around a refusal."),
+                        ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION,
+                                "Preferred language for sites that publish translations, as an "
+                                + "hreflang code such as 'en', 'ja' or 'pt-BR' (default '%s'). "
+                                + "Other translations of a page are skipped so the page budget "
+                                + "is spent on distinct content."
+                                        .formatted(DEFAULT_LANGUAGE))
                 ),
                 SchemaKeys.REQUIRED, List.of(ARG_URL)
         );
@@ -197,7 +212,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         } catch (SecurityException e) {
             return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
         }
-        return crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots);
+        var language = args.has(ARG_LANGUAGE) && !args.get(ARG_LANGUAGE).isJsonNull()
+                ? args.get(ARG_LANGUAGE).getAsString().strip()
+                : languageDefault();
+        return crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language);
     }
 
     /**
@@ -245,6 +263,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         final List<Refusal> refused = new ArrayList<>();
         final LinkedHashSet<String> seen = new LinkedHashSet<>();
         int totalChars;
+        /** Locale variants of pages already queued, dropped before they spend budget. */
+        int localeVariantsDropped;
+        /** Path prefixes the site's own hreflang markup identified as non-preferred
+         *  locale roots, e.g. "/ar/". Learned, never guessed — see suppressLocaleVariants. */
+        final LinkedHashSet<String> suppressedLocalePrefixes = new LinkedHashSet<>();
         int unvisited;
         String stoppedBecause;
         /** Remaining escalation budget, and what refusing it cost — reported rather
@@ -255,7 +278,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
-                         boolean respectRobots) {
+                         boolean respectRobots, String language) {
         long deadline = System.nanoTime()
                 + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
         var state = new CrawlState();
@@ -274,7 +297,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                         || depth >= maxDepth) {
                     break;
                 }
-                level = nextLevel(fetched, seed, sameHostOnly, state.seen);
+                if (depth == 0) {
+                    // Before harvesting or seeding, so both are filtered by what the
+                    // site's markup says about its own translations.
+                    learnLocalesFromHtml(seed, language, state, fetched);
+                }
+                level = nextLevel(fetched, seed, sameHostOnly, language, state);
                 if (depth == 0) {
                     level = withSitemapSeeds(level, seed, sameHostOnly, respectRobots, state);
                 }
@@ -395,12 +423,123 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     private static List<URI> nextLevel(List<WebExtraction.FetchResult> fetched, URI seed,
-                                       boolean sameHostOnly, LinkedHashSet<String> seen) {
+                                       boolean sameHostOnly, String language, CrawlState state) {
         var next = new ArrayList<URI>();
         for (var f : fetched) {
-            collectLinks(f, seed, sameHostOnly, seen, next);
+            // Before harvesting: a page that declares translations of itself gets all but
+            // one of them retired, so they never compete for the page budget. Without
+            // this, docs.openclaw.ai spent all 25 slots on one page in fifteen languages
+            // and reported "80 discovered pages not read" (JCLAW-1100).
+            suppressLocaleVariants(f, language, state);
+            collectLinks(f, seed, sameHostOnly, state, next);
         }
         return next;
+    }
+
+    /**
+     * Retire every declared translation of {@code fetched} except the preferred one.
+     *
+     * <p>Marks them seen rather than filtering later, so the suppression also covers a
+     * link to the same variant found on some other page.
+     *
+     * <p><b>Never suppresses everything.</b> A site with no variant in the preferred
+     * language keeps one — its own URL, or failing that the first declared — because a
+     * language filter that empties the frontier is worse than no filter at all.
+     */
+    private static void suppressLocaleVariants(WebExtraction.FetchResult fetched,
+                                               String language, CrawlState state) {
+        var alternates = WebExtraction.alternates(fetched);
+        if (alternates.size() < 2) return;
+
+        var keeper = pickVariant(alternates, language, fetched.finalUrl());
+        for (var entry : alternates.entrySet()) {
+            var uri = entry.getValue();
+            if (uri.equals(keeper)) continue;
+            if (state.seen.add(canonical(uri))) {
+                state.localeVariantsDropped++;
+            }
+            localeRoot(uri, keeper).ifPresent(state.suppressedLocalePrefixes::add);
+        }
+    }
+
+    /**
+     * The path prefix a non-preferred variant lives under, when the site's own markup
+     * says so — {@code https://host/ar} against a keeper of {@code https://host/} yields
+     * {@code /ar/}.
+     *
+     * <p>Suppressing declared alternates alone is not enough: it is reactive, and only
+     * teaches the crawl about a page it has already fetched. Against docs.openclaw.ai the
+     * home page's translations vanished but {@code /ar/agent-runtime-architecture} still
+     * spent budget, because it was queued before its English twin was read.
+     *
+     * <p>This is the path heuristic the ticket permits as a <em>supporting</em> signal:
+     * the prefix is only ever taken from a URL the site itself declared as an alternate,
+     * so {@code /design} is never mistaken for German. Nothing is inferred from a path
+     * the markup did not name.
+     */
+    private static Optional<String> localeRoot(URI variant, URI keeper) {
+        var path = variant.getPath() == null ? "" : variant.getPath();
+        var keeperPath = keeper.getPath() == null ? "" : keeper.getPath();
+        // Only a root-level variant defines a prefix: /ar over /, not /a/b over /a.
+        if (!keeperPath.isEmpty() && !"/".equals(keeperPath)) return Optional.empty();
+        var trimmed = path.startsWith("/") ? path.substring(1) : path;
+        if (trimmed.isEmpty() || trimmed.contains("/")) return Optional.empty();
+        return Optional.of("/" + trimmed + "/");
+    }
+
+    /** Exact hreflang match, then primary subtag ({@code en} matches {@code en-GB}), then
+     *  the page we are already holding, then whatever came first. */
+    private static URI pickVariant(Map<String, URI> alternates, String language, String finalUrl) {
+        var want = language.toLowerCase(Locale.ROOT);
+        var exact = alternates.get(want);
+        if (exact != null) return exact;
+        for (var e : alternates.entrySet()) {
+            var primary = e.getKey().split("-", 2)[0];
+            if (primary.equals(want.split("-", 2)[0])) return e.getValue();
+        }
+        for (var e : alternates.entrySet()) {
+            if (e.getValue().toString().equals(finalUrl)) return e.getValue();
+        }
+        return alternates.values().iterator().next();
+    }
+
+    /**
+     * Read the seed's translations from its HTML when the crawl never saw any (JCLAW-1100).
+     *
+     * <p>Costs one extra request, and only on sites that serve markdown. It exists because
+     * the three discovery features interact badly without it: preferring markdown
+     * (JCLAW-1101) means the seed arrives with no {@code <link rel="alternate">} to learn
+     * from, sitemap seeding (JCLAW-1092) then supplies the frontier, and a sitemap carries
+     * no locale annotation — docs.openclaw.ai lists 719 Arabic URLs in plain
+     * alphabetical order, so {@code /ar/} filled the page budget with nothing to say it
+     * was a translation. Locale de-duplication silently did not work on exactly the sites
+     * markdown-first was built for.
+     *
+     * <p>Deliberately conditional: an HTML seed already carries its alternates, so the
+     * extra request happens only when the seed came back as markdown. One request buys
+     * the locale map for the whole crawl.
+     */
+    private static void learnLocalesFromHtml(URI seed, String language, CrawlState state,
+                                             List<WebExtraction.FetchResult> fetched) {
+        if (!state.suppressedLocalePrefixes.isEmpty()) return;
+
+        // An HTML seed already carries its own alternates — read them and spend nothing.
+        for (var f : fetched) {
+            suppressLocaleVariants(f, language, state);
+        }
+        if (!state.suppressedLocalePrefixes.isEmpty()) return;
+        // Only a markdown seed is worth a second request; anything else has either told
+        // us its translations or has none to tell.
+        if (fetched.stream().noneMatch(f -> WebExtraction.isMarkdown(f.contentType()))) return;
+
+        try {
+            var html = WebExtraction.fetch(seed.toString(), CLIENT,
+                    Map.of("User-Agent", IDENTITY.userAgentHeader(), "Accept", "text/html"));
+            suppressLocaleVariants(html, language, state);
+        } catch (Exception _) {
+            // Best effort. A site that will not serve HTML simply keeps its translations
+            // in the frontier, which is where they were before this existed.
+        }
     }
 
     /**
@@ -425,18 +564,19 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private List<URI> withSitemapSeeds(List<URI> harvested, URI seed, boolean sameHostOnly,
                                        boolean respectRobots, CrawlState state) {
         if (!respectRobots || !seedFromSitemapDefault()) return harvested;
-        var seeds = SitemapSeeder.seedsFor(seed, CLIENT, IDENTITY);
+        var seeds = SitemapSeeder.seedsFor(seed, CLIENT, IDENTITY,
+                uri -> (!sameHostOnly || sameHost(uri, seed))
+                        && !underSuppressedLocale(uri, state)
+                        && !state.seen.contains(canonical(uri)));
         if (seeds.isEmpty()) return harvested;
 
         // Harvested links first: a page the site links to from its entry point is a
         // better guess at what a caller wants than an arbitrary sitemap row, and the
         // page budget cuts from the end.
         var merged = new ArrayList<>(harvested);
+        // The predicate above already applied the crawl's rules while the seeder was
+        // still reading, so the URL cap counted usable seeds rather than raw rows.
         for (var uri : seeds) {
-            // The crawl's own rules, not the seeder's: sameHost accepts subdomains both
-            // ways, so a sitemap on www.example.com still belongs to a crawl seeded at
-            // example.com. An exact match here dropped every such seed silently.
-            if (sameHostOnly && !sameHost(uri, seed)) continue;
             if (state.seen.add(canonical(uri))) merged.add(uri);
         }
         return merged;
@@ -521,10 +661,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     /** Runs after a level completes, single-threaded, so {@code seen} needs no
      *  synchronisation and the next level's order is deterministic. */
     private static void collectLinks(WebExtraction.FetchResult fetched, URI seed,
-                                     boolean sameHostOnly, LinkedHashSet<String> seen,
+                                     boolean sameHostOnly, CrawlState state,
                                      List<URI> next) {
+        var seen = state.seen;
         for (var link : WebExtraction.links(fetched)) {
             if (sameHostOnly && !sameHost(link, seed)) {
+                continue;
+            }
+            if (underSuppressedLocale(link, state)) {
+                state.localeVariantsDropped++;
                 continue;
             }
             // Dedup on the canonical form, so ?a=1#frag and ?a=1 are one page.
@@ -532,6 +677,17 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 next.add(link);
             }
         }
+    }
+
+    /** True when this URL sits under a locale prefix the site's markup already declared
+     *  as a non-preferred translation root. */
+    private static boolean underSuppressedLocale(URI link, CrawlState state) {
+        if (state.suppressedLocalePrefixes.isEmpty()) return false;
+        var path = link.getPath() == null ? "" : link.getPath();
+        for (var prefix : state.suppressedLocalePrefixes) {
+            if (path.startsWith(prefix)) return true;
+        }
+        return false;
     }
 
     /** Same registrable host, or a subdomain of the seed's — {@code docs.x.com} counts
@@ -588,6 +744,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             for (var r : refused) {
                 sb.append("  - %s \u2014 %s\n".formatted(r.url(), r.why()));
             }
+        }
+        if (state.localeVariantsDropped > 0) {
+            sb.append("Dropped %d locale variant%s of pages already queued.\n".formatted(
+                    state.localeVariantsDropped, state.localeVariantsDropped == 1 ? "" : "s"));
         }
         if (state.escalationsUsed > 0 || state.escalationsSuppressed > 0) {
             sb.append("Escalated %d page%s beyond the plain fetch".formatted(
@@ -650,6 +810,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * either way. "Ignore this site's directives" and "hammer this site" are different
      * requests, and only the first is available.
      */
+    private static String languageDefault() {
+        var configured = services.ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
+        return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
+    }
+
     private static boolean seedFromSitemapDefault() {
         return !"false".equalsIgnoreCase(
                 services.ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());

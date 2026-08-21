@@ -20,6 +20,8 @@ import java.net.URI;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -45,6 +47,10 @@ public final class WebExtraction {
 
     public static final int MAX_TEXT_LENGTH = 50_000;
     public static final int MAX_REDIRECTS = 5;
+
+    /** Markdown preferred, HTML still acceptable. Sites that ignore this simply serve
+     *  HTML and the existing pipeline runs unchanged. */
+    private static final String DEFAULT_ACCEPT = "text/markdown, text/html;q=0.9, */*;q=0.8";
 
     /** Below this many extracted characters the Readability pass is treated as a
      *  miss and the Jsoup boilerplate-strip fallback runs instead — small pages
@@ -73,6 +79,11 @@ public final class WebExtraction {
 
     /** Shared and configured once (never mutated per-call) so {@code parseToString}
      *  stays thread-safe under the parallel tool dispatch. */
+    /** Shared and stateless, like {@link #HTML_TO_MARKDOWN} — flexmark parsers are
+     *  documented as thread-safe once built. */
+    private static final com.vladsch.flexmark.parser.Parser MARKDOWN_PARSER =
+            com.vladsch.flexmark.parser.Parser.builder().build();
+
     private static final Tika TIKA = new Tika();
     static {
         TIKA.setMaxStringLength(MAX_TEXT_LENGTH + 10_000);
@@ -206,6 +217,17 @@ public final class WebExtraction {
      */
     public static FetchResult fetch(String url, Map<String, String> headers, Transport transport)
             throws IOException {
+        // Ask for markdown first (JCLAW-1101). A growing number of documentation sites
+        // publish an agent-oriented markdown rendering alongside the HTML, and taking
+        // them up on it skips the whole Readability-plus-flexmark reconstruction: one
+        // docs.openclaw.ai page is 66,184 bytes of markup or 5,673 bytes of markdown
+        // carrying the same text. Advisory only — the response Content-Type decides what
+        // actually happens, never the request.
+        if (headers.keySet().stream().noneMatch(h -> h.equalsIgnoreCase("Accept"))) {
+            var withAccept = new LinkedHashMap<>(headers);
+            withAccept.put("Accept", DEFAULT_ACCEPT);
+            headers = Map.copyOf(withAccept);
+        }
         var current = URI.create(url);
         SsrfGuard.assertSafeScheme(current);
         assertHostAllowed(current);
@@ -328,6 +350,9 @@ public final class WebExtraction {
      * <p>Empty for any non-HTML response — a crawl has nothing to follow out of a PDF.
      */
     public static List<URI> links(FetchResult fetched) {
+        if (isMarkdown(fetched.contentType())) {
+            return markdownLinks(fetched);
+        }
         if (!isHtml(fetched.contentType(), fetched.body())) {
             return List.of();
         }
@@ -440,6 +465,84 @@ public final class WebExtraction {
 
     /** True for content types that are already human-readable and must pass
      *  through untouched (JSON, XML, CSV, plain text, source). */
+    /**
+     * The page's declared translations, keyed by {@code hreflang} (JCLAW-1100).
+     *
+     * <p>Reads {@code <link rel="alternate" hreflang="..">}, which is the reliable
+     * signal. A {@code /de} path prefix is a guess and {@code /design} is not German, so
+     * path shape is never used to infer a language here.
+     *
+     * <p>Empty for markdown and for any page that declares none — most of the web.
+     */
+    public static Map<String, URI> alternates(FetchResult fetched) {
+        if (!isHtml(fetched.contentType(), fetched.body())) {
+            return Map.of();
+        }
+        var html = new String(fetched.body(), charsetFor(fetched.contentType()));
+        var out = new LinkedHashMap<String, URI>();
+        for (var link : Jsoup.parse(html, fetched.finalUrl())
+                .select("link[rel~=(?i)alternate][hreflang]")) {
+            var lang = link.attr("hreflang").strip().toLowerCase(Locale.ROOT);
+            var abs = link.attr("abs:href");
+            if (lang.isEmpty() || abs.isBlank()) continue;
+            try {
+                var uri = URI.create(abs);
+                if (uri.getHost() != null) out.putIfAbsent(lang, uri);
+            } catch (RuntimeException _) {
+                // a malformed alternate must not lose the rest
+            }
+        }
+        // Insertion order is preserved deliberately: document order is the only tie-break
+        // a caller has when no variant matches the preferred language, and Map.copyOf
+        // returns an UNORDERED map, which made that fallback pick a different variant
+        // depending on hash iteration — green alone, red in a full suite.
+        return Collections.unmodifiableMap(out);
+    }
+
+    /** True for a response the origin has labelled as markdown. Deliberately reads the
+     *  RESPONSE type: content negotiation is advisory and plenty of servers return HTML
+     *  whatever was asked for, so the request header decides nothing on its own. */
+    public static boolean isMarkdown(String contentType) {
+        var ct = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+        return ct.contains("markdown");
+    }
+
+    /**
+     * Crawlable links from a markdown body (JCLAW-1101).
+     *
+     * <p>Without this, asking for markdown would silently disable link harvesting and a
+     * crawl would return only its seed. Markdown pages carry far fewer links than their
+     * HTML twins — the same docs page offers 3 against 118 — because the navigation
+     * chrome is gone; what remains is the links the prose actually makes.
+     */
+    private static List<URI> markdownLinks(FetchResult fetched) {
+        var text = new String(fetched.body(), charsetFor(fetched.contentType()));
+        var base = URI.create(fetched.finalUrl());
+        var out = new LinkedHashSet<URI>();
+        var document = MARKDOWN_PARSER.parse(text);
+        collectMarkdownLinks(document, base, out);
+        return List.copyOf(out);
+    }
+
+    private static void collectMarkdownLinks(com.vladsch.flexmark.util.ast.Node node,
+                                             URI base, LinkedHashSet<URI> out) {
+        for (var child = node.getFirstChild(); child != null; child = child.getNext()) {
+            if (child instanceof com.vladsch.flexmark.ast.Link link) {
+                try {
+                    var resolved = base.resolve(link.getUrl().toString());
+                    var scheme = resolved.getScheme();
+                    if (("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                            && resolved.getHost() != null) {
+                        out.add(resolved);
+                    }
+                } catch (RuntimeException _) {
+                    // one unparseable link must not lose the rest of the page
+                }
+            }
+            collectMarkdownLinks(child, base, out);
+        }
+    }
+
     private static boolean isTextual(String contentType) {
         if (contentType.isBlank()) {
             return false;

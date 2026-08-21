@@ -64,7 +64,8 @@ public final class SitemapSeeder {
      * seeds", because seeding is an enhancement to a crawl that already works without it.
      */
     public static List<URI> seedsFor(URI seed, OkHttpClient client,
-                                     RobotsCache.Identity identity) {
+                                     RobotsCache.Identity identity,
+                                     java.util.function.Predicate<URI> acceptable) {
         List<String> sitemaps;
         try {
             sitemaps = RobotsCache.sitemapsFor(seed, client, identity);
@@ -82,7 +83,7 @@ public final class SitemapSeeder {
         for (var sitemapUrl : sitemaps) {
             if (documents >= maxDocuments || out.size() >= maxUrls) break;
             documents += collect(parser, sitemapUrl, client, identity,
-                    out, maxUrls, maxDocuments - documents);
+                    out, maxUrls, maxDocuments - documents, acceptable);
         }
         if (!out.isEmpty()) {
             EventLogger.info("scrape", "%s: seeded %d URL%s from %d sitemap document%s"
@@ -95,7 +96,8 @@ public final class SitemapSeeder {
     /** Fetch and expand one sitemap, returning how many documents it cost. */
     private static int collect(SiteMapParser parser, String sitemapUrl,
                                OkHttpClient client, RobotsCache.Identity identity,
-                               List<URI> out, int maxUrls, int documentsLeft) {
+                               List<URI> out, int maxUrls, int documentsLeft,
+                               java.util.function.Predicate<URI> acceptable) {
         if (documentsLeft <= 0) return 0;
         AbstractSiteMap parsed;
         try {
@@ -113,24 +115,33 @@ public final class SitemapSeeder {
             for (var child : index.getSitemaps()) {
                 if (cost >= documentsLeft || out.size() >= maxUrls) break;
                 cost += collect(parser, child.getUrl().toString(), client, identity,
-                        out, maxUrls, documentsLeft - cost);
+                        out, maxUrls, documentsLeft - cost, acceptable);
             }
             return cost;
         }
         if (parsed instanceof SiteMap map) {
             for (var entry : map.getSiteMapUrls()) {
                 if (out.size() >= maxUrls) break;
-                parse(entry.getUrl().toString(), out);
+                parse(entry.getUrl().toString(), out, acceptable);
             }
         }
         return 1;
     }
 
-    /** Parse only — every filtering rule belongs to the crawl. */
-    private static void parse(String candidate, List<URI> out) {
+    /**
+     * Parse, then let the CALLER decide. The predicate carries the crawl's own rules —
+     * the seeder still owns none of them — but applying it here means the URL cap counts
+     * seeds the crawl can actually use.
+     *
+     * <p>Filtering afterwards was measurably wrong: docs.openclaw.ai lists 719 Arabic
+     * URLs alphabetically ahead of everything else, so a cap of 50 raw entries yielded
+     * about six usable ones and a crawl that should have returned 25 pages returned 6.
+     */
+    private static void parse(String candidate, List<URI> out,
+                              java.util.function.Predicate<URI> acceptable) {
         try {
             var uri = URI.create(candidate);
-            if (uri.getHost() != null) out.add(uri);
+            if (uri.getHost() != null && acceptable.test(uri)) out.add(uri);
         } catch (RuntimeException _) {
             // one malformed <loc> must not lose the rest of the sitemap
         }
