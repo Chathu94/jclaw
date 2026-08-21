@@ -75,40 +75,61 @@ resolve itself.
 
 ## Looking like a real browser
 
-The browser is the operator's installed **Google Chrome** (`channel="chrome"`) rather
-than the Chromium that ships with Patchright, falling back to the bundled build when
-Chrome is absent so a server without a desktop browser still renders. That one choice
-is most of the stealth, and almost none of it is code. Measured against a headful
-Chrome on the same probe:
+**No system browser is required.** Everything below uses the browser Playwright
+downloads — Patchright is a Playwright fork and shares the same `ms-playwright` cache —
+so a headless Linux server behaves exactly like a developer laptop. That browser is
+Google's official **Chrome for Testing** build, not a community Chromium, which is why
+proprietary codecs (H.264, AAC, MP3) and Widevine are present in it.
 
-| Signal | bundled Chromium | real Chrome |
+Measured: 106/150 on the corpus against 107/150 for the operator's installed Chrome —
+a one-entry difference, inside run-to-run noise. The `channel="chrome"` preference was
+removed rather than kept as an optimisation, because a second code path that only some
+hosts exercise is a reproducibility problem, not a feature.
+
+The original problem was not Chromium-versus-Chrome. Recent Playwright defaults
+`headless=True` to **`chromium-headless-shell`**, a stripped build, and that is what
+made rung 3 look automated. Launching the **full** Chromium (`channel="chromium"`,
+already downloaded by `patchright install`) closes almost all of it. Measured against a
+real headful Chrome on the same probe:
+
+| Signal | headless shell | full Chromium |
 |---|---|---|
-| `userAgentData.brands` | `HeadlessChrome` | `Google Chrome` |
-| `navigator.plugins` / `mimeTypes` | 0 / 0 | 5 / 2 |
-| `window.chrome` | `undefined` | object, with `loadTimes` |
-| WebGL renderer | SwiftShader | the real GPU |
-| `languages` | `en-US` | the operator's real list |
-| `Notification.permission` | `denied` | `default` |
-| `pdfViewerEnabled` | false | true |
+| `navigator.plugins` / `mimeTypes` | 0 / 0 | **5 / 2** |
+| `window.chrome` | `undefined` | **object, with `loadTimes`** |
+| WebGL renderer | SwiftShader | **the real GPU** |
+| `languages` | `en-US` | **the host's real list** |
+| `Notification.permission` | `denied` | **`default`** |
+| `pdfViewerEnabled` | false | **true** |
 
-`Sec-CH-UA` is generated from `userAgentData.brands`, so the Chrome channel fixes the
-header at its source — no `Emulation.setUserAgentOverride` needed. The User-Agent
-string still says `HeadlessChrome` even on the Chrome channel, and is corrected
-separately.
+Proprietary codecs (H.264, AAC, MP3) and Widevine are present in the bundled build
+too — checked, not assumed.
 
-That leaves **one** signal differing from a headful Chrome — `outerWidth`/`outerHeight`
-equal the viewport, because headless has no window chrome to add — and zero failures
-on `bot.sannysoft.com`.
+One signal the full Chromium still gets wrong: `userAgentData.brands` says `Chromium`
+where Chrome says `Google Chrome`, and **`Sec-CH-UA` is generated from it**. A single
+`Emulation.setUserAgentOverride` fixes the header, the JS API and the User-Agent string
+together. Every field but the brand list is read back from the browser itself, so a
+Linux host reports Linux rather than whatever the author's machine was.
+
+That read-back must happen on a **secure origin** — `navigator.userAgentData` does not
+exist on `about:blank`, and probing there silently yields an empty platform which the
+override then pins as empty, worse than not overriding at all. The probe page is served
+locally through a fulfilled route: a real `https://` origin with no network request.
+
+Result: **20 of 21 probed signals identical to a real headful Chrome**, and no failing
+rows on `bot.sannysoft.com`.
+
+The one that remains is `outerWidth`/`outerHeight`, which equal the viewport because
+headless has no window chrome to add. It is not fixable here — Patchright disables
+`add_init_script` (verified: a marker set in one is absent from the page, at both
+context and page level), which is the only hook running early enough for a detector
+reading the value during load. It is also a weak tell, since a real browser in
+fullscreen or kiosk mode reports the same.
 
 **This is not indistinguishability, and should not be described as such.** Every
-*static* fingerprint matches because the browser largely is a real Chrome. What remains
-distinguishable is behaviour: a page is loaded, settles, and is read — no mouse
-movement, no scrolling, no dwell time. A detector scoring behaviour rather than
-fingerprints can still tell, and a render-only rung structurally cannot produce those
-signals.
-
-Access measured on the 150-site corpus: 82/150 with bundled Chromium, 87/150 with the
-UA token corrected, **107/150 with the Chrome channel**.
+*static* fingerprint matches. What remains distinguishable is behaviour: a page is
+loaded, settles, and is read — no mouse movement, no scrolling, no dwell time. A
+detector scoring behaviour rather than fingerprints can still tell, and a render-only
+rung structurally cannot produce those signals.
 
 ## Concurrency
 

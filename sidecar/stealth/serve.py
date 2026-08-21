@@ -76,31 +76,6 @@ DEFAULT_MAX_CONCURRENT = 4
 # does not change. Fixing it needs Emulation.setUserAgentOverride with
 # userAgentMetadata; deferred until measurement shows the brand list is what is
 # actually costing access.
-_UA_LOCK = threading.Lock()
-_REAL_UA = None
-
-# Prefer the operator's real Google Chrome over the bundled Chromium. This is the
-# single largest stealth difference available and almost none of it is code: measured
-# against a headful Chrome on the same probe, bundled Chromium differs on eleven
-# signals and Chrome-headless on two. Chrome supplies a real GPU string
-# ("Google Inc. (Apple)" rather than SwiftShader), a populated navigator.plugins and
-# mimeTypes, window.chrome with loadTimes, the operator's real language list,
-# Notification.permission "default" rather than "denied", pdfViewerEnabled, and — the
-# one this started with — userAgentData brands reading "Google Chrome" instead of
-# "HeadlessChrome", which is what Sec-CH-UA is generated from.
-#
-# Falls back to bundled Chromium when Chrome is absent, because a server without a
-# desktop browser must still render rather than fail.
-_CHANNEL_LOCK = threading.Lock()
-_CHANNEL = None  # None = undetermined, "" = bundled Chromium
-
-# One signal still separates us from a headful Chrome: outerWidth/outerHeight equal
-# the viewport, because headless has no window chrome to add. It is NOT fixable here —
-# Patchright disables add_init_script (verified: a marker set in one is absent from the
-# page, at both context and page level), which is the only hook that runs early enough
-# for a detector reading the value during load. It is also a weak tell; a real browser
-# in fullscreen or kiosk mode reports the same thing.
-
 from ssrf import is_public_host
 
 try:
@@ -109,6 +84,41 @@ try:
 except Exception as exc:  # pragma: no cover - exercised only on a broken install
     sync_playwright = None
     _IMPORT_ERROR = "%s: %s" % (type(exc).__name__, exc)
+
+_UA_LOCK = threading.Lock()
+_UA_OVERRIDE = None
+
+# Launch the FULL Chromium, never the headless shell. Recent Playwright defaults
+# headless=True to chromium-headless-shell, a stripped build, and that — not
+# Chromium-versus-Chrome — was what made rung 3 look automated. Measured against a
+# headful Chrome on the same probe, the headless shell differs on eight signals that
+# the full build matches exactly: navigator.plugins (0 vs 5), mimeTypes (0 vs 2),
+# window.chrome (undefined vs an object with loadTimes), WebGL (SwiftShader vs the
+# real GPU), languages, Notification.permission, pdfViewerEnabled.
+#
+# The full build ships WITH Patchright, so this needs no system browser and behaves
+# identically on a headless Linux server. Proprietary codecs (H.264, AAC, MP3) and
+# Widevine are present in it too, checked rather than assumed.
+_CHANNEL = "chromium"
+
+# One signal the full Chromium still does not match: userAgentData.brands says
+# "Chromium" where Chrome says "Google Chrome", and Sec-CH-UA is generated from it.
+# Emulation.setUserAgentOverride fixes the header, the JS API and the UA string in one
+# call. Every field except the brand list is read back from the browser itself, so a
+# Linux host reports Linux rather than whatever the developer's machine was.
+#
+# The read-back has to happen on a SECURE origin: navigator.userAgentData does not
+# exist on about:blank, and probing there silently yielded an empty platform, which
+# the override then pinned as empty — worse than not overriding at all. The probe page
+# is served locally through a fulfilled route, so it is a real https origin with no
+# network request.
+_UA_PROBE = """async () => {
+  const d = navigator.userAgentData;
+  const hi = d ? await d.getHighEntropyValues(
+      ['architecture', 'bitness', 'model', 'platformVersion']) : {};
+  return {ua: navigator.userAgent, platform: d ? d.platform : '',
+          mobile: d ? d.mobile : false, ...hi};
+}"""
 
 
 class SidecarState:
@@ -170,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status": "ok",
                 "model": self.state.identity,
                 "patchright": sync_playwright is not None,
-                "channel": _CHANNEL if _CHANNEL is not None else "undetermined",
+                "channel": _CHANNEL,
                 "browser_ready": capability()["runnable"],
             })
         elif self.path == "/capability":
@@ -229,34 +239,39 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     @staticmethod
-    def _channel(pw):
-        """"chrome" when the real browser is installed, "" for bundled Chromium."""
-        global _CHANNEL
-        with _CHANNEL_LOCK:
-            if _CHANNEL is None:
-                try:
-                    probe = pw.chromium.launch(headless=True, channel="chrome")
-                    probe.close()
-                    _CHANNEL = "chrome"
-                except Exception as exc:
-                    sys.stderr.write("[stealth-sidecar] real Chrome unavailable (%s) — "
-                                     "falling back to bundled Chromium\n" % type(exc).__name__)
-                    _CHANNEL = ""
-            return _CHANNEL
-
-    @staticmethod
-    def _headful_user_agent(browser):
-        """The browser's own UA with the headless token corrected, cached per process."""
-        global _REAL_UA
+    def _ua_override(context):
+        """Chrome-shaped UA metadata built from this browser's own values, cached."""
+        global _UA_OVERRIDE
         with _UA_LOCK:
-            if _REAL_UA is None:
-                probe = browser.new_context()
+            if _UA_OVERRIDE is None:
+                page = context.new_page()
                 try:
-                    ua = probe.new_page().evaluate("navigator.userAgent")
+                    page.route("**/*", lambda r: r.fulfill(
+                        status=200, content_type="text/html", body="<html></html>"))
+                    page.goto("https://ua-probe.jclaw.invalid/",
+                              wait_until="domcontentloaded", timeout=15000)
+                    info = page.evaluate(_UA_PROBE)
                 finally:
-                    probe.close()
-                _REAL_UA = ua.replace("HeadlessChrome/", "Chrome/")
-            return _REAL_UA
+                    page.close()
+                ua = info["ua"].replace("HeadlessChrome/", "Chrome/")
+                full = ua.split("Chrome/")[1].split(" ")[0]
+                major = full.split(".")[0]
+                _UA_OVERRIDE = {
+                    "userAgent": ua,
+                    "userAgentMetadata": {
+                        "brands": [{"brand": "Not=A?Brand", "version": "99"},
+                                   {"brand": "Google Chrome", "version": major},
+                                   {"brand": "Chromium", "version": major}],
+                        "fullVersion": full,
+                        "platform": info.get("platform") or "",
+                        "platformVersion": info.get("platformVersion") or "",
+                        "architecture": info.get("architecture") or "",
+                        "bitness": info.get("bitness") or "",
+                        "model": info.get("model") or "",
+                        "mobile": bool(info.get("mobile")),
+                    },
+                }
+            return _UA_OVERRIDE
 
     def _render(self, url, pins, timeout_ms, settle_ms, wait_until):
         args = []
@@ -287,15 +302,21 @@ class Handler(BaseHTTPRequestHandler):
             route.continue_()
 
         with sync_playwright() as p:
-            channel = self._channel(p)
-            launch = {"headless": True, "args": args}
-            if channel:
-                launch["channel"] = channel
-            browser = p.chromium.launch(**launch)
             try:
-                context = browser.new_context(user_agent=self._headful_user_agent(browser))
+                browser = p.chromium.launch(headless=True, channel=_CHANNEL, args=args)
+            except Exception as exc:
+                # Only reachable when the full Chromium build was never downloaded;
+                # the headless shell still renders, just more visibly automated.
+                sys.stderr.write("[stealth-sidecar] full Chromium unavailable (%s) — "
+                                 "falling back to the headless shell; run "
+                                 "'patchright install chromium'\n" % type(exc).__name__)
+                browser = p.chromium.launch(headless=True, args=args)
+            try:
+                context = browser.new_context()
                 page = context.new_page()
                 page.route("**/*", gate)
+                context.new_cdp_session(page).send(
+                    "Emulation.setUserAgentOverride", self._ua_override(context))
                 response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)
                 if settle_ms > 0:
                     page.wait_for_timeout(settle_ms)
