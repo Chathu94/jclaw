@@ -191,6 +191,33 @@ preferred when a gate decision turns on a margin of one or two sites.
 the measured median fails about half the time. A floor that is meant to hold has to sit
 below the observed minimum.
 
+## Sitemap seeding (JCLAW-1092) — measured separately, and why
+
+The gate harness cannot see this feature. It fetches **one URL per corpus entry at depth
+0**, and seeding activates at depth 1 by design, so `scrapetest` is structurally blind to
+it. The harness measures *per-URL access* — can we read this page; seeding changes *crawl
+coverage* — which pages a crawl returns. Nothing in the epic measured the second, so this
+was measured directly: crawl each seed at depth 1, `maxPages` 25, with seeding on and off,
+and compare the returned page sets.
+
+| Seed | off | on | only-on |
+|---|---|---|---|
+| tumblr.com | 10 | 10 | 0 |
+| spotify.com | 10 | 10 | 0 |
+| **icloud.com** | **1** | **24** | **23** |
+| wordpress.org | 15 | 15 | 0 |
+| nginx.org | 7 | 7 | 0 |
+
+**The ticket's prediction was wrong, and usefully so.** It expected `unprotected-ssr` to
+benefit first. The benefit is entirely in `unprotected-spa`: a server-rendered site has
+crawlable links, so harvesting saturates the page budget on its own and seeding is a
+no-op. An SPA's entry page has no links to harvest — `icloud.com` returned one page
+without seeding and twenty-four with it.
+
+So the feature is worth having for exactly the case that motivated it and does nothing
+elsewhere, which is the right shape: harvested links are merged first and the page budget
+cuts from the end, so seeding only spends budget that harvesting could not fill.
+
 ## Policy blocks — the Web Bot Auth question
 
 **4 origins** classify as `POLICY_BLOCK`: they state that they refuse automated access.

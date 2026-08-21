@@ -87,6 +87,19 @@ public final class RobotsCache {
     }
 
     /** Crawl-delay this host asks for, clamped to a sane band. */
+    /**
+     * The {@code Sitemap:} URLs this host's robots.txt advertises (JCLAW-1092).
+     *
+     * <p>Costs no request of its own: robots.txt is already fetched and cached for the
+     * allow and crawl-delay checks, and {@code getSitemaps()} reads a field the same
+     * parse populated. Returns empty when the host publishes none, which is the common
+     * case and not an error.
+     */
+    public static List<String> sitemapsFor(URI uri, OkHttpClient client, Identity identity) {
+        var sitemaps = rulesFor(uri, client, identity).getSitemaps();
+        return sitemaps == null ? List.of() : List.copyOf(sitemaps);
+    }
+
     public static long delayMillis(URI uri, OkHttpClient client, Identity identity) {
         long declared = rulesFor(uri, client, identity).getCrawlDelay();
         if (declared == BaseRobotRules.UNSET_CRAWL_DELAY || declared <= 0) {

@@ -11,6 +11,7 @@ import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
+import tools.scrape.SitemapSeeder;
 import utils.PlayConfig;
 import utils.RobotsCache;
 import utils.SsrfGuard;
@@ -71,6 +72,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_RESPECT_ROBOTS = "web_scrape.respect-robots";
     private static final String CFG_CONCURRENCY = "web_scrape.concurrency";
     private static final String CFG_MAX_ESCALATIONS = "web_scrape.max-escalations";
+    private static final String CFG_SEED_FROM_SITEMAP = "web_scrape.seed-from-sitemap";
 
     /** Escalated pages allowed per crawl. Deliberately well below max-pages: a rung-3
      *  render costs seconds where a plain fetch costs milliseconds, so a crawl that
@@ -273,6 +275,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     break;
                 }
                 level = nextLevel(fetched, seed, sameHostOnly, state.seen);
+                if (depth == 0) {
+                    level = withSitemapSeeds(level, seed, sameHostOnly, respectRobots, state);
+                }
                 depth++;
             }
         }
@@ -396,6 +401,45 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             collectLinks(f, seed, sameHostOnly, seen, next);
         }
         return next;
+    }
+
+    /**
+     * Merge the host's sitemap URLs into the frontier (JCLAW-1092).
+     *
+     * <p><b>Seeded URLs are depth 1, not depth 0.</b> The ticket asked for this to be
+     * decided and recorded. Depth 0 means "the page you asked for" — a caller passing
+     * {@code maxDepth=0} gets one page, and letting a sitemap add twenty-five more would
+     * silently redefine that contract for every existing caller. Seeding is discovery,
+     * {@code maxDepth} is what bounds discovery, so a depth-0 crawl correctly does no
+     * seeding at all. Seeded URLs then compete with harvested links on equal terms, which
+     * is right: both are one step of discovery from the seed.
+     *
+     * <p><b>Skipped when {@code respectRobots} is off.</b> The epic separates discovery
+     * from politeness, so seeding regardless looked defensible — a {@code Sitemap:} line
+     * is a publishing hint, not a restriction. {@code RobotsCacheTest} decided otherwise:
+     * {@code turningOffRespectRobotsIgnoresTheRulesButStillPaces} asserts robots.txt is
+     * not fetched at all when its rules are ignored. Mining that file for hints while
+     * declaring we ignore it would break a tested contract to save a caller nothing, and
+     * an operator who turned robots off wants fewer requests, not an extra one.
+     */
+    private List<URI> withSitemapSeeds(List<URI> harvested, URI seed, boolean sameHostOnly,
+                                       boolean respectRobots, CrawlState state) {
+        if (!respectRobots || !seedFromSitemapDefault()) return harvested;
+        var seeds = SitemapSeeder.seedsFor(seed, CLIENT, IDENTITY);
+        if (seeds.isEmpty()) return harvested;
+
+        // Harvested links first: a page the site links to from its entry point is a
+        // better guess at what a caller wants than an arbitrary sitemap row, and the
+        // page budget cuts from the end.
+        var merged = new ArrayList<>(harvested);
+        for (var uri : seeds) {
+            // The crawl's own rules, not the seeder's: sameHost accepts subdomains both
+            // ways, so a sitemap on www.example.com still belongs to a crawl seeded at
+            // example.com. An exact match here dropped every such seed silently.
+            if (sameHostOnly && !sameHost(uri, seed)) continue;
+            if (state.seen.add(canonical(uri))) merged.add(uri);
+        }
+        return merged;
     }
 
     /** One page's work, as it runs on the pool. Pacing happens here so the wait for a
@@ -584,8 +628,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return (int) PlayConfig.longOr(CFG_MAX_DEPTH, DEFAULT_MAX_DEPTH);
     }
 
+    /** Runtime config, matching web_scrape.concurrency and .respect-robots. JCLAW-1099
+     *  described this as operator-tunable but read it from application.conf, which needs
+     *  a restart to change — not tunable in the sense the ticket meant. */
     private static int maxEscalations() {
-        return (int) PlayConfig.longOr(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
+        return services.ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS);
     }
 
     private static int configTimeoutSeconds() {
@@ -603,6 +650,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * either way. "Ignore this site's directives" and "hammer this site" are different
      * requests, and only the first is available.
      */
+    private static boolean seedFromSitemapDefault() {
+        return !"false".equalsIgnoreCase(
+                services.ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
+    }
+
     private static boolean respectRobotsDefault() {
         return !"false".equalsIgnoreCase(
                 services.ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());
