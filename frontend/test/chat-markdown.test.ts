@@ -14,6 +14,35 @@ describe('normalizeMarkdownLinks', () => {
   it('leaves spaceless destinations untouched', () => {
     expect(normalizeMarkdownLinks('[a](https://x.test/p)')).toBe('[a](https://x.test/p)')
   })
+
+  it('leaves an angle-wrapped destination containing parens untouched', () => {
+    // Truncating at the first `)` re-wrapped the fragment as `(<<a (1>)/b.epub>)`,
+    // which marked then rendered as literal text instead of an anchor.
+    const src = '[b.epub](<books/A Title (1234)/b.epub>)'
+    expect(normalizeMarkdownLinks(src)).toBe(src)
+  })
+
+  it('wraps a bare destination whose balanced parens precede a space', () => {
+    expect(normalizeMarkdownLinks('[b.epub](books/A Title (1234)/b.epub)'))
+      .toBe('[b.epub](<books/A Title (1234)/b.epub>)')
+  })
+})
+
+describe('renderMarkdown workspace file links', () => {
+  const href = '/api/agents/7/files/books/A%20Title%20(1234)/b.epub'
+
+  it('renders a parenthesised, space-bearing filename as a real anchor', () => {
+    const html = renderMarkdown('[b.epub](<books/A Title (1234)/b.epub>)', 7)
+    expect(html).toContain(`<a href="${href}"`)
+    expect(html).not.toContain('&lt;')
+  })
+
+  it('renders the same file written without angle brackets', () => {
+    // Asserted on the whole path, not just the prefix: the truncating pattern
+    // still produced an anchor here, just one pointing at half the filename.
+    const html = renderMarkdown('[b.epub](books/A Title (1234)/b.epub)', 7)
+    expect(html).toContain(`<a href="${href}"`)
+  })
 })
 
 describe('renderMarkdown /api/ allow-list', () => {

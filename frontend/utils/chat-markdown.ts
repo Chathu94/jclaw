@@ -60,12 +60,19 @@ DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
   }
 })
 
+// A link destination is either angle-bracketed — which may hold spaces and
+// parentheses — or bare, where CommonMark still permits balanced parens. Both
+// shapes must be matched whole: a pattern that stopped at the first `)` truncated
+// `[x](<Book (123)/x.epub>)` mid-destination and then re-wrapped the fragment,
+// turning a valid link into literal text (JCLAW-1098).
+const MARKDOWN_LINK = /\[([^\]\n]+)\]\((<[^<>\n]*>|[^()\n]*(?:\([^()\n]*\)[^()\n]*)*)\)/g
+
 // Marked (CommonMark) only allows whitespace in link destinations when they
 // are wrapped in angle brackets. LLMs routinely emit bare filenames with
 // spaces like `[file.docx](file.docx)`, which silently fall through as plain
 // text. Wrap such destinations in <...> so they parse into real anchors.
 export function normalizeMarkdownLinks(text: string): string {
-  return text.replaceAll(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
+  return text.replaceAll(MARKDOWN_LINK, (match, label, dest) => {
     const trimmed = dest.trim()
     if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
     if (!/\s/.test(trimmed)) return match
