@@ -56,8 +56,15 @@ class StealthBrowserTest extends UnitTest {
 
     @Test
     void theSidecarsAddressCheckAgreesWithSsrfGuard() throws Exception {
-        var script = new File(Play.applicationPath, "sidecar/stealth/ssrf.py");
-        assertTrue(script.isFile(), "ssrf.py missing — the sidecar's guard has moved or gone");
+        // Both copies. The fetch sidecar gained one when rung 2 started validating pin
+        // targets, and two files that must agree are exactly what this test is for.
+        for (var relative : List.of("sidecar/stealth/ssrf.py", "sidecar/fetch/ssrf.py")) {
+            assertGuardIsNoMorePermissiveThanJava(new File(Play.applicationPath, relative));
+        }
+    }
+
+    private static void assertGuardIsNoMorePermissiveThanJava(File script) throws Exception {
+        assertTrue(script.isFile(), script + " missing — a sidecar's guard has moved or gone");
 
         var cmd = new java.util.ArrayList<>(List.of("python3", "-c", """
                 import sys, json
@@ -82,7 +89,7 @@ class StealthBrowserTest extends UnitTest {
             // failures, which is why the divergent addresses were absent from the table
             // and the fail-open one went unnoticed.
             if (pythonSaysPublic) {
-                assertTrue(javaSaysPublic, "the sidecar admits " + address
+                assertTrue(javaSaysPublic, script + " admits " + address
                         + " while SsrfGuard rejects it — the duplicated guard has drifted open");
             }
         }

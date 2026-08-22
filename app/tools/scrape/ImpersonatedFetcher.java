@@ -63,14 +63,26 @@ public final class ImpersonatedFetcher {
      */
     public static WebExtraction.Transport transport() {
         return (uri, headers) -> {
-            // The guard runs here as well as in the redirect walk: the sidecar is an
-            // unguarded HTTP client by design, so nothing else stops a first-hop URL
-            // that resolves to a private address.
-            SsrfGuard.assertUrlSafe(uri.toString());
+            // The guard runs here as well as in the redirect walk, and it pins:
+            // hostResolverRule throws everything assertUrlSafe does AND returns the
+            // address it actually validated. Sending the hostname alone left curl to
+            // resolve it a second time, so a record that changed between the two
+            // lookups reached an address the guard had never seen — the rebinding
+            // window rung 3 closes at launch and this one had left open.
+            var pinRule = SsrfGuard.hostResolverRule(uri.toString());
             var baseUrl = FetchSidecarManager.ensureRunning();
 
             var payload = new JsonObject();
             payload.addProperty("url", uri.toString());
+            var pins = new JsonObject();
+            // "MAP <host> <ip>" — the sidecar turns it into a CURLOPT_RESOLVE entry,
+            // so the JVM never has to know curl's argument syntax, exactly as the
+            // render sidecar rebuilds Chromium's flag from the same rule.
+            pinRule.ifPresent(rule -> {
+                var parts = rule.split(" ");
+                if (parts.length == 3) pins.addProperty(parts[1], parts[2]);
+            });
+            payload.add("pins", pins);
             payload.addProperty("timeoutMs", CALL_TIMEOUT.toMillis() / 2);
             payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
             var hdrs = new JsonObject();

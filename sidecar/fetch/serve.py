@@ -18,13 +18,25 @@ Protocol (bound to 127.0.0.1 only):
                     isHealthy(expectedModel) respawns when an operator repins it.
   GET  /capability-> 200 {kind, runnable, profile, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no server
-  POST /fetch {url, headers?, profile?, timeoutMs?, maxBytes?}
+  POST /fetch {url, pins?, headers?, profile?, timeoutMs?, maxBytes?}
         -> 200  upstream body verbatim; upstream status and Location ride in
                 X-Upstream-* headers (see below)
         -> 400  {error}  malformed request
         -> 502  {error}  transport failure reaching the origin
   POST /shutdown -> 200 {status} then exit, so a restarted JVM can evict an
                     orphan it has no Process handle for.
+
+`pins` maps a hostname to the address SsrfGuard already resolved and approved,
+and becomes a CURLOPT_RESOLVE entry so curl never looks the name up itself. Without
+it the JVM validated a hostname and then handed the hostname over to be resolved a
+second time, which is a rebinding window the render sidecar closes at launch. Pin
+targets are re-checked here (ssrf.py, shared with the render sidecar and pinned
+against the JVM guard by StealthBrowserTest) because this endpoint is
+unauthenticated and a pin decides where curl connects.
+
+Note what this sidecar still does NOT do: it performs no SSRF check on the request
+URL itself. The JVM is authoritative for that, and stays so on every redirect hop
+because of the next paragraph.
 
 REDIRECTS ARE NOT FOLLOWED, and that is load-bearing. curl_cffi follows them by
 default, and its impersonation actively disguises that a hop happened — which
@@ -45,6 +57,9 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
+
+from ssrf import is_public_ip
 
 DEFAULT_PROFILE = "chrome"
 # Ceiling on what this process will hold for one response. The JVM applies its
@@ -57,14 +72,24 @@ try:
     import certifi
     import curl_cffi
     from curl_cffi import requests as curl_requests
+    from curl_cffi import Curl, CurlOpt
     _CURL_CFFI_VERSION = getattr(curl_cffi, "__version__", None)
     _CA_BUNDLE = certifi.where()
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - exercised only on a broken install
     curl_requests = None
+    Curl = CurlOpt = None
     _CURL_CFFI_VERSION = None
     _CA_BUNDLE = None
     _IMPORT_ERROR = "%s: %s" % (type(exc).__name__, exc)
+
+
+def _default_port(url):
+    """The port curl will connect on, which a RESOLVE entry has to name exactly."""
+    parts = urlsplit(url)
+    if parts.port:
+        return parts.port
+    return 80 if parts.scheme.lower() == "http" else 443
 
 
 def _header_safe(value):
@@ -187,8 +212,28 @@ class Handler(BaseHTTPRequestHandler):
         timeout_s = max(1.0, float(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS) / 1000.0)
         max_bytes = min(int(req.get("maxBytes") or HARD_MAX_BYTES), HARD_MAX_BYTES)
 
+        pins = req.get("pins") or {}
+        # A pin decides where curl connects, so an unvalidated one points this fetcher
+        # wherever the caller likes. The JVM only ever pins an address SsrfGuard
+        # approved; this endpoint is unauthenticated, so it re-checks rather than
+        # trusting the caller to have been that JVM.
+        for pinned_host, pinned_ip in pins.items():
+            if not is_public_ip(pinned_ip):
+                self._send_json(400, {
+                    "error": "pin for %s is not a public address" % pinned_host})
+                return
+
         try:
-            resp = curl_requests.get(
+            curl_handle = Curl()
+            if pins:
+                # CURLOPT_RESOLVE pre-seeds curl's DNS cache, so the name is never
+                # looked up again here. Without it the JVM validated a hostname and
+                # then handed the hostname over for curl to re-resolve independently —
+                # the rebinding window rung 3 closes with its launch pin.
+                port = _default_port(url)
+                curl_handle.setopt(CurlOpt.RESOLVE,
+                                   ["%s:%d:%s" % (h, port, ip) for h, ip in pins.items()])
+            resp = curl_requests.Session(curl=curl_handle).get(
                 url,
                 headers=headers,
                 impersonate=profile,
