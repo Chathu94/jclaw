@@ -85,7 +85,7 @@ public final class RenderedFetcher {
                 .build();
 
         try (var response = CLIENT.newCall(request).execute()) {
-            var body = response.body() == null ? new byte[0] : response.body().bytes();
+            var body = response.body().bytes();
             if (!response.isSuccessful()) {
                 throw new ScrapeSidecarException("stealth sidecar returned HTTP %d for %s: %s"
                         .formatted(response.code(), url,

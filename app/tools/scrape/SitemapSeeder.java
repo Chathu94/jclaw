@@ -69,7 +69,7 @@ public final class SitemapSeeder {
         List<String> sitemaps;
         try {
             sitemaps = RobotsCache.sitemapsFor(seed, client, identity);
-        } catch (Exception e) {
+        } catch (Exception _) {
             return List.of();
         }
         if (sitemaps.isEmpty()) return List.of();
@@ -106,7 +106,7 @@ public final class SitemapSeeder {
             var fetched = WebExtraction.fetch(sitemapUrl, client,
                     Map.of("User-Agent", identity.userAgentHeader()));
             parsed = parser.parseSiteMap(fetched.body(), URI.create(fetched.finalUrl()).toURL());
-        } catch (Exception e) {
+        } catch (Exception _) {
             return 1;   // the request was still spent
         }
 

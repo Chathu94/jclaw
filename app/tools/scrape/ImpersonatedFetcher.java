@@ -88,7 +88,7 @@ public final class ImpersonatedFetcher {
                     // verification failure reads very differently from an origin refusing
                     // us), and without it the harness reports a bare 502 that has to be
                     // reproduced by hand to diagnose.
-                    var detail = response.body() == null ? "" : response.body().string();
+                    var detail = response.body().string();
                     throw new ScrapeSidecarException(
                             "fetch sidecar returned HTTP %d for %s: %s"
                                     .formatted(response.code(), uri, truncate(detail)), null);
@@ -98,7 +98,7 @@ public final class ImpersonatedFetcher {
                     throw new ScrapeSidecarException(
                             "fetch sidecar response carried no X-Upstream-Status for " + uri, null);
                 }
-                var body = response.body() == null ? new byte[0] : response.body().bytes();
+                var body = response.body().bytes();
                 return new WebExtraction.Exchange(
                         Integer.parseInt(upstream),
                         body,

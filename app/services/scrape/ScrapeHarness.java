@@ -173,8 +173,9 @@ public final class ScrapeHarness {
     public record Score(int total, int ok, double rate) {}
 
     /** {@code byStratum} is what the epic gates on; {@code byVendor} answers "which
-     *  WAFs can we get past", which an aggregate cannot. Both come from one run. */
-    /** {@code prevalenceWeighted} answers "what will an agent actually experience",
+     *  WAFs can we get past", which an aggregate cannot. Both come from one run.
+     *
+     *  <p>{@code prevalenceWeighted} answers "what will an agent actually experience",
      *  {@code rate} answers "did we do the hard work". Both are reported because either
      *  alone is misleading: the corpus over-samples difficulty by design, and the web
      *  under-samples it. {@code prevalenceNote} carries the unreachable exclusion, which

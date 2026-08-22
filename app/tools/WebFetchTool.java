@@ -129,8 +129,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
             var text = WebExtraction.toText(fetched);
             var best = climb(url, fetched, text, null);
             var body = best.fetched() == null ? fetched : best.fetched();
-            return "html".equals(mode) ? rawHtml(body, url, agent)
-                    : (best.text() == null ? text : best.text());
+            var extracted = best.text() == null ? text : best.text();
+            return "html".equals(mode) ? rawHtml(body, url, agent) : extracted;
         } catch (WebExtraction.HostNotAllowedException e) {
             return e.getMessage();
         } catch (SecurityException e) {
@@ -167,8 +167,9 @@ public class WebFetchTool implements ToolRegistry.Tool {
      *  the harness both do so all three agree on what counts as a failure. */
     private static ScrapeLadder.Attempt climb(String url, WebExtraction.FetchResult fetched,
                                               String text, String error) {
+        var detail = error == null ? "fetch failed" : error;
         var obs = fetched == null
-                ? ScrapeObservation.failed(url, error == null ? "fetch failed" : error)
+                ? ScrapeObservation.failed(url, detail)
                 : ScrapeObservation.of(fetched, text);
         return ScrapeLadder.climb(url, new ScrapeLadder.Attempt(
                 ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error));

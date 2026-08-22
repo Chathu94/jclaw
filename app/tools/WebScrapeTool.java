@@ -93,6 +93,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private static final String CFG_SEED_FROM_SITEMAP = "web_scrape.seed-from-sitemap";
     private static final String CFG_LANGUAGE = "web_scrape.language";
     private static final String ARG_LANGUAGE = "language";
+    private static final String EVENT_CATEGORY = "scrape";
 
     /** Preferred language for pages that declare translations. English by default; the
      *  per-call {@code language} argument overrides it, following the respectRobots
@@ -292,6 +293,18 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         int escalationsLeft = maxEscalations();
         int escalationsUsed;
         int escalationsSuppressed;
+
+        /** Claimed from the crawl pool, so two threads escalating at once cannot
+         *  overdraw the budget. */
+        synchronized boolean claimEscalation() {
+            if (escalationsLeft <= 0) {
+                escalationsSuppressed++;
+                return false;
+            }
+            escalationsLeft--;
+            escalationsUsed++;
+            return true;
+        }
     }
 
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
@@ -644,19 +657,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private Outcome escalate(URI uri, Outcome plain, CrawlState state) {
         if (plain.usable() || !ScrapeLadder.available()) return plain;
-        synchronized (state) {
-            if (state.escalationsLeft <= 0) {
-                state.escalationsSuppressed++;
-                return plain;
-            }
-            state.escalationsLeft--;
-            state.escalationsUsed++;
-        }
+        if (!state.claimEscalation()) return plain;
         var best = ScrapeLadder.climb(uri.toString(),
                 new ScrapeLadder.Attempt(ScrapeRung.PLAIN, plain.fetched(), plain.text(),
                         plain.reason(), plain.detail()));
         if (best.servedBy() == ScrapeRung.PLAIN) return plain;
-        EventLogger.info("scrape", "%s: served by %s after %s at PLAIN"
+        EventLogger.info(EVENT_CATEGORY, "%s: served by %s after %s at PLAIN"
                 .formatted(uri, best.servedBy(), plain.reason()), null);
         return new Outcome(best.fetched(), best.text(), best.reason(),
                 BlockClassifier.nextRung(best.reason(), best.servedBy()),
@@ -670,7 +676,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var reason = BlockClassifier.classify(obs);
         var next = BlockClassifier.nextRung(reason);
         if (reason != ScrapeReason.OK) {
-            EventLogger.info("scrape",
+            EventLogger.info(EVENT_CATEGORY,
                     "%s: %s (would need %s)".formatted(uri, reason, next),
                     obs.failed() ? obs.error() : "extracted %d chars".formatted(obs.textLength()));
         }

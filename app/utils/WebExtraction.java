@@ -77,13 +77,13 @@ public final class WebExtraction {
                     // markdown.
                     .set(FlexmarkHtmlConverter.OUTPUT_ATTRIBUTES_ID, false)).build();
 
-    /** Shared and configured once (never mutated per-call) so {@code parseToString}
-     *  stays thread-safe under the parallel tool dispatch. */
     /** Shared and stateless, like {@link #HTML_TO_MARKDOWN} — flexmark parsers are
      *  documented as thread-safe once built. */
     private static final com.vladsch.flexmark.parser.Parser MARKDOWN_PARSER =
             com.vladsch.flexmark.parser.Parser.builder().build();
 
+    /** Shared and configured once (never mutated per-call) so {@code parseToString}
+     *  stays thread-safe under the parallel tool dispatch. */
     private static final Tika TIKA = new Tika();
     static {
         TIKA.setMaxStringLength(MAX_TEXT_LENGTH + 10_000);
@@ -130,18 +130,6 @@ public final class WebExtraction {
         }
     }
 
-    /**
-     * Fetch a URL through a {@link SsrfGuard}ed client. Redirects are followed
-     * manually, up to {@link #MAX_REDIRECTS}, so each hop is re-validated through
-     * {@link SsrfGuard#assertSafeScheme(URI)} and re-resolved through the guarded DNS.
-     *
-     * <p>Only the final (non-redirect) response body is read, and it is read as raw
-     * bytes — never a decoded String — so binary documents survive intact for Tika.
-     * The read is size-bounded through {@link #readBounded}.
-     *
-     * @param headers request headers, so a caller can present a different client
-     *                identity without forking this loop
-     */
     /**
      * One HTTP exchange with redirects <em>not</em> followed — the transport a fetch
      * lane plugs in. Rung 1 supplies OkHttp; rung 2 supplies the TLS-impersonation
@@ -212,8 +200,17 @@ public final class WebExtraction {
     }
 
     /**
-     * Walk redirects manually, re-validating every hop against {@link SsrfGuard} and
-     * the outbound allowlist, and return the first non-redirect response.
+     * Fetch a URL through a {@link SsrfGuard}ed client. Redirects are followed
+     * manually, up to {@link #MAX_REDIRECTS}, so each hop is re-validated through
+     * {@link SsrfGuard#assertSafeScheme(URI)} and the outbound allowlist, and
+     * re-resolved through the guarded DNS.
+     *
+     * <p>Only the final (non-redirect) response body is read, and it is read as raw
+     * bytes — never a decoded String — so binary documents survive intact for Tika.
+     * The read is size-bounded through {@link #readBounded}.
+     *
+     * @param headers request headers, so a caller can present a different client
+     *                identity without forking this loop
      */
     public static FetchResult fetch(String url, Map<String, String> headers, Transport transport)
             throws IOException {
@@ -463,8 +460,6 @@ public final class WebExtraction {
         return false;
     }
 
-    /** True for content types that are already human-readable and must pass
-     *  through untouched (JSON, XML, CSV, plain text, source). */
     /**
      * The page's declared translations, keyed by {@code hreflang} (JCLAW-1100).
      *
@@ -543,6 +538,8 @@ public final class WebExtraction {
         }
     }
 
+    /** True for content types that are already human-readable and must pass
+     *  through untouched (JSON, XML, CSV, plain text, source). */
     private static boolean isTextual(String contentType) {
         if (contentType.isBlank()) {
             return false;

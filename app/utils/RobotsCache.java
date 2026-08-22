@@ -86,7 +86,6 @@ public final class RobotsCache {
         return rulesFor(uri, client, identity).isAllowed(uri.toString());
     }
 
-    /** Crawl-delay this host asks for, clamped to a sane band. */
     /**
      * The {@code Sitemap:} URLs this host's robots.txt advertises (JCLAW-1092).
      *
@@ -100,6 +99,7 @@ public final class RobotsCache {
         return sitemaps == null ? List.of() : List.copyOf(sitemaps);
     }
 
+    /** Crawl-delay this host asks for, clamped to a sane band. */
     public static long delayMillis(URI uri, OkHttpClient client, Identity identity) {
         long declared = rulesFor(uri, client, identity).getCrawlDelay();
         if (declared == BaseRobotRules.UNSET_CRAWL_DELAY || declared <= 0) {

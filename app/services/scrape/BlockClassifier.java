@@ -101,23 +101,6 @@ public final class BlockClassifier {
     }
 
     /**
-     * The cheapest rung that could plausibly address this failure.
-     *
-     * <p>{@link ScrapeReason#THIN_CONTENT} skips {@link ScrapeRung#IMPERSONATE}
-     * deliberately: a different TLS fingerprint cannot execute JavaScript, so
-     * escalating a client-rendered page to the impersonation rung spends a request to
-     * arrive at the same empty page.
-     *
-     * <p>{@link ScrapeReason#TIMEOUT} stays at {@link ScrapeRung#NONE}: an origin too
-     * slow to answer a plain fetch will not answer a browser faster, and a render is the
-     * most expensive way to wait.
-     *
-     * <p>{@link ScrapeReason#POLICY_BLOCK} maps to {@link ScrapeRung#NONE} rather than
-     * to a stealth rung. An origin that states it blocks agents is refusing on identity,
-     * and the answer to that is identification, not evasion — which is the lane the epic
-     * descoped.
-     */
-    /**
      * The rung to try after {@code reason} was observed <em>on {@code attempted}</em>.
      *
      * <p>The single-argument form maps a reason to the rung that addresses it, which is
@@ -136,6 +119,23 @@ public final class BlockClassifier {
         return next < ScrapeRung.NONE.ordinal() ? ScrapeRung.values()[next] : ScrapeRung.NONE;
     }
 
+    /**
+     * The cheapest rung that could plausibly address this failure.
+     *
+     * <p>{@link ScrapeReason#THIN_CONTENT} skips {@link ScrapeRung#IMPERSONATE}
+     * deliberately: a different TLS fingerprint cannot execute JavaScript, so
+     * escalating a client-rendered page to the impersonation rung spends a request to
+     * arrive at the same empty page.
+     *
+     * <p>{@link ScrapeReason#TIMEOUT} stays at {@link ScrapeRung#NONE}: an origin too
+     * slow to answer a plain fetch will not answer a browser faster, and a render is the
+     * most expensive way to wait.
+     *
+     * <p>{@link ScrapeReason#POLICY_BLOCK} maps to {@link ScrapeRung#NONE} rather than
+     * to a stealth rung. An origin that states it blocks agents is refusing on identity,
+     * and the answer to that is identification, not evasion — which is the lane the epic
+     * descoped.
+     */
     public static ScrapeRung nextRung(ScrapeReason reason) {
         return switch (reason) {
             case TLS_BLOCKED, TRUST_BLOCK -> ScrapeRung.IMPERSONATE;
