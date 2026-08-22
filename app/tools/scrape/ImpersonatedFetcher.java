@@ -98,7 +98,11 @@ public final class ImpersonatedFetcher {
                     throw new ScrapeSidecarException(
                             "fetch sidecar response carried no X-Upstream-Status for " + uri, null);
                 }
-                var body = response.body().bytes();
+                // Bounded like rungs 1 and 3. readTimeout is disabled on this client
+                // too, and the sidecar is an unauthenticated localhost port — an
+                // orphan from an older build, or anything else holding it, buffers
+                // straight onto the heap otherwise.
+                var body = WebExtraction.readBounded(response.body(), uri);
                 return new WebExtraction.Exchange(
                         Integer.parseInt(upstream),
                         body,

@@ -31,14 +31,22 @@ because moving the launch out of the JVM moves the pinning with it:
      SsrfGuard resolution, pin the entry host to the address the guard actually
      validated. That closes the DNS-rebinding window between the guard's
      lookup and the browser's.
-  2. A route interceptor re-checks every request the page makes — redirects and
+  2. Route interceptors re-check every request the page makes — redirects and
      subresources included, which the launch pin alone does not cover — and
-     aborts any host that resolves to a non-public address.
+     abort any host that resolves to a non-public address. Registered on the
+     CONTEXT and paired with a WebSocket interceptor: page-level routing does not
+     cover popups, service workers or ws:// at all, and a page that could open a
+     socket to loopback could read it and write the reply into the DOM we return.
+
+Both interceptors fail CLOSED. A URL whose host cannot be parsed is aborted rather
+than allowed, and a scheme that is not http/https/data/blob/about is aborted too.
 
 Guard (2) is a SECOND implementation of the JVM's IP-range check, which is a real
 duplication and is treated as one: it lives in ssrf.py, stdlib-only, and
 StealthBrowserTest runs that file against the same address table the Java guard is
-fed so the two cannot drift apart silently.
+fed. The asserted invariant is that this side is never MORE PERMISSIVE than the
+JVM's — it may be stricter. Exact parity was the earlier claim and it was not true:
+ipaddress admitted fec0::/10, which Java's isSiteLocalAddress() rejects.
 """
 
 import argparse
@@ -48,6 +56,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 DEFAULT_TIMEOUT_MS = 35_000
 # Cloudflare's interstitial resolves itself a few seconds after load. Waiting for
@@ -76,7 +85,7 @@ DEFAULT_MAX_CONCURRENT = 4
 # does not change. Fixing it needs Emulation.setUserAgentOverride with
 # userAgentMetadata; deferred until measurement shows the brand list is what is
 # actually costing access.
-from ssrf import is_public_host
+from ssrf import is_public_host, is_public_ip
 
 try:
     from patchright.sync_api import sync_playwright
@@ -119,6 +128,12 @@ _UA_PROBE = """async () => {
   return {ua: navigator.userAgent, platform: d ? d.platform : '',
           mobile: d ? d.mobile : false, ...hi};
 }"""
+
+
+def _header_safe(value):
+    """Origin-supplied text, made safe to put in an HTTP header value. send_header
+    encodes latin-1 and raises on anything else, taking the whole response with it."""
+    return str(value).encode("ascii", "backslashreplace").decode("ascii")
 
 
 class SidecarState:
@@ -215,6 +230,15 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         pins = req.get("pins") or {}
+        # A pin exempts its host from the route gate, so an unvalidated one is a way
+        # around the gate rather than an input to it. The JVM only ever pins an address
+        # SsrfGuard approved; this endpoint is unauthenticated, so it re-checks rather
+        # than trusting the caller to have been that JVM.
+        for pinned_host, pinned_ip in pins.items():
+            if not is_public_ip(pinned_ip):
+                self._send_json(400, {
+                    "error": "pin for %s is not a public address" % pinned_host})
+                return
         timeout_ms = int(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS)
         settle_ms = int(req.get("settleMs") or DEFAULT_SETTLE_MS)
         wait_until = req.get("waitUntil") or DEFAULT_WAIT_UNTIL
@@ -231,9 +255,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("X-Upstream-Status", str(status))
-        self.send_header("X-Upstream-Url", final_url)
+        # Both values are origin-influenced — final_url comes from the page, and the
+        # blocked set from URLs it chose to request — and send_header raises on
+        # anything outside latin-1, which would drop the whole response.
+        self.send_header("X-Upstream-Url", _header_safe(final_url))
         if blocked:
-            self.send_header("X-Blocked-Hosts", ",".join(sorted(blocked)[:20]))
+            self.send_header("X-Blocked-Hosts",
+                             _header_safe(",".join(sorted(blocked)[:20])))
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -285,21 +313,45 @@ class Handler(BaseHTTPRequestHandler):
         def gate(route):
             # Pinned hosts are already guard-validated; anything else the page
             # reaches for gets resolved and range-checked before it is allowed.
-            host = ""
-            try:
-                host = route.request.url.split("//", 1)[1].split("/", 1)[0].split(":")[0]
-            except IndexError:
-                pass
-            if host and host not in pins:
-                allowed = decided.get(host)
-                if allowed is None:
-                    allowed = is_public_host(host)
-                    decided[host] = allowed
-                if not allowed:
-                    blocked.add(host)
+            parts = urlsplit(route.request.url)
+            scheme = parts.scheme.lower()
+            if scheme in ("http", "https"):
+                # urlsplit, not string slicing: the hand-rolled split produced "[2606"
+                # for an IPv6 literal and "" for anything it could not parse, and an
+                # empty host then skipped the check entirely.
+                host = parts.hostname
+                if not host:
+                    blocked.add(route.request.url[:80])
                     route.abort()
                     return
+                if host not in pins:
+                    allowed = decided.get(host)
+                    if allowed is None:
+                        allowed = is_public_host(host)
+                        decided[host] = allowed
+                    if not allowed:
+                        blocked.add(host)
+                        route.abort()
+                        return
+            elif scheme not in ("data", "blob", "about"):
+                # data/blob/about reach no network and a page legitimately uses them.
+                # Everything else -- file:, ftp:, chrome-extension: -- has no business
+                # being fetched by a rendered page, and defaulting them to "allow" is
+                # the wrong way round for a security gate.
+                blocked.add(scheme + ":")
+                route.abort()
+                return
             route.continue_()
+
+        def ws_gate(ws):
+            # page.route never sees WebSocket traffic -- it is a separate API -- so
+            # until this existed a page could open ws://127.0.0.1, read a loopback
+            # service and write the reply into the DOM we hand back.
+            host = urlsplit(ws.url).hostname
+            if not host or (host not in pins and not is_public_host(host)):
+                blocked.add(host or ws.url[:80])
+                return
+            ws.connect_to_server()
 
         with sync_playwright() as p:
             try:
@@ -312,9 +364,13 @@ class Handler(BaseHTTPRequestHandler):
                                  "'patchright install chromium'\n" % type(exc).__name__)
                 browser = p.chromium.launch(headless=True, args=args)
             try:
-                context = browser.new_context()
+                # Routed on the CONTEXT, not the page: a popup the page opens is a
+                # separate Page with no page-level handler, and service workers issue
+                # requests the page handler never sees at all.
+                context = browser.new_context(service_workers="block")
+                context.route("**/*", gate)
+                context.route_web_socket("**/*", ws_gate)
                 page = context.new_page()
-                page.route("**/*", gate)
                 context.new_cdp_session(page).send(
                     "Emulation.setUserAgentOverride", self._ua_override(context))
                 response = page.goto(url, wait_until=wait_until, timeout=timeout_ms)

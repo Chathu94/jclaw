@@ -37,7 +37,14 @@ class StealthBrowserTest extends UnitTest {
             "fd00::1",                                    // private v6
             "169.254.169.254", "fe80::1",                 // link-local (incl. cloud metadata)
             "224.0.0.1", "ff02::1",                       // multicast
-            "0.0.0.0", "::");                             // unspecified
+            "0.0.0.0", "::",                              // unspecified
+            // Classes where the two implementations do NOT agree. The table held none
+            // of them, so it passed while asserting equality it could not have caught
+            // a drift in. fec0::/10 was the one that mattered: Java rejects it as
+            // site-local, ipaddress called it public, and the sidecar admitted it.
+            "fec0::1",                                    // v6 site-local
+            "240.0.0.1", "192.0.2.1", "198.18.0.1",       // v4 reserved/doc/benchmark
+            "255.255.255.255", "64:ff9b::7f00:1");        // broadcast, v4-mapped v6
 
     @AfterEach
     void clearOverrides() {
@@ -69,8 +76,15 @@ class StealthBrowserTest extends UnitTest {
         for (var address : ADDRESSES) {
             boolean pythonSaysPublic = python.get(address).getAsBoolean();
             boolean javaSaysPublic = !SsrfGuard.isUnsafe(InetAddress.getByName(address));
-            assertEquals(javaSaysPublic, pythonSaysPublic,
-                    "guards disagree on " + address + " — the sidecar's copy has drifted");
+            // Not equality. The security property is one-directional: the sidecar must
+            // never admit what the JVM would reject, and being stricter costs only
+            // reach. Asserting equality made the stricter-side differences look like
+            // failures, which is why the divergent addresses were absent from the table
+            // and the fail-open one went unnoticed.
+            if (pythonSaysPublic) {
+                assertTrue(javaSaysPublic, "the sidecar admits " + address
+                        + " while SsrfGuard rejects it — the duplicated guard has drifted open");
+            }
         }
     }
 

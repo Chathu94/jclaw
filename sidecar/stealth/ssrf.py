@@ -16,12 +16,19 @@ import socket
 def is_public_ip(addr):
     """True when `addr` (a string or ip_address) is publicly routable.
 
-    The rejected set mirrors SsrfGuard.isUnsafe: loopback, private, link-local,
-    multicast, reserved and unspecified.
+    Covers SsrfGuard.isUnsafe and then some. Exact parity is NOT the invariant --
+    this side must never be more permissive, and it is allowed to be stricter, which
+    is what StealthBrowserTest asserts.
+
+    fec0::/10 is checked explicitly: Java's isSiteLocalAddress() rejects the
+    deprecated IPv6 site-local range, and ipaddress classifies it as neither private
+    nor reserved, so mirroring "is_private" alone admitted an address the JVM blocks.
     """
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
+        return False
+    if ip.version == 6 and (int(ip) >> 118) == 0x3FB:
         return False
     return not (ip.is_private or ip.is_loopback or ip.is_link_local
                 or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
@@ -35,6 +42,9 @@ def is_public_host(host):
     """
     try:
         infos = socket.getaddrinfo(host, None)
-    except OSError:
+    except (OSError, UnicodeError, ValueError):
+        # An over-long or empty DNS label raises UnicodeEncodeError from the idna
+        # codec, not OSError. Catching only OSError let it escape the route handler,
+        # leaving the request neither continued nor aborted until the render timed out.
         return False
     return bool(infos) and all(is_public_ip(i[4][0]) for i in infos)

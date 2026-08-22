@@ -67,6 +67,16 @@ except Exception as exc:  # pragma: no cover - exercised only on a broken instal
     _IMPORT_ERROR = "%s: %s" % (type(exc).__name__, exc)
 
 
+def _header_safe(value):
+    """Origin-supplied text, made safe to put in an HTTP header value.
+
+    send_header encodes latin-1 and raises on anything else, and a Location or
+    Content-Type carrying raw UTF-8 is common in the wild — it killed the whole
+    response rather than the one header.
+    """
+    return str(value).encode("ascii", "backslashreplace").decode("ascii")
+
+
 def _supported_profiles():
     """The impersonation targets this curl_cffi build accepts, or () if unknown."""
     if curl_requests is None:
@@ -196,6 +206,13 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
             return
 
+        # Everything that can fail happens BEFORE the first byte is written, so a
+        # failure here is still answerable as 502. The previous shape claimed headers
+        # "may already be on the wire" and swallowed the error; they are not —
+        # send_response and send_header only append to _headers_buffer, and nothing
+        # flushes until end_headers(). So the caller received no status line at all
+        # and blocked to its own 90s timeout, turning a diagnosable transport error
+        # into an indistinguishable TIMEOUT.
         try:
             body = bytearray()
             truncated = False
@@ -205,25 +222,30 @@ class Handler(BaseHTTPRequestHandler):
                     del body[max_bytes:]
                     truncated = True
                     break
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("X-Upstream-Status", str(resp.status_code))
-            self.send_header("X-Upstream-Content-Type", resp.headers.get("Content-Type", ""))
-            self.send_header("X-Upstream-Url", resp.url or url)
+            headers = [
+                ("Content-Type", "application/octet-stream"),
+                ("X-Upstream-Status", str(resp.status_code)),
+                ("X-Upstream-Content-Type", _header_safe(resp.headers.get("Content-Type", ""))),
+                ("X-Upstream-Url", _header_safe(resp.url or url)),
+            ]
             location = resp.headers.get("Location")
             if location:
-                self.send_header("X-Upstream-Location", location)
+                headers.append(("X-Upstream-Location", _header_safe(location)))
             if truncated:
-                self.send_header("X-Upstream-Truncated", "true")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(bytes(body))
+                headers.append(("X-Upstream-Truncated", "true"))
+            headers.append(("Content-Length", str(len(body))))
         except Exception as exc:
-            # Headers may already be on the wire, so this cannot become a JSON
-            # error response — log it and let the short read surface to the JVM.
             sys.stderr.write("[fetch-sidecar] body relay failed for %s: %s\n" % (url, exc))
+            self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
+            return
         finally:
             resp.close()
+
+        self.send_response(200)
+        for name, value in headers:
+            self.send_header(name, value)
+        self.end_headers()
+        self.wfile.write(bytes(body))
 
 
 def _idle_watcher(state):
