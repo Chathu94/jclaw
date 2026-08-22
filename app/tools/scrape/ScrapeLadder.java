@@ -16,8 +16,8 @@ import java.util.Map;
  * reachable: the tools classified a failure, logged the rung that would fix it, and gave
  * up. Wiring them together took the 150-site corpus from 61/150 to 101/150 —
  * 40.7% to 67.3% equal-allocation, 60.9% to 89.1% prevalence-weighted. The figures live
- * in {@code docs/scrape-access-gate.md}; earlier drafts of this note quoted numbers from
- * a different run, which is why they are cited from one place now.
+ * in {@code docs/spikes/jclaw-1091-scrape-access-gate.md}; earlier drafts of this note
+ * quoted numbers from a different run, which is why they are cited from one place now.
  *
  * <p><b>Escalation, never substitution.</b> A higher rung is not a superset of a lower
  * one — measured twice. Rung 2 reads pages rung 1 cannot and the reverse; rung 3 reads
