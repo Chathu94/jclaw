@@ -22,8 +22,8 @@ import java.util.Map;
  * <p><b>Unreachable domains are excluded, and this is load-bearing.</b> Roughly a third
  * of the Tranco sample did not respond at all — parked, dead or NXDOMAIN. Nothing can
  * scrape a dead host, so leaving them in the denominator caps the achievable score near
- * 69% by arithmetic rather than by capability. The exclusion moves a measured ladder run
- * from about 62% to about 91%, so it is stated in the report rather than buried here.
+ * 69% by arithmetic rather than by capability. The exclusion moves the measured ladder
+ * run from about 61% to 89.1%, so it is stated in the report rather than buried here.
  */
 public final class ScrapePrevalence {
 

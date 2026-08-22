@@ -101,10 +101,17 @@ public final class SitemapSeeder {
         if (documentsLeft <= 0) return 0;
         AbstractSiteMap parsed;
         try {
+            // Paced like any other fetch too: a sitemap index can name several children,
+            // and issuing those back-to-back is the crawl-delay guarantee broken before
+            // the crawl has read its first page.
+            RobotsCache.awaitSlot(URI.create(sitemapUrl), RobotsCache.DEFAULT_DELAY_MS);
             // Through the guarded client like any other fetch — a sitemap lives on the
             // same untrusted host as the pages and gets no exemption.
             var fetched = WebExtraction.fetch(sitemapUrl, client,
-                    Map.of("User-Agent", identity.userAgentHeader()));
+                    Map.of("User-Agent", identity.userAgentHeader(),
+                            // Explicit: the shared default asks for markdown first, and a
+                            // content-negotiating origin would rank that above the XML.
+                            "Accept", "application/xml, text/xml;q=0.9"));
             parsed = parser.parseSiteMap(fetched.body(), URI.create(fetched.finalUrl()).toURL());
         } catch (Exception _) {
             return 1;   // the request was still spent

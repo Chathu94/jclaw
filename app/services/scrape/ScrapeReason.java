@@ -31,6 +31,9 @@ public enum ScrapeReason {
      *  it — the operator can lift it, or not. */
     ROBOTS_DISALLOWED,
     TIMEOUT,
+    /** The origin answered that the page is not there. No rung climbs it — a browser
+     *  renders a 404 as faithfully as a plain fetch reads one. */
+    NOT_FOUND,
     /** Transport or extraction failure that is ours, not the origin's. */
     ERROR
 }

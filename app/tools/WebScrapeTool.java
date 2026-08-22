@@ -639,12 +639,17 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             var fetched = WebExtraction.fetch(uri.toString(), CLIENT, headersFor(language));
             var text = WebExtraction.toText(fetched);
             plain = classified(uri, fetched, ScrapeObservation.of(fetched, text));
+        } catch (WebExtraction.HostNotAllowedException e) {
+            // Our own refusal, not the origin's. The browser rung reaches the network
+            // without consulting the allowlist, so escalating this would walk around the
+            // guard rather than fall back to it — the same reason web_fetch returns here.
+            return classified(uri, null, ScrapeObservation.failed(uri.toString(), reason(e)));
         } catch (Exception e) {
             // One unreachable page must not end the crawl — the caller asked for a
             // site, and a broken link on it is the site's problem, not the run's.
             plain = classified(uri, null, ScrapeObservation.failed(uri.toString(), reason(e)));
         }
-        return escalate(uri, plain, state);
+        return escalate(uri, plain, state, language);
     }
 
     /**
@@ -655,12 +660,26 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * that failed still spent the seconds, and refunding would let one pathological host
      * consume the whole crawl one retry at a time.
      */
-    private Outcome escalate(URI uri, Outcome plain, CrawlState state) {
+    private Outcome escalate(URI uri, Outcome plain, CrawlState state, String language) {
         if (plain.usable() || !ScrapeLadder.available()) return plain;
+        // Ask before claiming: a reason no installed rung addresses would spend the slot
+        // without issuing a request, and be counted in the "escalated N pages" line.
+        if (!ScrapeLadder.wouldAttempt(plain.reason())) return plain;
         if (!state.claimEscalation()) return plain;
+        // An escalation is another request to a host that just refused us, so it waits
+        // its turn like any other. Without this a blocked page fired rung 1, rung 2 and
+        // rung 3 back-to-back, which is the pacing guarantee inverted at exactly the
+        // moment the origin was least willing.
+        try {
+            RobotsCache.awaitSlot(uri, RobotsCache.DEFAULT_DELAY_MS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            return plain;
+        }
         var best = ScrapeLadder.climb(uri.toString(),
                 new ScrapeLadder.Attempt(ScrapeRung.PLAIN, plain.fetched(), plain.text(),
-                        plain.reason(), plain.detail()));
+                        plain.reason(), plain.detail()),
+                language);
         if (best.servedBy() == ScrapeRung.PLAIN) return plain;
         EventLogger.info(EVENT_CATEGORY, "%s: served by %s after %s at PLAIN"
                 .formatted(uri, best.servedBy(), plain.reason()), null);
@@ -825,6 +844,16 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return (int) PlayConfig.longOr(CFG_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS);
     }
 
+    private static String languageDefault() {
+        var configured = services.ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
+        return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
+    }
+
+    private static boolean seedFromSitemapDefault() {
+        return !"false".equalsIgnoreCase(
+                services.ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
+    }
+
     /**
      * Default for the {@code respectRobots} argument when a call omits it.
      *
@@ -836,16 +865,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * either way. "Ignore this site's directives" and "hammer this site" are different
      * requests, and only the first is available.
      */
-    private static String languageDefault() {
-        var configured = services.ConfigService.get(CFG_LANGUAGE, DEFAULT_LANGUAGE).strip();
-        return configured.isEmpty() ? DEFAULT_LANGUAGE : configured;
-    }
-
-    private static boolean seedFromSitemapDefault() {
-        return !"false".equalsIgnoreCase(
-                services.ConfigService.get(CFG_SEED_FROM_SITEMAP, "true").strip());
-    }
-
     private static boolean respectRobotsDefault() {
         return !"false".equalsIgnoreCase(
                 services.ConfigService.get(CFG_RESPECT_ROBOTS, "true").strip());

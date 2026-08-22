@@ -80,9 +80,14 @@ public class ApiScrapeTestController extends Controller {
         };
         // Ladder position, not rung id: "scrape" is rung 1's transport wearing the tool's
         // politeness, so it must not be told to escalate past impersonation.
+        // "ladder" sits at PLAIN, not BROWSER: it climbs per URL, so no single rung
+        // describes the run. Pinning it at the ceiling made nextRung answer BROWSER+1 —
+        // the descoped provider rung — for every failure, and byNextRung is the column
+        // used to decide what to build next. At PLAIN it names the cheapest rung that
+        // addresses the reason, which is a claim the data supports.
         var attempted = switch (rungId) {
             case "2" -> ScrapeRung.IMPERSONATE;
-            case "3", "ladder" -> ScrapeRung.BROWSER;
+            case "3" -> ScrapeRung.BROWSER;
             default -> ScrapeRung.PLAIN;
         };
         if (rung == null) {

@@ -4,6 +4,7 @@ import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
+import services.scrape.ScrapeSidecarException;
 import utils.WebExtraction;
 
 import java.util.Map;
@@ -13,8 +14,10 @@ import java.util.Map;
  *
  * <p>Every rung existed and was measured before this class did, and none of them was
  * reachable: the tools classified a failure, logged the rung that would fix it, and gave
- * up. On the CF-100 corpus that is the difference between 38.0% and 72.0%
- * equal-allocation, or 58.8% and 91.0% prevalence-weighted.
+ * up. Wiring them together took the 150-site corpus from 61/150 to 101/150 —
+ * 40.7% to 67.3% equal-allocation, 60.9% to 89.1% prevalence-weighted. The figures live
+ * in {@code docs/scrape-access-gate.md}; earlier drafts of this note quoted numbers from
+ * a different run, which is why they are cited from one place now.
  *
  * <p><b>Escalation, never substitution.</b> A higher rung is not a superset of a lower
  * one — measured twice. Rung 2 reads pages rung 1 cannot and the reverse; rung 3 reads
@@ -29,9 +32,15 @@ public final class ScrapeLadder {
      * profile it forges, and overriding it would pair a Chrome ClientHello with a
      * non-Chrome agent string — a mismatch WAFs test for directly (JCLAW-1087).
      */
-    public static final Map<String, String> IMPERSONATED_HEADERS = Map.of(
-            "Accept", "text/html,application/xhtml+xml",
-            "Accept-Language", "en-US,en;q=0.9");
+    public static Map<String, String> impersonatedHeaders(String language) {
+        // Same "*;q=0.5" tail rung 1 sends: a bare preference invites a 406 from a site
+        // that has no page in that language, and a language must never cost us the page.
+        return Map.of("Accept", "text/html,application/xhtml+xml",
+                "Accept-Language", language + ", *;q=0.5");
+    }
+
+    /** The language a caller that has no preference of its own escalates in. */
+    public static final String DEFAULT_LANGUAGE = "en";
 
     /** One rung's product, and which rung produced it. */
     public record Attempt(ScrapeRung servedBy, WebExtraction.FetchResult fetched,
@@ -54,6 +63,18 @@ public final class ScrapeLadder {
     }
 
     /**
+     * Whether {@link #climb} would issue a request for a rung-1 failure with this reason.
+     *
+     * <p>A caller holding a budget must ask before claiming a slot: {@code climb} returns
+     * without a request when the classifier names an uninstalled rung, so claiming first
+     * spends the budget on a page nothing was attempted for and reports an escalation
+     * that never happened.
+     */
+    public static boolean wouldAttempt(ScrapeReason reason) {
+        return isInstalled(BlockClassifier.nextRung(reason, ScrapeRung.PLAIN));
+    }
+
+    /**
      * Attempt higher rungs until one succeeds or the ladder is exhausted, and return the
      * best attempt made. {@code plain} is the rung-1 result the caller already has.
      *
@@ -62,6 +83,12 @@ public final class ScrapeLadder {
      * invoke this unconditionally and an install with no sidecars simply keeps rung 1.
      */
     public static Attempt climb(String url, Attempt plain) {
+        return climb(url, plain, DEFAULT_LANGUAGE);
+    }
+
+    /** As {@link #climb(String, Attempt)}, carrying the caller's language preference so
+     *  an escalated page comes back in the language the unescalated one would have. */
+    public static Attempt climb(String url, Attempt plain, String language) {
         if (plain.usable()) return plain;
 
         var best = plain;
@@ -72,7 +99,7 @@ public final class ScrapeLadder {
             var next = BlockClassifier.nextRung(last.reason(), attempted);
             if (!isInstalled(next)) return best;
 
-            last = attempt(next, url);
+            last = attempt(next, url, language);
             attempted = next;
             if (last.usable()) return last;
             best = better(best, last);
@@ -80,14 +107,21 @@ public final class ScrapeLadder {
     }
 
     /** Run one URL through {@code rung}, classifying the result the way the harness does. */
-    private static Attempt attempt(ScrapeRung rung, String url) {
+    private static Attempt attempt(ScrapeRung rung, String url, String language) {
         try {
             var fetched = rung == ScrapeRung.BROWSER
                     ? RenderedFetcher.fetch(url)
-                    : ImpersonatedFetcher.fetch(url, IMPERSONATED_HEADERS);
+                    : ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
             var text = WebExtraction.toText(fetched);
             var obs = ScrapeObservation.of(fetched, text);
             return new Attempt(rung, fetched, text, BlockClassifier.classify(obs), null);
+        } catch (ScrapeSidecarException e) {
+            // Ours, not the origin's — and the distinction this type exists to carry was
+            // being thrown away by classifying its message: "sidecar returned HTTP 503"
+            // matched the status pattern and reported a local outage as TRUST_BLOCK.
+            var detail = e.getMessage();
+            return new Attempt(rung, null, null, ScrapeReason.ERROR,
+                    detail == null || detail.isBlank() ? e.getClass().getSimpleName() : detail);
         } catch (Exception e) {
             var message = e.getMessage();
             var detail = message == null || message.isBlank()

@@ -85,14 +85,19 @@ public final class RenderedFetcher {
                 .build();
 
         try (var response = CLIENT.newCall(request).execute()) {
-            var body = response.body().bytes();
+            // Bounded like every other transport: a render settles into a DOM the origin
+            // controls the size of, and readTimeout is disabled here, so an unbounded
+            // read is the one place a page could push arbitrary bytes onto the heap.
+            var body = WebExtraction.readBounded(response.body(), URI.create(url));
             if (!response.isSuccessful()) {
                 throw new ScrapeSidecarException("stealth sidecar returned HTTP %d for %s: %s"
                         .formatted(response.code(), url,
                                 new String(body, StandardCharsets.UTF_8).strip()), null);
             }
+            // "0" is the sidecar's own value for "navigation returned no response
+            // object", not a missing header — it is not an error.
             var status = response.header("X-Upstream-Status", "0");
-            if (!"0".equals(status) && Integer.parseInt(status) >= 400) {
+            if (!"0".equals(status) && upstreamStatus(status, url) >= 400) {
                 throw new IOException("HTTP %s fetching %s".formatted(status, url));
             }
             var finalUrl = response.header("X-Upstream-Url", url);
@@ -100,6 +105,17 @@ public final class RenderedFetcher {
             // hop the interceptor allowed still cannot return an unsafe final URL.
             SsrfGuard.assertUrlSafe(URI.create(finalUrl).toString());
             return new WebExtraction.FetchResult(body, "text/html; charset=utf-8", finalUrl);
+        }
+    }
+
+    /** Fails as a sidecar fault rather than letting an unchecked parse error escape a
+     *  method declared to throw {@link IOException}, as rung 2 already does. */
+    private static int upstreamStatus(String status, String url) {
+        try {
+            return Integer.parseInt(status);
+        } catch (NumberFormatException e) {
+            throw new ScrapeSidecarException(
+                    "stealth sidecar sent a non-numeric upstream status for " + url, e);
         }
     }
 }

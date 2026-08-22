@@ -291,7 +291,7 @@ public final class WebExtraction {
      *       the heap.</li>
      * </ol>
      */
-    private static byte[] readBounded(ResponseBody body, URI url) throws IOException {
+    public static byte[] readBounded(ResponseBody body, URI url) throws IOException {
         long cap = maxBodyBytes();
         long declared = body.contentLength();
         if (declared > cap) {
@@ -550,7 +550,11 @@ public final class WebExtraction {
                 || ct.contains("xml")
                 || ct.contains("csv")
                 || ct.contains("javascript")
-                || ct.contains("yaml");
+                || ct.contains("yaml")
+                // isMarkdown matches on the word alone, so application/markdown routed to
+                // the markdown link parser but fell through to Tika here — one response
+                // with two different opinions about what it is.
+                || ct.contains("markdown");
     }
 
     /** Heuristic used only when the content type is absent: magic numbers for

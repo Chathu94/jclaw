@@ -17,12 +17,12 @@ import java.util.concurrent.TimeoutException;
 /**
  * Runs the CF-100 corpus and reports per-rung access rates (JCLAW-1081).
  *
- * <p>Only rung 1 exists today, so this establishes the baseline the epic must beat.
- * Rungs 2-4 land with JCLAW-1087/1088/1089 and register here.
+ * <p>Rungs 1-3 ship; the provider rung (JCLAW-1089/1090) was descoped and never
+ * registered here.
  *
- * <p><b>Each rung is measured independently, never through the escalation ladder.</b>
- * The ladder returns one aggregate outcome, which is exactly the attribution the
- * harness exists to produce.
+ * <p><b>Each numbered rung is measured independently</b> — the ladder returns one
+ * aggregate outcome, which is the opposite of the attribution those lanes exist to
+ * produce. {@link #rungLadder()} is the deliberate exception, reported beside them.
  *
  * <p><b>Rungs run the real code path, never a stand-in HTTP client.</b> Which client
  * gets through is the whole question — curl's TLS fingerprint is not OkHttp's, is not
@@ -102,7 +102,9 @@ public final class ScrapeHarness {
     public static Rung rung2() {
         return url -> {
             try {
-                var fetched = tools.scrape.ImpersonatedFetcher.fetch(url, tools.scrape.ScrapeLadder.IMPERSONATED_HEADERS);
+                var fetched = tools.scrape.ImpersonatedFetcher.fetch(url,
+                        tools.scrape.ScrapeLadder.impersonatedHeaders(
+                                tools.scrape.ScrapeLadder.DEFAULT_LANGUAGE));
                 return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
             } catch (Exception e) {
                 var m = e.getMessage();
@@ -117,7 +119,10 @@ public final class ScrapeHarness {
      *
      * <p>Serves two failure modes the epic keeps separate on purpose. {@code THIN_CONTENT}
      * is a rendering problem and occurs at every protection tier including none;
-     * {@code JS_CHALLENGE}/{@code TURNSTILE} is a fingerprint gate. The report separates
+     * {@code JS_CHALLENGE} is a fingerprint gate. {@code TURNSTILE} is not among them:
+     * it is an interactive widget, so {@link BlockClassifier#nextRung} routes it to the
+     * descoped provider rung and the ladder never spends a render on one. The report
+     * separates
      * them structurally rather than by annotation: {@code byRendering} scores against the
      * corpus's client-rendered axis, {@code byStratum} against its protection axis, so a
      * rendering fix can never be credited to anti-bot work or the reverse.
@@ -136,13 +141,18 @@ public final class ScrapeHarness {
     }
 
     /**
-     * The escalation ladder as the tools actually run it (JCLAW-1099).
+     * The escalation ladder, measured end to end (JCLAW-1099).
      *
      * <p>The other rungs measure one transport in isolation, which is what per-rung
-     * attribution needs. This one measures what a caller gets, and it exists because the
-     * union of three separate rung runs was being quoted as a ladder figure while no
-     * caller could obtain it. A number that has to be computed by hand across three runs
-     * is not a measurement of anything shipped.
+     * attribution needs. This one measures the climb, and it exists because the union of
+     * three separate rung runs was being quoted as a ladder figure while no caller could
+     * obtain it. A number computed by hand across three runs measures nothing shipped.
+     *
+     * <p>It is the ladder over rung 1's <em>transport</em>, not over the tool: robots
+     * admission, per-host pacing and the crawl's escalation budget belong to
+     * {@code web_scrape} and are absent here, so this bounds what the ladder can reach
+     * rather than reproducing what a crawl returns. {@link #rungScrape()} is the lane
+     * that carries the tool's politeness.
      */
     public static Rung rungLadder() {
         return url -> {
@@ -284,13 +294,23 @@ public final class ScrapeHarness {
         var note = "prevalence weighting unavailable";
         try {
             var weights = ScrapePrevalence.load();
-            note = weights.note();
+            double covered = 0;
             for (var byOutcome : group(results, Result::outcome).entrySet()) {
-                weighted += weights.weight(byOutcome.getKey()) * byOutcome.getValue().rate();
+                var share = weights.weight(byOutcome.getKey());
+                covered += share;
+                weighted += share * byOutcome.getValue().rate();
             }
-        } catch (IOException _) {
-            // A missing prevalence file must not fail a run: the equal-allocation score
-            // is the gate, and this number is context alongside it.
+            // Stated, not corrected. An outcome the corpus lacks contributes no weight,
+            // so the figure is an absolute share of the web rather than an average over
+            // what was measured — dividing by the covered mass here would silently
+            // restate every number the gate report already publishes.
+            note = weights.note()
+                    + "; corpus outcomes cover %.1f%% of the weighted mass".formatted(covered * 100);
+        } catch (IOException | RuntimeException _) {
+            // A missing OR malformed prevalence file must not fail a run: the
+            // equal-allocation score is the gate, and this number is context alongside
+            // it. Gson signals a bad file with unchecked exceptions, so catching only
+            // IOException discarded completed runs over a typo in a data file.
         }
         return new RungReport(rungName, results.size(), ok, rate(ok, results.size()),
                 Math.round(weighted * 10) / 10.0, note,

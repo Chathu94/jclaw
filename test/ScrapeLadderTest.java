@@ -109,6 +109,43 @@ class ScrapeLadderTest extends UnitTest {
     }
 
     @Test
+    void aDeadLinkIsNeverEscalated() {
+        // 404/410 used to classify as ERROR, which escalates to BROWSER. Crawls hit dead
+        // links constantly, so a handful of them spent the whole escalation budget on
+        // renders that return the same 404 — and suppressed the pages that needed it.
+        assertEquals(ScrapeReason.NOT_FOUND, services.scrape.BlockClassifier.classify(
+                services.scrape.ScrapeObservation.failed(
+                        "https://example.test/gone", "HTTP 404 fetching https://example.test/gone")));
+        for (var attempted : java.util.List.of(ScrapeRung.PLAIN, ScrapeRung.IMPERSONATE)) {
+            assertEquals(ScrapeRung.NONE,
+                    services.scrape.BlockClassifier.nextRung(ScrapeReason.NOT_FOUND, attempted),
+                    "a page the origin says is absent is not a transport problem");
+        }
+    }
+
+    @Test
+    void wouldAttemptAnswersBeforeABudgetIsSpent() {
+        // The budget is claimed before the climb, so a caller must be able to ask whether
+        // the climb would issue any request at all. Reasons no rung addresses used to
+        // spend a slot and be counted in the "escalated N pages" line.
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.POLICY_BLOCK),
+                "a policy refusal reaches no installed rung");
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.NOT_FOUND),
+                "a dead link reaches no installed rung");
+        disableEveryRung();
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT),
+                "with no sidecar installed nothing is attempted");
+    }
+
+    @Test
+    void anEscalatedFetchCarriesTheCallersLanguage() {
+        // A crawl asked for "ja" and the escalated fetch silently reverted to en-US, so
+        // the crawl mixed two languages with only a rung marker to explain why.
+        assertEquals("ja, *;q=0.5",
+                ScrapeLadder.impersonatedHeaders("ja").get("Accept-Language"));
+    }
+
+    @Test
     void escalationIsAvailableWhenEitherSidecarIs() {
         ConfigService.set(FetchSidecarManager.CFG_ENABLED, "true");
         ConfigService.set(StealthSidecarManager.CFG_ENABLED, "false");

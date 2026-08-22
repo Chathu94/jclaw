@@ -61,6 +61,16 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static final Map<String, String> HEADERS =
             Map.of("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)");
 
+    /** Mode {@code html} promises the page's own source, so it asks for it: the shared
+     *  default prefers markdown, and a site that honours that had its markdown written
+     *  to the workspace as {@code <host>.html}. */
+    private static Map<String, String> headersFor(String mode) {
+        if (!"html".equals(mode)) return HEADERS;
+        var withAccept = new java.util.HashMap<>(HEADERS);
+        withAccept.put("Accept", "text/html,application/xhtml+xml");
+        return Map.copyOf(withAccept);
+    }
+
     /**
      * Package-private and non-final so {@code WebFetchToolTest} can substitute
      * a loopback-friendly client (SsrfGuard's {@code SAFE_DNS} blocks 127.0.0.1
@@ -125,7 +135,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
         var mode = args.has("mode") ? args.get("mode").getAsString() : "text";
 
         try {
-            var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
+            var fetched = WebExtraction.fetch(url, CLIENT, headersFor(mode));
             var text = WebExtraction.toText(fetched);
             var best = climb(url, fetched, text, null);
             var body = best.fetched() == null ? fetched : best.fetched();

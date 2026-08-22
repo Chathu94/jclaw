@@ -149,7 +149,10 @@ public final class RobotsCache {
             // Through the guarded fetch like any other URL — robots.txt lives on the same
             // untrusted host as the pages, and gets no exemption from SsrfGuard.
             var fetched = WebExtraction.fetch(robotsUrl, client,
-                    Map.of("User-Agent", identity.userAgentHeader()));
+                    // Explicit: the shared default prefers markdown, which a
+                    // content-negotiating origin would rank above this file's own type.
+                    Map.of("User-Agent", identity.userAgentHeader(),
+                            "Accept", "text/plain"));
             return PARSER.parseContent(robotsUrl, fetched.body(),
                     fetched.contentType(), List.of(identity.robotName()));
         } catch (Exception e) {

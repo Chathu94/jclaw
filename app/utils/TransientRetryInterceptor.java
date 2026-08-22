@@ -4,7 +4,10 @@ import okhttp3.Interceptor;
 import okhttp3.Response;
 import org.jspecify.annotations.NonNull;
 
+import javax.net.ssl.SSLException;
+
 import java.io.IOException;
+import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.Set;
 
@@ -39,6 +42,12 @@ public final class TransientRetryInterceptor implements Interceptor {
     private static final Duration BASE_BACKOFF = Duration.ofMillis(500);
     private static final Duration MAX_BACKOFF = Duration.ofSeconds(5);
 
+    /** Ceiling on time spent waiting across one call. Two 5s {@code Retry-After} waits
+     *  fit inside the lane's 30s call timeout but leave too little for the attempts
+     *  themselves, and an expired call is classified {@code TIMEOUT} — the one reason
+     *  the ladder refuses to escalate. */
+    private static final Duration MAX_TOTAL_BACKOFF = Duration.ofSeconds(6);
+
     @Override
     public @NonNull Response intercept(Chain chain) throws IOException {
         var request = chain.request();
@@ -49,6 +58,7 @@ public final class TransientRetryInterceptor implements Interceptor {
         }
 
         IOException lastFailure = null;
+        long sleptMillis = 0;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             Response response = null;
             try {
@@ -57,11 +67,19 @@ public final class TransientRetryInterceptor implements Interceptor {
                     return response;
                 }
             } catch (IOException e) {
+                if (isPermanent(e)) throw e;
                 lastFailure = e;
                 if (attempt == MAX_ATTEMPTS) throw e;
             }
 
             var wait = backoff(attempt, response);
+            if (sleptMillis + wait.toMillis() > MAX_TOTAL_BACKOFF.toMillis()) {
+                // Waiting again would spend the call's own timeout, and a call that
+                // expires classifies as TIMEOUT — which no rung escalates. Hand the
+                // status back instead, so a 503 still reads as TRUST_BLOCK and climbs.
+                if (response != null) return response;
+                throw lastFailure;
+            }
             // The body must be closed before another attempt or the connection leaks;
             // the response is being discarded either way.
             if (response != null) response.close();
@@ -70,6 +88,7 @@ public final class TransientRetryInterceptor implements Interceptor {
                 // than issue another request into a crawl that is being torn down.
                 throw lastFailure != null ? lastFailure : new IOException("interrupted during retry backoff");
             }
+            sleptMillis += wait.toMillis();
         }
         throw lastFailure != null ? lastFailure : new IOException("retries exhausted");
     }
@@ -82,8 +101,12 @@ public final class TransientRetryInterceptor implements Interceptor {
                 try {
                     var seconds = Long.parseLong(header.strip());
                     if (seconds >= 0) {
-                        return Duration.ofSeconds(seconds).compareTo(MAX_BACKOFF) > 0
-                                ? MAX_BACKOFF : Duration.ofSeconds(seconds);
+                        // Floored, not honoured literally: "Retry-After: 0" asks for an
+                        // immediate retry against a limiter that has just refused us,
+                        // which is the outcome the scoping rationale above rules out.
+                        var asked = Duration.ofSeconds(seconds).compareTo(BASE_BACKOFF) < 0
+                                ? BASE_BACKOFF : Duration.ofSeconds(seconds);
+                        return asked.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : asked;
                     }
                 } catch (NumberFormatException _) {
                     // An HTTP-date form is legal and rare; fall through to exponential
@@ -93,6 +116,16 @@ public final class TransientRetryInterceptor implements Interceptor {
         }
         var exponential = BASE_BACKOFF.multipliedBy(1L << (attempt - 1));
         return exponential.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : exponential;
+    }
+
+    /**
+     * Failures a second attempt cannot change. {@link SsrfGuard} signals a blocked
+     * address by throwing {@link UnknownHostException}, so without this the guard's own
+     * refusal was re-issued three times with 1.5s of sleep behind it; a TLS failure is
+     * likewise a decision about the peer, not a blip.
+     */
+    private static boolean isPermanent(IOException e) {
+        return e instanceof UnknownHostException || e instanceof SSLException;
     }
 
     /** False when the wait was interrupted. */

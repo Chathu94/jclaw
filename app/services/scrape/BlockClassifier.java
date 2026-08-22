@@ -147,7 +147,8 @@ public final class BlockClassifier {
             // where a different TLS fingerprint cannot. Skips IMPERSONATE for the same
             // reason THIN_CONTENT does.
             case ERROR -> ScrapeRung.BROWSER;
-            case OK, POLICY_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT -> ScrapeRung.NONE;
+            case OK, POLICY_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT, NOT_FOUND ->
+                    ScrapeRung.NONE;
         };
     }
 
@@ -161,6 +162,10 @@ public final class BlockClassifier {
             return switch (Integer.parseInt(m.group(1))) {
                 case 401, 402, 451 -> ScrapeReason.POLICY_BLOCK;
                 case 403, 406, 429, 503 -> ScrapeReason.TRUST_BLOCK;
+                // A dead link is not a transport problem: rendering it costs seconds and
+                // an escalation slot to arrive at the same 404. Crawls hit these
+                // constantly, so leaving them in ERROR spent the whole budget on them.
+                case 404, 410 -> ScrapeReason.NOT_FOUND;
                 default -> ScrapeReason.ERROR;
             };
         }

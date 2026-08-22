@@ -3,9 +3,10 @@ package services.scrape;
 /**
  * Rungs of the escalation ladder, in cost order (JCLAW-1086).
  *
- * <p>Only {@link #PLAIN} is implemented; the rest land with JCLAW-1087/1088/1089.
- * The enum exists now because {@link BlockClassifier#nextRung} is the decision those
- * stories will consume, and the decision is testable before any of them are built.
+ * <p>{@link #PLAIN}, {@link #IMPERSONATE} and {@link #BROWSER} ship. {@link #PROVIDER}
+ * was descoped, so {@link BlockClassifier#nextRung} still names it for the failures only
+ * it could address — a reason kept distinct from {@link #NONE} rather than a rung that
+ * will be attempted.
  */
 public enum ScrapeRung {
     /** OkHttp + SsrfGuard + Readability. What ships today. */
