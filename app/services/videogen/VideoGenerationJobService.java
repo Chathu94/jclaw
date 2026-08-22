@@ -9,6 +9,7 @@ import okhttp3.Request;
 import play.Logger;
 import services.AttachmentService;
 import services.ConfigService;
+import services.LocalSidecarDaemon;
 import services.videogen.VideoGenerationService.PollResult;
 import services.videogen.VideoGenerationService.VideoGenRequest;
 import tools.GeneratedMediaFile;
@@ -175,9 +176,25 @@ public final class VideoGenerationJobService {
         }
     }
 
+    /** Whether {@code url} really addresses this host's video sidecar, compared as
+     *  parsed host and port so userinfo cannot spoof the authority. */
+    private static boolean isLocalSidecar(String url) {
+        var sidecar = okhttp3.HttpUrl.parse(LocalVideoSidecarManager.baseUrl());
+        var target = okhttp3.HttpUrl.parse(url);
+        return sidecar != null && target != null
+                && sidecar.host().equals(target.host())
+                && sidecar.port() == target.port();
+    }
+
     private static byte[] fetchBytes(String url) {
-        var req = new Request.Builder().url(url).get().build();
-        try (var resp = HttpFactories.general().newCall(req).execute()) {
+        var req = new Request.Builder().url(url);
+        // Host and port, not a prefix: "http://127.0.0.1:9528@evil.example/x" starts with
+        // the sidecar's base URL while OkHttp resolves the host as evil.example, which
+        // would hand a provider-supplied URL the sidecar secret.
+        if (isLocalSidecar(url)) {
+            req.header(LocalSidecarDaemon.AUTH_HEADER, LocalVideoSidecarManager.authToken());
+        }
+        try (var resp = HttpFactories.general().newCall(req.get().build()).execute()) {
             if (!resp.isSuccessful()) {
                 throw new VideoGenerationException("video fetch failed: HTTP " + resp.code());
             }

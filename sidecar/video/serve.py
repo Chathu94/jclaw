@@ -20,9 +20,15 @@ ltx_pipelines_mlx — faster, higher quality, generates audio); everywhere else 
   GET  /jobs/<id>/result  -> mp4 bytes | 409 {not_ready}
   POST /pull              -> ndjson stream of {bytesDownloaded,totalBytes} while weights download
 
+Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
+derives from its own install secret; without it in the environment the sidecar
+refuses to start.
+`--no-auth` drops both requirements for hand-running (see README).
+
 Weights live under --cache-dir (jclaw passes data/video-models) via the HF cache layout.
 """
 import argparse
+import hmac
 import json
 import os
 import platform
@@ -403,7 +409,23 @@ def _pull_stream(state, wfile):
     wfile.flush()
 
 
+# Not a CORS-simple header, so a page the operator visits cannot forge a request this
+# sidecar honours: the browser would have to preflight, and this server answers no OPTIONS.
+AUTH_HEADER = "X-Sidecar-Token"
+
+
+def _require_token(ap):
+    """The secret the JVM hands the child in its environment. Missing means fail closed —
+    an unauthenticated loopback sidecar is reachable by every local process."""
+    token = os.environ.get("SIDECAR_TOKEN", "")
+    if not token:
+        ap.error("SIDECAR_TOKEN is unset — pass --no-auth to run this sidecar unauthenticated")
+    return token
+
+
 class Handler(BaseHTTPRequestHandler):
+    token = None  # shared secret; None only under --no-auth
+
     def __init__(self, *a, state=None, **k):
         self.state = state
         super().__init__(*a, **k)
@@ -419,7 +441,18 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorized(self):
+        if self.token is None:
+            return True
+        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+                               self.token.encode("utf-8")):
+            return True
+        self._json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        return False
+
     def do_GET(self):
+        if not self._authorized():
+            return
         s = self.state
         path = self.path.split("?")[0]
         if path == "/health":
@@ -455,6 +488,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not_found"})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         s = self.state
         path = self.path.split("?")[0]
         if path == "/pull":
@@ -534,6 +569,8 @@ def main():
     ap.add_argument("--model", help="engine id: " + " | ".join(MODELS))
     ap.add_argument("--cache-dir")
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    ap.add_argument("--no-auth", action="store_true",
+                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
     # One-shot adaptive probe (SV-2): detect GPU + free VRAM, print the tiered engine list, exit. No server,
     # no model load — this is what the Settings "detect capability" flow runs to populate the dropdown.
     ap.add_argument("--probe", action="store_true")
@@ -543,6 +580,7 @@ def main():
         return
     if not a.model or not a.cache_dir:
         ap.error("--model and --cache-dir are required unless --probe is given")
+    Handler.token = None if a.no_auth else _require_token(ap)
     os.environ.setdefault("HF_HOME", a.cache_dir)
     state = State(a.model, a.cache_dir, a.idle_timeout_min * 60.0)
     threading.Thread(target=_idle_watcher, args=(state,), daemon=True).start()

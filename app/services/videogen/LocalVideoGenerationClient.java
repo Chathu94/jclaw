@@ -6,6 +6,7 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import services.LocalSidecarDaemon;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
@@ -88,6 +89,7 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
         }
         var httpReq = new Request.Builder()
                 .url(base + "/jobs")
+                .header(LocalSidecarDaemon.AUTH_HEADER, LocalVideoSidecarManager.authToken())
                 .post(RequestBody.create(payload.toString(), JSON))
                 .build();
         try (var resp = client.newCall(httpReq).execute()) {
@@ -120,7 +122,8 @@ public class LocalVideoGenerationClient implements VideoGenerationService {
         // job is active, and on success the runner fetches the result within the same tick — well inside
         // the idle window — so the process is still up to serve /jobs/<id>/result.
         var base = pollBase();
-        var httpReq = new Request.Builder().url(base + "/jobs/" + providerJobId).get().build();
+        var httpReq = new Request.Builder().url(base + "/jobs/" + providerJobId)
+                .header(LocalSidecarDaemon.AUTH_HEADER, LocalVideoSidecarManager.authToken()).get().build();
         try (var resp = client.newCall(httpReq).execute()) {
             var body = resp.body().string();
             if (!resp.isSuccessful()) {

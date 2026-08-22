@@ -8,7 +8,7 @@ JCLAW-509 spike: a localhost HTTP daemon beats a per-request subprocess
 (which would re-pay the multi-second model load on every image) and a model
 server like torchserve (too heavy for a single-user Personal Edition).
 
-Protocol (bound to 127.0.0.1 only):
+Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health  -> 200 {status, device, dtype, model, weights_present, loaded}
   GET  /capability -> 200 {kind, gpu, freeVramGb, totalVramGb, runnable, tier, reason}
   GET  /progress-> 200 {percent}   (0..100 while generating, null when idle)
@@ -26,6 +26,11 @@ Protocol (bound to 127.0.0.1 only):
            {"status":"downloading","bytesDownloaded":N,"totalBytes":M}
            ... terminated by {"status":"done",...} or {"status":"error","error":...}
 
+Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
+derives from its own install secret; without it in the environment the sidecar
+refuses to start.
+`--no-auth` drops both requirements for hand-running (see README).
+
 Device/dtype (JCLAW-509 addenda): mps->float16 (+ PYTORCH_ENABLE_MPS_FALLBACK),
 cuda->bfloat16, cpu->float32 (slow; logged as a warning). The JVM cannot see
 CUDA/MPS, so the chosen device is reported here via /health.
@@ -36,6 +41,7 @@ matching jclaw's data/ runtime-artifact convention (asr-models, lucene).
 
 import argparse
 import fnmatch
+import hmac
 import io
 import json
 import os
@@ -253,8 +259,23 @@ def _pull_stream(state: SidecarState):
         yield line({"status": "done", "bytesDownloaded": total, "totalBytes": total})
 
 
+# Not a CORS-simple header, so a page the operator visits cannot forge a request this
+# sidecar honours: the browser would have to preflight, and this server answers no OPTIONS.
+AUTH_HEADER = "X-Sidecar-Token"
+
+
+def _require_token(ap):
+    """The secret the JVM hands the child in its environment. Missing means fail closed —
+    an unauthenticated loopback sidecar is reachable by every local process."""
+    token = os.environ.get("SIDECAR_TOKEN", "")
+    if not token:
+        ap.error("SIDECAR_TOKEN is unset — pass --no-auth to run this sidecar unauthenticated")
+    return token
+
+
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None  # set on the class before the server starts
+    token = None  # shared secret; None only under --no-auth
 
     # Quieter logging: BaseHTTPRequestHandler logs every request to stderr by
     # default; route it through one prefix so jclaw's stderr drainer can tag it.
@@ -291,7 +312,18 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8")) if raw else {}
 
+    def _authorized(self):
+        if self.token is None:
+            return True
+        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+                               self.token.encode("utf-8")):
+            return True
+        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        return False
+
     def do_GET(self):
+        if not self._authorized():
+            return
         path = self.path.split("?")[0]
         if path == "/capability":
             # GPU + free-VRAM verdict for the Settings "can this machine run local Flux?" gate. Pure host
@@ -318,6 +350,8 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def do_POST(self):
+        if not self._authorized():
+            return
         path = self.path.split("?")[0]
         self.state.touch()
         if path == "/generate":
@@ -461,6 +495,8 @@ def main():
     ap.add_argument("--model", help="Hugging Face repo id")
     ap.add_argument("--cache-dir", default=os.path.join("data", "image-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    ap.add_argument("--no-auth", action="store_true",
+                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
     # One-shot capability probe: detect GPU + free VRAM, print the verdict, exit. No server, no model
     # load — what the Settings "detect GPU" flow runs to decide whether local Flux is offered.
     ap.add_argument("--probe", action="store_true")
@@ -476,6 +512,7 @@ def main():
     # Point Hugging Face at jclaw's data dir so weights land under data/image-models.
     os.environ.setdefault("HF_HOME", cache_dir)
 
+    Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, cache_dir, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(

@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
+import services.LocalSidecarDaemon;
 import services.sidecar.SidecarHttpClient;
 
 import java.io.IOException;
@@ -85,6 +86,7 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
         }
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/diarize")
+                .header(LocalSidecarDaemon.AUTH_HEADER, DiarizeSidecarManager.authToken())
                 .post(RequestBody.create(body.toString(), JSON))
                 .build());
         call.timeout().timeout(ConfigService.getInt(
@@ -119,7 +121,8 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : DiarizeSidecarManager.ensureRunning();
         var encoded = URLEncoder.encode(commaSeparatedRepos, StandardCharsets.UTF_8);
         var call = client.newCall(new Request.Builder()
-                .url(baseUrl + "/diarize/models?ids=" + encoded).get().build());
+                .url(baseUrl + "/diarize/models?ids=" + encoded)
+                .header(LocalSidecarDaemon.AUTH_HEADER, DiarizeSidecarManager.authToken()).get().build());
         call.timeout().timeout(60, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var text = resp.body().string();
@@ -141,6 +144,7 @@ public class DiarizeSidecarClient extends SidecarHttpClient {
         body.addProperty("model", repo);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/diarize/prefetch")
+                .header(LocalSidecarDaemon.AUTH_HEADER, DiarizeSidecarManager.authToken())
                 .post(RequestBody.create(body.toString(), JSON))
                 .build());
         call.timeout().timeout(60, TimeUnit.SECONDS);

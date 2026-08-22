@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.FetchSidecarManager;
+import services.LocalSidecarDaemon;
 import services.scrape.ScrapeSidecarException;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -91,6 +92,7 @@ public final class ImpersonatedFetcher {
 
             var request = new Request.Builder()
                     .url(baseUrl + "/fetch")
+                    .header(LocalSidecarDaemon.AUTH_HEADER, FetchSidecarManager.authToken())
                     .post(RequestBody.create(payload.toString(), JSON))
                     .build();
 
@@ -110,11 +112,13 @@ public final class ImpersonatedFetcher {
                     throw new ScrapeSidecarException(
                             "fetch sidecar response carried no X-Upstream-Status for " + uri, null);
                 }
-                // Bounded like rungs 1 and 3. readTimeout is disabled on this client
-                // too, and the sidecar is an unauthenticated localhost port — an
-                // orphan from an older build, or anything else holding it, buffers
-                // straight onto the heap otherwise.
+                // Bounded like rungs 1 and 3: readTimeout is disabled on this client, so
+                // an orphan from an older build holding the port buffers straight onto
+                // the heap otherwise. The token proves the caller held the secret, not
+                // that the process answering is the build this JVM expects.
                 var body = WebExtraction.readBounded(response.body(), uri);
+                WebExtraction.noteUpstreamTruncated(
+                        response.header("X-Upstream-Truncated"), uri.toString());
                 return new WebExtraction.Exchange(
                         Integer.parseInt(upstream),
                         body,

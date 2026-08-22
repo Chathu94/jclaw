@@ -47,7 +47,18 @@ the pinning with it, so the containment is rebuilt here in two layers, mirroring
 2. **Route gate.** The launch pin covers the entry host only. A page also follows
    redirects and pulls subresources, so every request is intercepted, its host resolved
    and range-checked, and non-public ones aborted. Blocked hosts come back in
-   `X-Blocked-Hosts` rather than failing silently.
+   `X-Blocked-Hosts` (with a total in `X-Blocked-Hosts-Count`) rather than failing
+   silently. The lookup runs under a 3 s deadline and fails closed — `getaddrinfo` takes
+   no timeout and the gate runs on the thread holding a render permit, so a black-holed
+   resolver would otherwise stall the render past the JVM's 120 s call timeout. Decisions
+   are cached for 60 s across renders: long enough that a page pulling forty subresources
+   from one host resolves it once, short enough that an allow is not a standing
+   rebinding window. A deadline miss is **not** cached — it is an answer the resolver
+   never gave, and caching it would block a legitimate CDN for the full minute on one slow
+   lookup — so the request that hit it is denied and the next one asks again. Lookups run
+   on a fixed 8-thread pool, because a lookup past its deadline is abandoned and
+   `getaddrinfo` cannot be interrupted: unbounded, a black-holed resolver would leave one
+   live thread per host the page names.
 
 Layer 2 is a **second implementation of a security check**, which is a real cost. It
 lives in `ssrf.py` — stdlib-only, no Patchright import — and `StealthBrowserTest` runs
@@ -56,22 +67,56 @@ when the two disagree. (Confirmed to fail on a deliberate mutation, not just pas
 
 ## Protocol
 
-Bound to `127.0.0.1` only.
+`--host` defaults to `127.0.0.1` and the daemon passes it explicitly, but the server binds whatever it is handed — the loopback bind is a default, not an enforced constraint.
 
 | Route | Result |
 |---|---|
-| `GET /health` | `{status, model, patchright, browser_ready}` |
-| `GET /capability` | `{kind, runnable, reason}` |
-| `POST /render` | rendered HTML; outcome in `X-Upstream-*` / `X-Blocked-Hosts` |
+| `GET /health` | `{status, model, patchright, channel, browser_ready}` |
+| `GET /capability` | `{kind, runnable, channel, reason}` |
+| `POST /render` | rendered HTML; outcome in `X-Upstream-*` / `X-Settled-Status` / `X-Blocked-Hosts*` |
 | `POST /shutdown` | exits, so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | capability JSON on stdout, no browser launched |
 
-`POST /render` takes `{url, pins?, timeoutMs?, settleMs?, waitUntil?}`.
+`channel` is the browser the most recent render actually launched, not the one asked
+for — see [Looking like a real browser](#looking-like-a-real-browser).
+
+`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, waitUntil?, maxBytes?}`.
+
+| Response header | Meaning |
+|---|---|
+| `X-Upstream-Status` | status of the **first** navigation response, from `page.goto` — captured *before* the settle window. `0` means the navigation returned no response object |
+| `X-Settled-Status` | status of the last main-frame navigation the settle window **ended** on |
+| `X-Upstream-Url` | where the page finally sat |
+| `X-Blocked-Hosts` | up to 20 hosts the route gate aborted |
+| `X-Blocked-Hosts-Count` | how many it aborted in total, since the list above is clipped |
+| `X-Upstream-Truncated` | `true` when the body was cut at `maxBytes` |
+
+The two status headers differ on exactly the case this rung exists for: an interstitial
+served with 403 that then resolves itself client-side ends the settle window on 200, and
+the settled body is the real page. The JVM currently reads `X-Upstream-Status` only, and
+treats `>= 400` as a failed fetch — so those pages are discarded and scored `TRUST_BLOCK`
+even though the HTML in the same response is good. `X-Settled-Status` is reported so that
+can be fixed deliberately: it changes the measured access rate, so it is a gate decision,
+not a bug fix.
 
 `waitUntil` defaults to `domcontentloaded`, **not** `networkidle`. A challenge page
 that keeps polling never goes idle, so waiting for it hangs on exactly the pages this
 rung exists for. A fixed `settleMs` window afterwards gives the challenge time to
 resolve itself.
+
+`timeoutMs`, `settleMs` and `maxBytes` are clamped here (60 s / 15 s / 25 MiB) rather than
+trusted. Each holds a render permit — one of four — for its whole duration, and the JVM
+abandons the call at 120 s, so an unbounded request parks a browser nobody is waiting for.
+
+`maxBytes` caps the rendered document this process relays, under that hard ceiling. `0`
+means zero bytes, not "no cap"; omit the field to get the ceiling. These are the fetch
+sidecar's semantics exactly, because the JVM sends both rungs the same
+`WebExtraction.maxBodyBytes()` and a field that meant opposite things at the two ends
+would cap one rung and uncap the other.
+
+`400` means a malformed request — a body that is not a JSON object, a `pins` that is not
+one, a `timeoutMs`/`settleMs`/`maxBytes` that will not parse as a number, a negative
+`maxBytes`, or a pin whose target is not a public address. `502` is a failed navigation.
 
 ## Looking like a real browser
 
@@ -104,6 +149,16 @@ real headful Chrome on the same probe:
 Proprietary codecs (H.264, AAC, MP3) and Widevine are present in the bundled build
 too — checked, not assumed.
 
+A launch that fails falls back to the headless shell **for that render only**, and the
+next render tries the full build again. Latching the shell for the process lifetime was
+wrong: a launch failure is not proof the build is missing — a timeout, ENOMEM, a locked
+profile and fd exhaustion raise the same way, and all are reachable with four renders
+launching at once — so one transient failure would have downgraded the fingerprint for
+every later page of a sweep. The fallback is **reported**, in `channel` on `/health` and
+`/capability`, which names the browser the most recent render launched: a silent
+substitution would leave a sweep measuring the stripped build while the report named the
+full one.
+
 One signal the full Chromium still gets wrong: `userAgentData.brands` says `Chromium`
 where Chrome says `Google Chrome`, and **`Sec-CH-UA` is generated from it**. A single
 `Emulation.setUserAgentOverride` fixes the header, the JS API and the User-Agent string
@@ -114,6 +169,14 @@ That read-back must happen on a **secure origin** — `navigator.userAgentData` 
 exist on `about:blank`, and probing there silently yields an empty platform which the
 override then pins as empty, worse than not overriding at all. The probe page is served
 locally through a fulfilled route: a real `https://` origin with no network request.
+
+A failed probe is logged and the render goes out with the build's own User-Agent —
+degrading the disguise is the right failure mode, since a probe that fails the render
+turns one broken probe into a render error that names Playwright rather than the probe.
+The failure is remembered for 60 s and then re-probed. Caching it for the process
+lifetime was wrong for the same reason latching the headless shell was: the probe
+navigates, so it fails on the transients a render fails on, and every later render would
+have gone out undisguised while `/health` still reported the sidecar runnable.
 
 Result: **20 of 21 probed signals identical to a real headful Chrome**, and no failing
 rows on `bot.sannysoft.com`.
@@ -140,9 +203,26 @@ twenty-minute one. The bound is memory, not safety: each permit is a live headle
 Chromium. One `sync_playwright()` context per thread is safe; sharing one across
 threads is not.
 
+The UA probe *is* held under its cache lock, so concurrent cold-start renders queue behind
+one probe instead of each running their own. The probe navigates to a locally fulfilled
+route rather than the network, so the wait is milliseconds and the 15 s timeout is only a
+ceiling; running four of them in parallel would make the failure the retry exists for
+more likely, not less.
+
+## Authentication
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives
+from its own install secret and passes in the child's environment. Without that variable
+the sidecar refuses to start. A custom header is deliberately not CORS-simple, so a page
+the operator visits cannot reach a warm sidecar even though it listens on loopback.
+
+Hand-running: set a token of your own and send it, or pass `--no-auth` (off by default) to
+serve unauthenticated.
+
 ## Running it standalone
 
 ```bash
-uv run serve.py --probe
-uv run serve.py --port 9532 --max-concurrent 4
+uv run serve.py --probe                    # one-shot, no server, no token
+SIDECAR_TOKEN=dev uv run serve.py --port 9532 --max-concurrent 4
+curl -s -H 'X-Sidecar-Token: dev' localhost:9532/health
 ```

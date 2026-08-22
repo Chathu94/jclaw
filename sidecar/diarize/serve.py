@@ -12,7 +12,7 @@ opt-in (emotions=true) and runs in a separate SER worker (ser.py); the
 classical-SER path (DiaRemot) was rejected first for not transferring to
 8kHz telephony.
 
-Protocol (bound to 127.0.0.1 only):
+Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health  -> 200 {status, model, loaded}
   POST /diarize {audio_path, num_speakers?, emotions?, emotion_model?}
         -> 200 {turns: [{startMs, endMs, speaker, emotion?}, ...]}
@@ -21,6 +21,11 @@ Protocol (bound to 127.0.0.1 only):
         model (defaults MERaLiON-SER-v1).
   POST /shutdown -> 200 (JCLAW-637: evict an adopted orphan)
 
+Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
+derives from its own install secret; without it in the environment the sidecar
+refuses to start.
+`--no-auth` drops both requirements for hand-running (see README).
+
 The audio file is passed by path, not uploaded: both processes run on the
 same host and jclaw's attachments are already on disk. pyannote's gated
 community-1 weights need HF_TOKEN in the environment (the JVM passes it from
@@ -28,6 +33,7 @@ imagegen.local.hfToken); weights cache under --cache-dir via HF_HOME.
 """
 
 import argparse
+import hmac
 import json
 import os
 import sys
@@ -275,8 +281,23 @@ class SidecarState:
         self.last_activity = time.monotonic()
 
 
+# Not a CORS-simple header, so a page the operator visits cannot forge a request this
+# sidecar honours: the browser would have to preflight, and this server answers no OPTIONS.
+AUTH_HEADER = "X-Sidecar-Token"
+
+
+def _require_token(ap):
+    """The secret the JVM hands the child in its environment. Missing means fail closed —
+    an unauthenticated loopback sidecar is reachable by every local process."""
+    token = os.environ.get("SIDECAR_TOKEN", "")
+    if not token:
+        ap.error("SIDECAR_TOKEN is unset — pass --no-auth to run this sidecar unauthenticated")
+    return token
+
+
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None  # injected in main()
+    token = None  # shared secret; None only under --no-auth
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[diarize-sidecar] %s\n" % (fmt % args))
@@ -300,6 +321,15 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass  # client went away mid-response — not worth a traceback
 
+    def _authorized(self):
+        if self.token is None:
+            return True
+        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+                               self.token.encode("utf-8")):
+            return True
+        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        return False
+
     def _hf_status(self, repos):
         """Cache status for repos NOT in flight, via a one-shot hf_prefetch.py
         (minimal env — no pyannote/SER worker spawned). Returns the same shape
@@ -318,6 +348,8 @@ class Handler(BaseHTTPRequestHandler):
                 for repo, s in raw.items()}
 
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path.startswith("/diarize/models"):
             # Download status for the on-device diarization weights (pyannote +
             # the operator's SER model). An in-flight/failed download is sized
@@ -354,6 +386,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         if self.path == "/diarize/prefetch":
             # Kick a DETACHED download of a diarization weight (pyannote or SER
             # repo) and return immediately — the download never holds a lock or
@@ -529,6 +563,8 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "diarize-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    ap.add_argument("--no-auth", action="store_true",
+                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
@@ -536,6 +572,7 @@ def main():
     # Point Hugging Face at jclaw's data dir so weights land under data/.
     os.environ.setdefault("HF_HOME", cache_dir)
 
+    Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()

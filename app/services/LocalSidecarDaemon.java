@@ -15,6 +15,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -83,6 +84,10 @@ public final class LocalSidecarDaemon {
     private final Config cfg;
     private final Object lock = new Object();
 
+    /** Guards the {@link #authToken} derivation only. Deliberately not {@link #lock()},
+     *  which the diarization facade holds across a multi-minute spawn. */
+    private final Object tokenLock = new Object();
+
     /** JCLAW-830 single-flight: only one thread spawns on the fixed port at a
      *  time. Held across spawn + {@link #awaitHealthy()} so a second concurrent
      *  starter waits for the in-flight spawn then re-checks health and no-ops,
@@ -106,6 +111,14 @@ public final class LocalSidecarDaemon {
      *  {@link #argvIdentifiesSidecar} cannot drift apart — a rename that missed the
      *  matcher would leave the reaper silently never matching anything again. */
     private static final String SERVE_SCRIPT = "serve.py";
+
+    /** Header carrying {@link #authToken()} on every sidecar request. A custom header is
+     *  deliberately not CORS-simple, so a page the operator visits cannot reach a warm
+     *  sidecar even though it listens on loopback. */
+    public static final String AUTH_HEADER = "X-Sidecar-Token";
+
+    /** Derived once per daemon; see {@link #authTokenFor()} for why it is not random. */
+    private volatile String authToken;
 
     private volatile Process process;
     private volatile Thread outDrain;
@@ -148,6 +161,45 @@ public final class LocalSidecarDaemon {
 
     public String baseUrl() {
         return "http://127.0.0.1:" + port();
+    }
+
+    /** The shared secret every request to this daemon's sidecar must carry in {@link #AUTH_HEADER}. */
+    public String authToken() {
+        var t = authToken;
+        if (t == null) {
+            synchronized (tokenLock) {
+                t = authToken;
+                if (t == null) authToken = t = authTokenFor();
+            }
+        }
+        return t;
+    }
+
+    /**
+     * Derived, not random, and that is the whole design.
+     *
+     * <p>A per-spawn random token is unknowable to any JVM that did not do the spawning,
+     * so every {@code /health} from a restarted JVM answers 401: orphan adoption
+     * (JCLAW-637) stops working, {@link #evict()} becomes unreachable, and a second JVM
+     * on the same clone — {@code play autotest} beside a running app — can no longer
+     * share a warm sidecar and collides on the port instead.
+     *
+     * <p>Deriving it from {@code application.secret} keyed by the sidecar's name gives
+     * every JVM on this installation the same answer while still defeating what the
+     * token is for: a browser cannot send a custom header cross-origin, and another
+     * user on the host does not have the secret.
+     */
+    private String authTokenFor() {
+        try {
+            var mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(
+                    Play.secretKey.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(mac.doFinal(
+                            ("sidecar:" + cfg.displayName()).getBytes(StandardCharsets.UTF_8)));
+        } catch (java.security.GeneralSecurityException e) {
+            throw new IllegalStateException("cannot derive the sidecar auth token", e);
+        }
     }
 
     /** Whether a process handle exists (alive or not) — drives the engine-switch
@@ -245,6 +297,9 @@ public final class LocalSidecarDaemon {
             if (hfToken != null && !hfToken.isBlank()) {
                 pb.environment().put("HF_TOKEN", hfToken);
             }
+            // Via the environment, not argv: argv is world-readable through ps, and this
+            // daemon's own reaper reads other processes' argv.
+            pb.environment().put("SIDECAR_TOKEN", authToken());
             proc = pb.start();
         } catch (IOException e) {
             throw cfg.fail().apply("failed to launch %s: %s".formatted(cfg.displayName(), e.getMessage()), e);
@@ -461,7 +516,7 @@ public final class LocalSidecarDaemon {
      */
     public boolean isHealthy(String expectedModel) {
         var call = HttpFactories.general().newCall(
-                new Request.Builder().url(baseUrl() + "/health").get().build());
+                new Request.Builder().url(baseUrl() + "/health").header(AUTH_HEADER, authToken()).get().build());
         call.timeout().timeout(5, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             // Drain the body so the sidecar finishes its write — closing the connection
@@ -495,6 +550,7 @@ public final class LocalSidecarDaemon {
     private void evict() {
         var call = HttpFactories.general().newCall(new Request.Builder()
                 .url(baseUrl() + "/shutdown")
+                .header(AUTH_HEADER, authToken())
                 .post(okhttp3.RequestBody.create(new byte[0]))
                 .build());
         call.timeout().timeout(5, TimeUnit.SECONDS);

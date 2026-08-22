@@ -288,11 +288,16 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         final LinkedHashSet<String> suppressedLocalePrefixes = new LinkedHashSet<>();
         int unvisited;
         String stoppedBecause;
+        /** {@code System.nanoTime()} at which the crawl's declared timeout expires. */
+        long deadline;
         /** Remaining escalation budget, and what refusing it cost — reported rather
          *  than silently dropped, so a thin result is never mistaken for a blocked one. */
         int escalationsLeft = maxEscalations();
         int escalationsUsed;
         int escalationsSuppressed;
+        /** Kept apart from {@link #escalationsSuppressed}: raising max-escalations fixes
+         *  one and does nothing for the other. */
+        int escalationsOutOfTime;
 
         /** Claimed from the crawl pool, so two threads escalating at once cannot
          *  overdraw the budget. */
@@ -305,13 +310,17 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             escalationsUsed++;
             return true;
         }
+
+        synchronized void noteOutOfTime() {
+            escalationsOutOfTime++;
+        }
     }
 
     private String crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
                          boolean respectRobots, String language) {
-        long deadline = System.nanoTime()
-                + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
         var state = new CrawlState();
+        state.deadline = System.nanoTime()
+                + Duration.ofSeconds(configTimeoutSeconds()).toNanos();
         state.seen.add(canonical(seed));
         var level = List.of(seed);
         int depth = 0;
@@ -323,7 +332,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     break;
                 }
                 var fetched = fetchLevel(pool, admitted, respectRobots, language, state);
-                if (state.stoppedBecause != null || exhausted(deadline, state)
+                if (state.stoppedBecause != null || exhausted(state)
                         || depth >= maxDepth) {
                     break;
                 }
@@ -440,8 +449,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     /** True when the time or content budget is spent; records which one. */
-    private boolean exhausted(long deadline, CrawlState state) {
-        if (System.nanoTime() > deadline) {
+    private boolean exhausted(CrawlState state) {
+        if (System.nanoTime() > state.deadline) {
             state.stoppedBecause = "time budget (%ds) reached".formatted(configTimeoutSeconds());
             return true;
         }
@@ -665,6 +674,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         // Ask before claiming: a reason no installed rung addresses would spend the slot
         // without issuing a request, and be counted in the "escalated N pages" line.
         if (!ScrapeLadder.wouldAttempt(plain.reason())) return plain;
+        // Checked between levels alone this bounds nothing: rung 2 waits up to 90s and
+        // rung 3 up to 120s, so a 60s crawl could block an agent turn for minutes. A
+        // climb already in flight keeps running — the rungs have no cancellation seam.
+        if (System.nanoTime() > state.deadline) {
+            state.noteOutOfTime();
+            return plain;
+        }
         if (!state.claimEscalation()) return plain;
         // An escalation is another request to a host that just refused us, so it waits
         // its turn like any other. Without this a blocked page fired rung 1, rung 2 and
@@ -794,7 +810,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             sb.append("Dropped %d locale variant%s of pages already queued.\n".formatted(
                     state.localeVariantsDropped, state.localeVariantsDropped == 1 ? "" : "s"));
         }
-        if (state.escalationsUsed > 0 || state.escalationsSuppressed > 0) {
+        if (state.escalationsUsed > 0 || state.escalationsSuppressed > 0
+                || state.escalationsOutOfTime > 0) {
             sb.append("Escalated %d page%s beyond the plain fetch".formatted(
                     state.escalationsUsed, state.escalationsUsed == 1 ? "" : "s"));
             if (state.escalationsSuppressed > 0) {
@@ -802,6 +819,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 // whether the page resisted or whether we simply stopped trying.
                 sb.append("; %d more could have been but the escalation budget (%d) was spent"
                         .formatted(state.escalationsSuppressed, maxEscalations()));
+            }
+            if (state.escalationsOutOfTime > 0) {
+                sb.append("; %d more were skipped because the time budget (%ds) was spent"
+                        .formatted(state.escalationsOutOfTime, configTimeoutSeconds()));
             }
             sb.append(".\n");
         }

@@ -37,15 +37,25 @@ load — a per-request subprocess would re-pay it every time, and a model server
 Device/dtype is picked here (the JVM can't see CUDA/MPS): `mps`→fp16
 (with `PYTORCH_ENABLE_MPS_FALLBACK=1`), `cuda`→bf16, `cpu`→fp32.
 
+## Authentication
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives
+from its own install secret and passes in the child's environment. Without that variable
+the sidecar refuses to start. A custom header is deliberately not CORS-simple, so a page
+the operator visits cannot reach a warm sidecar even though it listens on loopback.
+
+Hand-running: set a token of your own and send it, or pass `--no-auth` (off by default) to
+serve unauthenticated.
+
 ## Running by hand (debugging)
 
 ```bash
 cd sidecar/image
-uv run serve.py --port 9527 --model black-forest-labs/FLUX.2-klein-4B
+SIDECAR_TOKEN=dev uv run serve.py --port 9527 --model black-forest-labs/FLUX.2-klein-4B
 # then, from another shell:
-curl localhost:9527/health
-curl -X POST localhost:9527/pull           # downloads weights (ndjson progress)
-curl -X POST localhost:9527/generate -d '{"prompt":"a red bicycle"}' -o out.png
+curl -H 'X-Sidecar-Token: dev' localhost:9527/health
+curl -H 'X-Sidecar-Token: dev' -X POST localhost:9527/pull    # downloads weights (ndjson progress)
+curl -H 'X-Sidecar-Token: dev' -X POST localhost:9527/generate -d '{"prompt":"a red bicycle"}' -o out.png
 ```
 
 Weights download to `--cache-dir` (jclaw passes `data/image-models/`) via `HF_HOME`.

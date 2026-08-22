@@ -9,13 +9,18 @@ measured tier comparison — speaker attribution now runs through an
 audio-capable cloud chat model (the diarize_audio tool); this daemon's job
 is plain transcription and ASR model management for the Settings page.
 
-Protocol (bound to 127.0.0.1 only):
+Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health  -> 200 {status, model, loaded}
   GET  /asr/models?ids=a,b -> 200 {models: {...}}   (JCLAW-650)
   POST /transcribe {audio_path, model, language?}
         -> 200 {segments: [{startMs, endMs, text, ...confidence}, ...]}
   POST /asr/prefetch {model} -> 200 {...}           (JCLAW-650)
   POST /shutdown -> 200 (JCLAW-637: evict an adopted orphan)
+
+Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
+derives from its own install secret; without it in the environment the sidecar
+refuses to start.
+`--no-auth` drops both requirements for hand-running (see README).
 
 The audio file is passed by path, not uploaded: both processes run on the
 same host and jclaw's attachments are already on disk.
@@ -25,6 +30,7 @@ runtime-artifact convention.
 """
 
 import argparse
+import hmac
 import json
 import os
 import sys
@@ -289,8 +295,23 @@ class SidecarState:
         self.last_activity = time.monotonic()
 
 
+# Not a CORS-simple header, so a page the operator visits cannot forge a request this
+# sidecar honours: the browser would have to preflight, and this server answers no OPTIONS.
+AUTH_HEADER = "X-Sidecar-Token"
+
+
+def _require_token(ap):
+    """The secret the JVM hands the child in its environment. Missing means fail closed —
+    an unauthenticated loopback sidecar is reachable by every local process."""
+    token = os.environ.get("SIDECAR_TOKEN", "")
+    if not token:
+        ap.error("SIDECAR_TOKEN is unset — pass --no-auth to run this sidecar unauthenticated")
+    return token
+
+
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None  # injected in main()
+    token = None  # shared secret; None only under --no-auth
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[asr-sidecar] %s\n" % (fmt % args))
@@ -323,8 +344,19 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass  # client went away mid-response — not an error worth a traceback
 
+    def _authorized(self):
+        if self.token is None:
+            return True
+        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+                               self.token.encode("utf-8")):
+            return True
+        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        return False
+
     # ---- endpoints ------------------------------------------------------
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path.startswith("/asr/models"):
             # JCLAW-650: host-relevant ASR artifact status for the Settings
             # UI — which engine will run each model and whether its weights
@@ -380,6 +412,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         if self.path == "/asr/prefetch":
             # JCLAW-650: download the host engine's weights for a model. Kicks a
             # DETACHED subprocess and returns immediately — the download never
@@ -531,6 +565,8 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "asr-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    ap.add_argument("--no-auth", action="store_true",
+                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
@@ -538,6 +574,7 @@ def main():
     # Point Hugging Face at jclaw's data dir so weights land under data/.
     os.environ.setdefault("HF_HOME", cache_dir)
 
+    Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()

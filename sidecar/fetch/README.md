@@ -24,6 +24,18 @@ private address with `SsrfGuard` never seeing the hop. The sidecar returns the
 This is the one place where the stealth lane and SSRF containment genuinely
 conflict. Containment wins.
 
+## SSRF: what is checked here, and what is not
+
+**The request URL is not checked at all.** The JVM's `SsrfGuard` is authoritative for
+it, and stays authoritative on every hop because redirects come back here rather than
+being followed.
+
+`pins` *is* checked. Each `{host: ip}` entry becomes a `CURLOPT_RESOLVE` entry, so it
+decides where curl actually connects, and the token proves only that the caller held the
+secret, not that it was the JVM whose `SsrfGuard` approved the address — so every pin
+target is re-validated against `ssrf.py` (shared with the render sidecar, held to the
+Java guard by `StealthBrowserTest`), and a non-public address is a `400`.
+
 ## Impersonation profiles
 
 `--model` selects the profile (the daemon reuses its `--model` slot for it, so
@@ -41,17 +53,19 @@ stable identity we present is the JA4, and it matches Chrome's.
 
 ## Protocol
 
-Bound to `127.0.0.1` only.
+`--host` defaults to `127.0.0.1`, and `LocalSidecarDaemon` passes it explicitly — but
+the server binds whatever it is handed. Loopback is a default here, not a constraint the
+code enforces.
 
 | Route | Result |
 |---|---|
-| `GET /health` | `{status, model, curl_cffi, profile_supported}` — `model` is the profile |
-| `GET /capability` | `{kind, runnable, profile, profileKnown, profileCount, reason}` |
+| `GET /health` | `{status, model, curl_cffi, profile_supported, reason}` — `model` is the profile, so repinning it in config makes the JVM's health check respawn |
+| `GET /capability` | `{kind, runnable, profile, profileKnown, profileCount, reason}` — the same keys whether or not the install is usable |
 | `POST /fetch` | upstream body verbatim; see below |
-| `POST /shutdown` | exits, so a restarted JVM can evict an orphan |
+| `POST /shutdown` | answers, lets in-flight fetches finish, then exits — so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | the capability JSON on stdout, no server, no port |
 
-`POST /fetch` takes `{url, headers?, profile?, timeoutMs?, maxBytes?}` and answers
+`POST /fetch` takes `{url, pins?, headers?, profile?, timeoutMs?, maxBytes?}` and answers
 `200` when the exchange completed — **not** when the origin was happy. The
 origin's own result rides in headers, so a 403 from the origin stays
 distinguishable from a 403 raised by the sidecar itself:
@@ -62,13 +76,35 @@ distinguishable from a 403 raised by the sidecar itself:
 - `X-Upstream-Url` — the URL actually requested
 - `X-Upstream-Truncated` — `true` when the body hit `maxBytes`
 
-`400` means a malformed request, `502` a transport failure reaching the origin.
+`400` means a malformed request — a body that is not a JSON object, a `pins` that is
+not one, a `timeoutMs`/`maxBytes` that will not parse as a number, or a negative
+`maxBytes`. `502` is a transport failure reaching the origin.
+
+`maxBytes` caps what this process buffers, under a hard 25 MB ceiling. `0` means zero
+bytes, not "no cap"; omit the field to get the ceiling.
+
+A `curl_cffi` that will not import is a startup failure, not a degraded mode: the process
+writes the import error to stderr and exits non-zero. `LocalSidecarDaemon` reads any
+non-2xx `/health` as "not up yet", so a sidecar that stayed up reporting its own
+brokenness would burn the full startup timeout; a dead child is named within a second.
+`--probe` still reports it as `runnable: false`, which is how to diagnose it without a spawn.
+
+## Authentication
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives
+from its own install secret and passes in the child's environment. Without that variable
+the sidecar refuses to start. A custom header is deliberately not CORS-simple, so a page
+the operator visits cannot reach a warm sidecar even though it listens on loopback.
+
+Hand-running: set a token of your own and send it, or pass `--no-auth` (off by default) to
+serve unauthenticated.
 
 ## Running it standalone
 
 ```bash
-uv run serve.py --probe
-uv run serve.py --port 9531 --model chrome
+uv run serve.py --probe                    # one-shot, no server, no token
+SIDECAR_TOKEN=dev uv run serve.py --port 9531 --model chrome
+curl -s -H 'X-Sidecar-Token: dev' localhost:9531/health
 ```
 
 The JVM launches it through `LocalSidecarDaemon` and never needs these directly.

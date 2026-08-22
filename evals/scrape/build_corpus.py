@@ -297,34 +297,68 @@ def select(pool, want):
     return out
 
 
+def write_json(path, doc):
+    """Serialise through a sibling temp file: open(path, "w") truncates before the dump
+    runs, so a raise mid-serialisation would destroy the corpus it is rewriting."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh, indent=2)
+    os.replace(tmp, path)
+
+
 def reclassify(path, workers):
     """Re-probe the corpus's own entries and refresh their labels in place (JCLAW-1091).
 
     Protection tiers drift — the epic carries this as risk R3 — so a gate scored against
     labels captured weeks earlier is scoring a corpus that no longer exists. This differs
     from a rebuild on purpose: the URL set is held fixed, because changing which sites are
-    measured would make the baseline-versus-final delta meaningless.
+    measured would make the baseline-versus-final delta meaningless. A www. fallback that
+    answers is therefore classified but not written back; {probe_url_mismatch} counts how
+    many entries were labelled from a URL other than the one the harness will fetch.
+
+    Refreshing a label also re-derives that entry's {min_chars} from the freshly probed
+    body, so a pass moves PASS THRESHOLDS and not only labels — a page that grew since the
+    last probe is scored against a higher floor afterwards. {min_chars_moved} records how
+    many moved and by how much.
 
     Equal allocation is a property of the labels, not of the file, so drift can break it.
     That is reported rather than repaired: silently rebalancing would hide exactly the
-    drift this pass exists to surface, and the harness already refuses a corpus that is no
-    longer equally allocated.
+    drift this pass exists to surface. Drifting past the band is not free, though:
+    ScrapeCorpus.isEqualAllocation scores the REALISED counts, not the declared
+    {allocation} field this pass leaves alone, and the harness answers 400 and runs nothing
+    unless every stratum sits within ALLOCATION_TOLERANCE (20%) of the mean.
     """
-    doc = json.load(open(path))
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
     entries = doc["entries"]
+    if not entries:
+        sys.exit("corpus at %s has no entries — nothing to re-classify" % path)
     print("==> re-probing %d entries with %d workers" % (len(entries), workers), file=sys.stderr)
 
     def one(e):
-        host = e["url"].split("//", 1)[1].split("/", 1)[0]
-        url, status, headers, body, truncated = probe(host)
-        text = visible_text(body)
-        vendor, outcome, rendering = classify(status, headers, body, text, truncated)
-        return e, url, status, body, text, vendor, outcome, rendering
+        # Degrade, never raise: a raise propagates out of f.result() and aborts the sweep,
+        # discarding every label already refreshed.
+        try:
+            host = e["url"].split("//", 1)[-1].split("/", 1)[0]
+            url, status, headers, body, truncated = probe(host)
+            text = visible_text(body)
+            vendor, outcome, rendering = classify(status, headers, body, text, truncated)
+            return e, (url, status, body, text, vendor, outcome, rendering)
+        except Exception as err:
+            return e, err
 
-    changes, before = [], Counter(e["stratum"] for e in entries)
+    changes, floor_moves, mismatched = [], [], 0
+    before = Counter(e["stratum"] for e in entries)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         for f in as_completed([ex.submit(one, e) for e in entries]):
-            e, url, status, body, text, vendor, outcome, rendering = f.result()
+            e, res = f.result()
+            if isinstance(res, Exception):
+                changes.append((e["url"], e["stratum"],
+                                "PROBE FAILED (%s) — label kept" % type(res).__name__))
+                continue
+            url, status, body, text, vendor, outcome, rendering = res
+            if url != e["url"]:
+                mismatched += 1
             new_stratum = stratum_of(vendor, outcome, rendering)
             if new_stratum is None:
                 # Unclassifiable now (usually an origin that stopped answering). Keep the
@@ -337,9 +371,16 @@ def reclassify(path, workers):
                                 "%s/%s" % (new_stratum, vendor)))
             e["stratum"], e["vendor"], e["outcome"], e["rendering"] = \
                 new_stratum, vendor, outcome, rendering
+            was_floor = e["ground_truth"]["min_chars"]
             e["ground_truth"] = ground_truth(status, body, outcome, text)
+            if e["ground_truth"]["min_chars"] != was_floor:
+                floor_moves.append(e["ground_truth"]["min_chars"] - was_floor)
 
-    after = Counter(e["stratum"] for e in entries)
+    # Seeded from the before-keys so a stratum that lost every entry reports as 0 rather
+    # than vanishing — absent from the counter, min() never sees it and the worst possible
+    # drift would score as the smallest.
+    after = Counter(dict.fromkeys(before, 0))
+    after.update(e["stratum"] for e in entries)
     doc["reclassified_on"] = time.strftime("%Y-%m-%d")
     # "allocation" describes the SAMPLING DESIGN and stays "equal": the corpus was drawn
     # 25-per-stratum and the URL set is unchanged. Exact equality of the resulting counts
@@ -350,14 +391,26 @@ def reclassify(path, workers):
     doc["realised_strata"] = dict(sorted(after.items()))
     spread = max(after.values()) - min(after.values())
     doc["allocation_spread"] = spread
+    doc["min_chars_moved"] = {"entries": len(floor_moves),
+                              "min_delta": min(floor_moves, default=0),
+                              "max_delta": max(floor_moves, default=0)}
+    doc["probe_url_mismatch"] = mismatched
     if spread > 0:
         print("!!  strata no longer exactly equal (spread %d) — design stays 'equal', "
               "realised counts recorded" % spread, file=sys.stderr)
-    json.dump(doc, open(path, "w"), indent=2)
+    write_json(path, doc)
 
     print("==> %d of %d entries changed label" % (len(changes), len(entries)), file=sys.stderr)
     for url, was, now in sorted(changes):
         print("    %-38s %-28s -> %s" % (url, was, now), file=sys.stderr)
+    print("==> %d entries had min_chars moved (delta %d..%d) — pass thresholds, not labels"
+          % (len(floor_moves), min(floor_moves, default=0), max(floor_moves, default=0)),
+          file=sys.stderr)
+    if mismatched:
+        print("!!  %d entries answered on a URL other than the stored one — labelled from "
+              "it, stored URL unchanged" % mismatched, file=sys.stderr)
+    print("!!  prevalence.json is not re-probed by this pass; its probed_on now lags "
+          "corpus.json", file=sys.stderr)
     print("==> strata before: %s" % dict(sorted(before.items())), file=sys.stderr)
     print("==> strata after : %s" % dict(sorted(after.items())), file=sys.stderr)
 

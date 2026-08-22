@@ -12,27 +12,33 @@ library that impersonates in-process (impersonator-okhttp) ships its own copy
 of 309 okhttp3/ classes, OkHttpClient included, and would collide with the
 okhttp-jvm 5.4.0 the rest of jclaw runs on.
 
-Protocol (bound to 127.0.0.1 only):
-  GET  /health   -> 200 {status, model, curl_cffi, profile_supported}
+Protocol (--host defaults to 127.0.0.1; the server binds whatever it is given):
+  GET  /health   -> 200 {status, model, curl_cffi, profile_supported, reason}
                     "model" is the impersonation profile, so the JVM's
                     isHealthy(expectedModel) respawns when an operator repins it.
-  GET  /capability-> 200 {kind, runnable, profile, reason}
+  GET  /capability-> 200 {kind, runnable, profile, profileKnown, profileCount, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no server
   POST /fetch {url, pins?, headers?, profile?, timeoutMs?, maxBytes?}
         -> 200  upstream body verbatim; upstream status and Location ride in
                 X-Upstream-* headers (see below)
         -> 400  {error}  malformed request
         -> 502  {error}  transport failure reaching the origin
-  POST /shutdown -> 200 {status} then exit, so a restarted JVM can evict an
-                    orphan it has no Process handle for.
+  POST /shutdown -> 200 {status}, then exit once in-flight fetches drain, so a
+                    restarted JVM can evict an orphan it has no Process handle for.
+
+Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
+derives from its own install secret; without it in the environment the sidecar
+refuses to start.
+`--no-auth` drops both requirements for hand-running (see README).
 
 `pins` maps a hostname to the address SsrfGuard already resolved and approved,
 and becomes a CURLOPT_RESOLVE entry so curl never looks the name up itself. Without
 it the JVM validated a hostname and then handed the hostname over to be resolved a
 second time, which is a rebinding window the render sidecar closes at launch. Pin
 targets are re-checked here (ssrf.py, shared with the render sidecar and pinned
-against the JVM guard by StealthBrowserTest) because this endpoint is
-unauthenticated and a pin decides where curl connects.
+against the JVM guard by StealthBrowserTest) because a pin decides where curl
+connects, and the shared secret is the only thing standing between a local process
+and that decision.
 
 Note what this sidecar still does NOT do: it performs no SSRF check on the request
 URL itself. The JVM is authoritative for that, and stays so on every redirect hop
@@ -51,6 +57,7 @@ raised; a 200 here means only "the exchange completed".
 """
 
 import argparse
+import hmac
 import json
 import os
 import sys
@@ -67,6 +74,11 @@ DEFAULT_PROFILE = "chrome"
 # ballooning the sidecar's heap before the JVM gets a chance to.
 HARD_MAX_BYTES = 25 * 1024 * 1024
 DEFAULT_TIMEOUT_MS = 30_000
+# Ceiling on the shutdown/idle drain. Sized to the LONGEST fetch a caller can ask for,
+# not the default: the JVM sends half its 90s call timeout, so a drain budgeted at the
+# 30s default abandons a legitimate 45s fetch and closes with no status line — the exact
+# outcome the drain exists to prevent.
+DRAIN_TIMEOUT_S = 45.0
 
 try:
     import certifi
@@ -117,7 +129,11 @@ def _supported_profiles():
 def capability(profile):
     profiles = _supported_profiles()
     if curl_requests is None:
+        # Same keys as the success branch: a consumer written against the documented
+        # shape would break on exactly the broken install this endpoint exists to report.
         return {"kind": "fetch", "runnable": False, "profile": profile,
+                "profileKnown": False,
+                "profileCount": len(profiles),
                 "reason": "curl_cffi unavailable (%s)" % _IMPORT_ERROR}
     # An unknown name is reported rather than rejected: curl_cffi accepts rolling
     # aliases ("chrome") that are absent from the literal list on some builds.
@@ -133,13 +149,51 @@ class SidecarState:
         self.profile = profile
         self.idle_timeout_s = idle_timeout_s
         self.last_used = time.time()
+        self.in_flight = 0
+        self._drained = threading.Condition()
 
     def touch(self):
         self.last_used = time.time()
 
+    def begin_fetch(self):
+        with self._drained:
+            self.in_flight += 1
+
+    def end_fetch(self):
+        with self._drained:
+            self.in_flight -= 1
+            if self.in_flight == 0:
+                self._drained.notify_all()
+
+    def await_drain(self, budget_s):
+        """Block until no fetch is in flight. False when the budget ran out first."""
+        deadline = time.monotonic() + budget_s
+        with self._drained:
+            while self.in_flight:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._drained.wait(remaining)
+        return True
+
+
+# Not a CORS-simple header, so a page the operator visits cannot forge a request this
+# sidecar honours: the browser would have to preflight, and this server answers no OPTIONS.
+AUTH_HEADER = "X-Sidecar-Token"
+
+
+def _require_token(ap):
+    """The secret the JVM hands the child in its environment. Missing means fail closed —
+    an unauthenticated loopback sidecar is reachable by every local process."""
+    token = os.environ.get("SIDECAR_TOKEN", "")
+    if not token:
+        ap.error("SIDECAR_TOKEN is unset — pass --no-auth to run this sidecar unauthenticated")
+    return token
+
 
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None  # injected in main()
+    token = None  # shared secret; None only under --no-auth
 
     protocol_version = "HTTP/1.1"
 
@@ -155,7 +209,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_json(self):
-        length = int(self.headers.get("Content-Length", "0"))
+        # read(-1) reads to EOF, so a negative Content-Length would park the handler
+        # thread for as long as the caller keeps the socket open.
+        length = max(0, int(self.headers.get("Content-Length", "0")))
         raw = self.rfile.read(length) if length else b"{}"
         return json.loads(raw.decode("utf-8"))
 
@@ -165,16 +221,29 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass  # client went away mid-response — not worth a traceback
 
+    def _authorized(self):
+        if self.token is None:
+            return True
+        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+                               self.token.encode("utf-8")):
+            return True
+        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        return False
+
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path == "/health":
             # A health probe signals imminent use — touching the idle clock closes
             # the evict race between the JVM's check and its subsequent request.
             self.state.touch()
+            cap = capability(self.state.profile)
             self._send_json(200, {
                 "status": "ok",
                 "model": self.state.profile,
                 "curl_cffi": _CURL_CFFI_VERSION,
-                "profile_supported": capability(self.state.profile)["runnable"],
+                "profile_supported": cap["runnable"],
+                "reason": cap["reason"],
             })
         elif self.path == "/capability":
             self._send_json(200, capability(self.state.profile))
@@ -182,13 +251,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         if self.path == "/shutdown":
-            sys.stderr.write("[fetch-sidecar] shutdown requested — exiting\n")
+            sys.stderr.write("[fetch-sidecar] shutdown requested — draining\n")
             self._send_json(200, {"status": "bye"})
-            threading.Thread(target=lambda: (time.sleep(0.2), os._exit(0)), daemon=True).start()
+            # The sleep is grace for this reply to reach the socket, the drain for the
+            # fetches already running.
+            threading.Thread(target=lambda: (time.sleep(0.2), _exit_when_drained(self.state)),
+                             daemon=True).start()
             return
         if self.path == "/fetch":
-            self._handle_fetch()
+            self.state.begin_fetch()
+            try:
+                self._handle_fetch()
+            finally:
+                self.state.end_fetch()
             return
         self._send_json(404, {"error": "unknown path %s" % self.path})
 
@@ -197,26 +275,39 @@ class Handler(BaseHTTPRequestHandler):
         if curl_requests is None:
             self._send_json(502, {"error": "curl_cffi unavailable (%s)" % _IMPORT_ERROR})
             return
+        # Every coercion of the body belongs inside this try: an escape here reaches no
+        # handler at all, so the caller gets a closed connection where a 400 is promised.
         try:
             req = self._read_json()
+            if not isinstance(req, dict):
+                raise TypeError("body must be a JSON object")
+            url = req.get("url")
+            headers = req.get("headers") or {}
+            profile = req.get("profile") or self.state.profile
+            pins = req.get("pins") or {}
+            if not isinstance(pins, dict):
+                raise TypeError("pins must be a JSON object")
+            timeout_s = max(1.0, float(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS) / 1000.0)
+            # `or HARD_MAX_BYTES` here would read an explicit 0 as "no cap".
+            requested_bytes = req.get("maxBytes")
+            max_bytes = HARD_MAX_BYTES if requested_bytes is None else int(requested_bytes)
         except Exception as exc:
             self._send_json(400, {"error": "malformed request: %s" % exc})
             return
 
-        url = req.get("url")
         if not url:
             self._send_json(400, {"error": "url is required"})
             return
-        headers = req.get("headers") or {}
-        profile = req.get("profile") or self.state.profile
-        timeout_s = max(1.0, float(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS) / 1000.0)
-        max_bytes = min(int(req.get("maxBytes") or HARD_MAX_BYTES), HARD_MAX_BYTES)
+        if max_bytes < 0:
+            # Rejected, not clamped: del body[max_bytes:] cuts from the END, so a
+            # negative cap returns a body missing its tail under a 200.
+            self._send_json(400, {"error": "maxBytes must not be negative"})
+            return
+        max_bytes = min(max_bytes, HARD_MAX_BYTES)
 
-        pins = req.get("pins") or {}
         # A pin decides where curl connects, so an unvalidated one points this fetcher
-        # wherever the caller likes. The JVM only ever pins an address SsrfGuard
-        # approved; this endpoint is unauthenticated, so it re-checks rather than
-        # trusting the caller to have been that JVM.
+        # wherever the caller likes. The token proves only that the caller held the
+        # secret, not that it was the JVM whose SsrfGuard approved the address.
         for pinned_host, pinned_ip in pins.items():
             if not is_public_ip(pinned_ip):
                 self._send_json(400, {
@@ -293,6 +384,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(bytes(body))
 
 
+def _exit_when_drained(state):
+    """Exit once no fetch is in flight. A fetch killed mid-flight closes its connection
+    with no status line at all, which the caller can only read as a transport failure."""
+    if not state.await_drain(DRAIN_TIMEOUT_S):
+        sys.stderr.write("[fetch-sidecar] %d fetch(es) still running after %.0fs"
+                         " — exiting anyway\n" % (state.in_flight, DRAIN_TIMEOUT_S))
+    os._exit(0)
+
+
 def _idle_watcher(state):
     if state.idle_timeout_s <= 0:
         return
@@ -301,7 +401,7 @@ def _idle_watcher(state):
         if time.time() - state.last_used > state.idle_timeout_s:
             sys.stderr.write("[fetch-sidecar] idle for %.0fs — exiting\n"
                              % (time.time() - state.last_used))
-            os._exit(0)
+            _exit_when_drained(state)
 
 
 def main():
@@ -312,6 +412,8 @@ def main():
                     help="curl_cffi impersonation profile, e.g. chrome or chrome146")
     ap.add_argument("--cache-dir", default=os.path.join("data", "fetch-sidecar"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    ap.add_argument("--no-auth", action="store_true",
+                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
     ap.add_argument("--probe", action="store_true",
                     help="print capability JSON and exit without binding a port")
     args = ap.parse_args()
@@ -319,6 +421,12 @@ def main():
     if args.probe:
         print(json.dumps(capability(args.model)))
         return
+    if curl_requests is None:
+        # Fail the spawn rather than serve a permanently-502 sidecar: LocalSidecarDaemon
+        # reads any non-2xx /health as "not up yet", so a process that stays up and
+        # reports its own brokenness burns the whole startup timeout, where a dead child
+        # is named by startupExitMessage within a second.
+        sys.exit("[fetch-sidecar] curl_cffi unavailable (%s) — refusing to start" % _IMPORT_ERROR)
     if args.port is None:
         ap.error("--port is required unless --probe is given")
 
@@ -326,6 +434,7 @@ def main():
     # every sidecar, and its orphan reaper matches the running argv on it.
     os.makedirs(os.path.abspath(args.cache_dir), exist_ok=True)
 
+    Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()

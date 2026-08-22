@@ -3,7 +3,13 @@
 Async local video generation. One model per process (`--model`), one job at a time, gated on
 **free** VRAM. Launched + lifecycle-owned by `services.videogen.LocalVideoSidecarManager`.
 
-    uv run serve.py --model ltx --port 9528 --cache-dir ../../data/video-models --idle-timeout-min 15
+    SIDECAR_TOKEN=dev uv run serve.py --model ltx --port 9528 --cache-dir ../../data/video-models --idle-timeout-min 15
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives from its
+own install secret and passes in the child's environment; without that variable the sidecar refuses
+to start.
+A custom header is deliberately not CORS-simple, so a page the operator visits cannot reach a warm
+sidecar even though it listens on loopback. `--no-auth` (off by default) serves unauthenticated.
 
 Protocol (SV-3 / JCLAW-512): `GET /health`, `GET /capability`, `POST /jobs` -> 202 {job_id},
 `GET /jobs/<id>` -> {state,percent}, `GET /jobs/<id>/result` -> mp4, `POST /pull` -> ndjson progress.

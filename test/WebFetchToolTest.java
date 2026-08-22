@@ -15,6 +15,7 @@ import tools.WebFetchTool;
 
 import java.io.IOException;
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.TimeUnit;
@@ -554,6 +555,61 @@ class WebFetchToolTest extends UnitTest {
                 "redirect hop off the allowlist must be refused; got: " + result);
         assertTrue(result.contains("evil.test"),
                 "refusal must name the redirect target; got: " + result);
+    }
+
+    // =====================
+    // 10. JCLAW-1099: the per-agent escalation bound
+    // =====================
+
+    /** An arbitrary instant on a window boundary, so every claim below lands in the
+     *  window the test names rather than in whichever one the wall clock is in. */
+    private static final long WINDOW_START = Duration.ofMinutes(1).toMillis() * 25_000_000L;
+
+    /** A key no other test can be holding: play1 runs test classes concurrently, and a
+     *  budget shared with them would make the counts below somebody else's to move. */
+    private static String agentKey() {
+        return "web-fetch-budget-" + java.util.UUID.randomUUID();
+    }
+
+    @Test
+    void escalationIsBoundedPerMinuteAndTheWindowRolls() {
+        // Driven through the pure overload: the tool-level path sits behind
+        // ScrapeLadder.wouldAttempt, which is false on a host with no sidecar, so a
+        // tool-level test would exercise nothing and on a sidecar host would render the
+        // live web.
+        var agent = agentKey();
+        long minute = Duration.ofMinutes(1).toMillis();
+
+        for (int i = 1; i <= 3; i++) {
+            assertTrue(WebFetchTool.claimEscalation(agent, 3, WINDOW_START + i),
+                    "escalation " + i + " is within budget");
+        }
+        assertFalse(WebFetchTool.claimEscalation(agent, 3, WINDOW_START + minute - 1),
+                "the fourth in one minute must be refused, not merely logged");
+        assertTrue(WebFetchTool.claimEscalation(agent, 3, WINDOW_START + minute),
+                "a spent budget must recover, or one bad minute disables the ladder");
+    }
+
+    @Test
+    void oneAgentsSpentBudgetLeavesEveryOtherAgentEscalating() {
+        // The bound exists to cap one agent's loop. A JVM-wide counter would also stop
+        // every other conversation escalating for the rest of the minute, which is a
+        // wider blast radius than the loop it is defending against.
+        var greedy = agentKey();
+        for (int i = 1; i <= 2; i++) {
+            assertTrue(WebFetchTool.claimEscalation(greedy, 2, WINDOW_START + i));
+        }
+        assertFalse(WebFetchTool.claimEscalation(greedy, 2, WINDOW_START + 3),
+                "the greedy agent is out of budget");
+        assertTrue(WebFetchTool.claimEscalation(agentKey(), 2, WINDOW_START + 3),
+                "a second agent's first escalation must not pay for the first agent's loop");
+    }
+
+    @Test
+    void aLimitOfZeroAdmitsNothing() {
+        // An operator who sets web_fetch.max-escalations-per-minute to 0 has turned the
+        // ladder off, not asked for one free render per window.
+        assertFalse(WebFetchTool.claimEscalation(agentKey(), 0, WINDOW_START));
     }
 
     /** Build a one-page PDF containing {@code text}, using the PDFBox 3.x that

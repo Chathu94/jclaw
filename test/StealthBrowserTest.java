@@ -3,7 +3,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
-import services.ConfigService;
 import services.StealthSidecarManager;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeReason;
@@ -49,10 +48,11 @@ class StealthBrowserTest extends UnitTest {
             "64:ff9b::7f00:1",                            // NAT64 wrapping 127.0.0.1
             "100.64.0.1");                                // CGNAT
 
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
+
     @AfterEach
     void clearOverrides() {
-        ConfigService.set(StealthSidecarManager.CFG_ENABLED, "true");
-        ConfigService.clearCache();
+        config.restore();
     }
 
     // ==================== The duplicated guard ====================
@@ -135,8 +135,7 @@ class StealthBrowserTest extends UnitTest {
 
     @Test
     void disablingTheRungDegradesRatherThanErroring() {
-        ConfigService.set(StealthSidecarManager.CFG_ENABLED, "false");
-        ConfigService.clearCache();
+        config.set(StealthSidecarManager.CFG_ENABLED, "false");
         assertFalse(StealthSidecarManager.available());
         assertFalse(RenderedFetcher.available());
     }

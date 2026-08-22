@@ -61,6 +61,10 @@ public final class StealthSidecarManager {
         });
     }
 
+    public static String authToken() {
+        return DAEMON.authToken();
+    }
+
     /** Stop the sidecar if running. Wired into {@code jobs.ShutdownJob}. */
     public static void stop() {
         DAEMON.stop();

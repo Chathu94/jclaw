@@ -182,6 +182,29 @@ public final class ScrapeHarness {
 
     public record Score(int total, int ok, double rate) {}
 
+    public record GateCheck(String criterion, double measured, double floor, boolean pass) {}
+
+    public record Gate(boolean pass, List<GateCheck> checks) {}
+
+    /**
+     * The gate's floors as re-set on 2026-08-21 (docs/scrape-access-gate.md) — regression
+     * detectors set below the observed minimum across three runs, not the original targets,
+     * which that doc keeps as a stretch goal outside the gate.
+     *
+     * <p>They describe the local ladder, so only the ladder lane's verdict is the gate; a
+     * single-rung run is scored against them for comparison.
+     */
+    private static final List<Map.Entry<String, Double>> STRATUM_FLOORS = List.of(
+            Map.entry("unprotected-ssr", 95.0),
+            Map.entry("unprotected-spa", 95.0),
+            Map.entry("edge-served", 90.0),
+            Map.entry("denied", 40.0),
+            Map.entry("challenge", 36.0),
+            Map.entry("interactive", 16.0));
+
+    private static final double WEIGHTED_FLOOR = 88.0;
+    private static final double EQUAL_ALLOCATION_FLOOR = 60.0;
+
     /** {@code byStratum} is what the epic gates on; {@code byVendor} answers "which
      *  WAFs can we get past", which an aggregate cannot. Both come from one run.
      *
@@ -189,8 +212,12 @@ public final class ScrapeHarness {
      *  {@code rate} answers "did we do the hard work". Both are reported because either
      *  alone is misleading: the corpus over-samples difficulty by design, and the web
      *  under-samples it. {@code prevalenceNote} carries the unreachable exclusion, which
-     *  is worth about thirty points and must never travel separately from the number. */
-    public record RungReport(String rung, int attempted, int ok, double rate,
+     *  is worth about thirty points and must never travel separately from the number.
+     *
+     *  <p>{@code corpus} names which ruler produced all of it, because a corpus
+     *  re-classified between runs is a different ruler. */
+    public record RungReport(String rung, ScrapeCorpus.Identity corpus, Gate gate,
+                             int attempted, int ok, double rate,
                              double prevalenceWeighted, String prevalenceNote,
                              Map<String, Score> byStratum, Map<String, Score> byVendor,
                              Map<String, Score> byRendering, Map<String, Integer> byReason,
@@ -233,7 +260,7 @@ public final class ScrapeHarness {
                 }
             }
         }
-        return report(rungName, results);
+        return report(rungName, corpus, results);
     }
 
     private static Result errored(ScrapeCorpus.Entry e, String detail) {
@@ -278,7 +305,8 @@ public final class ScrapeHarness {
                 ok ? null : detail.substring(0, Math.min(200, detail.length())).replace('\n', ' '));
     }
 
-    private static RungReport report(String rungName, List<Result> results) {
+    private static RungReport report(String rungName, ScrapeCorpus.Corpus corpus,
+                                     List<Result> results) {
         var byReason = new LinkedHashMap<String, Integer>();
         var byNextRung = new LinkedHashMap<String, Integer>();
         for (var r : results) {
@@ -291,32 +319,63 @@ public final class ScrapeHarness {
         int prerender = (int) results.stream()
                 .filter(r -> !r.ok() && r.prerender()).count();
         double weighted = 0;
+        boolean weightingAvailable = false;
         var note = "prevalence weighting unavailable";
         try {
             var weights = ScrapePrevalence.load();
             double covered = 0;
+            var zeroWeight = new ArrayList<String>();
             for (var byOutcome : group(results, Result::outcome).entrySet()) {
                 var share = weights.weight(byOutcome.getKey());
+                // A renamed outcome is scored and then counts for nothing, so a broken
+                // label reads as a lower ceiling unless the report names it.
+                if (share == 0) zeroWeight.add(byOutcome.getKey());
                 covered += share;
                 weighted += share * byOutcome.getValue().rate();
             }
+            weightingAvailable = true;
             // Stated, not corrected. An outcome the corpus lacks contributes no weight,
             // so the figure is an absolute share of the web rather than an average over
             // what was measured — dividing by the covered mass here would silently
             // restate every number the gate report already publishes.
             note = weights.note()
-                    + "; corpus outcomes cover %.1f%% of the weighted mass".formatted(covered * 100);
-        } catch (IOException | RuntimeException _) {
-            // A missing OR malformed prevalence file must not fail a run: the
-            // equal-allocation score is the gate, and this number is context alongside
-            // it. Gson signals a bad file with unchecked exceptions, so catching only
-            // IOException discarded completed runs over a typo in a data file.
+                    + "; corpus outcomes cover %.1f%% of the weighted mass".formatted(covered * 100)
+                    + (zeroWeight.isEmpty() ? ""
+                            : "; ZERO weight, contributing nothing: " + String.join(", ", zeroWeight));
+        } catch (IOException _) {
+            // A missing or malformed prevalence file must not fail a run: the
+            // equal-allocation score is the gate, and this number is context alongside it.
         }
-        return new RungReport(rungName, results.size(), ok, rate(ok, results.size()),
-                Math.round(weighted * 10) / 10.0, note,
-                group(results, Result::stratum), group(results, Result::vendor),
+        double weightedPercent = Math.round(weighted * 10) / 10.0;
+        double rate = rate(ok, results.size());
+        var byStratum = group(results, Result::stratum);
+        return new RungReport(rungName, corpus.identity(),
+                gate(rate, weightedPercent, weightingAvailable, byStratum),
+                results.size(), ok, rate, weightedPercent, note,
+                byStratum, group(results, Result::vendor),
                 group(results, Result::rendering), byReason, byNextRung, prerender,
                 List.copyOf(results));
+    }
+
+    private static Gate gate(double rate, double weighted, boolean weightingAvailable,
+                             Map<String, Score> byStratum) {
+        var checks = new ArrayList<GateCheck>();
+        // A prevalence file that would not load is a missing measurement, not a regression.
+        if (weightingAvailable) {
+            checks.add(check("overall, prevalence-weighted", weighted, WEIGHTED_FLOOR));
+        }
+        checks.add(check("local-only, equal-allocation", rate, EQUAL_ALLOCATION_FLOOR));
+        for (var floor : STRATUM_FLOORS) {
+            var score = byStratum.get(floor.getKey());
+            if (score != null) {
+                checks.add(check(floor.getKey(), score.rate(), floor.getValue()));
+            }
+        }
+        return new Gate(checks.stream().allMatch(GateCheck::pass), List.copyOf(checks));
+    }
+
+    private static GateCheck check(String criterion, double measured, double floor) {
+        return new GateCheck(criterion, measured, floor, measured >= floor);
     }
 
     private static Map<String, Score> group(List<Result> results,

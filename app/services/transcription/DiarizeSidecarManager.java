@@ -62,6 +62,10 @@ public final class DiarizeSidecarManager {
         return token.isBlank() ? ConfigService.get("imagegen.local.hfToken", "") : token;
     }
 
+    static String authToken() {
+        return DAEMON.authToken();
+    }
+
     /** Stop the sidecar if running. Wired into {@code jobs.ShutdownJob}. */
     public static void stop() {
         DAEMON.stop();

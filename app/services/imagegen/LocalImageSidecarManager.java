@@ -80,7 +80,8 @@ public final class LocalImageSidecarManager {
      * bar simply doesn't show. Polled by the chat via {@code GET /api/imagegen/progress}.
      */
     public static Integer currentProgressPercent() {
-        var req = new Request.Builder().url(DAEMON.baseUrl() + "/progress").get().build();
+        var req = new Request.Builder().url(DAEMON.baseUrl() + "/progress")
+                .header(LocalSidecarDaemon.AUTH_HEADER, DAEMON.authToken()).get().build();
         try (var resp = PROGRESS_CLIENT.newCall(req).execute()) {
             if (!resp.isSuccessful()) return null;
             var pct = JsonParser.parseString(resp.body().string()).getAsJsonObject().get("percent");
@@ -88,6 +89,10 @@ public final class LocalImageSidecarManager {
         } catch (Exception _) {
             return null; // sidecar down / idle-evicted / unreachable — no bar
         }
+    }
+
+    static String authToken() {
+        return DAEMON.authToken();
     }
 
     /**

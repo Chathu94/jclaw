@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
+import services.LocalSidecarDaemon;
 import services.sidecar.SidecarHttpClient;
 
 import java.io.IOException;
@@ -72,6 +73,7 @@ public class AsrSidecarClient extends SidecarHttpClient {
         if (language != null && !language.isBlank()) body.addProperty("language", language);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/transcribe")
+                .header(LocalSidecarDaemon.AUTH_HEADER, AsrSidecarManager.authToken())
                 .post(RequestBody.create(body.toString(), JSON))
                 .build());
         call.timeout().timeout(ConfigService.getInt(
@@ -106,7 +108,8 @@ public class AsrSidecarClient extends SidecarHttpClient {
     public String asrModels(String commaSeparatedIds) {
         var baseUrl = baseUrlOverride != null ? baseUrlOverride : AsrSidecarManager.ensureRunning();
         var call = client.newCall(new Request.Builder()
-                .url(baseUrl + "/asr/models?ids=" + commaSeparatedIds).get().build());
+                .url(baseUrl + "/asr/models?ids=" + commaSeparatedIds)
+                .header(LocalSidecarDaemon.AUTH_HEADER, AsrSidecarManager.authToken()).get().build());
         call.timeout().timeout(30, TimeUnit.SECONDS);
         try (var resp = call.execute()) {
             var text = resp.body().string();
@@ -128,6 +131,7 @@ public class AsrSidecarClient extends SidecarHttpClient {
         body.addProperty("model", modelId);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/asr/prefetch")
+                .header(LocalSidecarDaemon.AUTH_HEADER, AsrSidecarManager.authToken())
                 .post(RequestBody.create(body.toString(), JSON))
                 .build());
         call.timeout().timeout(ConfigService.getInt(

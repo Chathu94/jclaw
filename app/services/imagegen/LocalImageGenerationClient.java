@@ -6,6 +6,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
+import services.LocalSidecarDaemon;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.Strings;
@@ -78,6 +79,7 @@ public class LocalImageGenerationClient implements ImageGenerationService {
         int timeoutS = ConfigService.getInt("imagegen.local.generateTimeoutSeconds", 300);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/generate")
+                .header(LocalSidecarDaemon.AUTH_HEADER, LocalImageSidecarManager.authToken())
                 .post(RequestBody.create(root.toString(), JSON))
                 .build());
         call.timeout().timeout(timeoutS, TimeUnit.SECONDS);

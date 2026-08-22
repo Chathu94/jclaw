@@ -1,16 +1,17 @@
 import org.junit.jupiter.api.AfterEach;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ConfigService;
 import services.FetchSidecarManager;
 import services.StealthSidecarManager;
+import services.scrape.BlockClassifier;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
 import utils.WebExtraction;
 
 import java.nio.charset.StandardCharsets;
+
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The escalation ladder (JCLAW-1099).
@@ -22,24 +23,27 @@ import java.nio.charset.StandardCharsets;
  */
 class ScrapeLadderTest extends UnitTest {
 
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
+
     @AfterEach
     void restoreRungs() {
-        ConfigService.set(FetchSidecarManager.CFG_ENABLED, "true");
-        ConfigService.set(StealthSidecarManager.CFG_ENABLED, "true");
-        ConfigService.clearCache();
+        config.restore();
     }
 
-    private static void disableEveryRung() {
-        ConfigService.set(FetchSidecarManager.CFG_ENABLED, "false");
-        ConfigService.set(StealthSidecarManager.CFG_ENABLED, "false");
-        ConfigService.clearCache();
+    private void disableEveryRung() {
+        config.set(FetchSidecarManager.CFG_ENABLED, "false");
+        config.set(StealthSidecarManager.CFG_ENABLED, "false");
     }
 
-    private static ScrapeLadder.Attempt plain(ScrapeReason reason, String text) {
+    private static ScrapeLadder.Attempt attempt(ScrapeRung rung, ScrapeReason reason, String text) {
         var fetched = new WebExtraction.FetchResult(
                 text == null ? new byte[0] : text.getBytes(StandardCharsets.UTF_8),
                 "text/html", "https://example.test/");
-        return new ScrapeLadder.Attempt(ScrapeRung.PLAIN, fetched, text, reason, null);
+        return new ScrapeLadder.Attempt(rung, fetched, text, reason, null);
+    }
+
+    private static ScrapeLadder.Attempt plain(ScrapeReason reason, String text) {
+        return attempt(ScrapeRung.PLAIN, reason, text);
     }
 
     @Test
@@ -51,6 +55,12 @@ class ScrapeLadderTest extends UnitTest {
         var result = ScrapeLadder.climb("https://example.test/", ok);
         assertSame(ok, result);
         assertEquals(ScrapeRung.PLAIN, result.servedBy());
+        // The guard alone is unobservable while OK maps to no rung, so the mapping is
+        // pinned beside it: whichever of the two changed, one of these fails.
+        for (var attempted : ScrapeRung.values()) {
+            assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.OK, attempted),
+                    "a page that read must not be escalated after " + attempted);
+        }
     }
 
     @Test
@@ -72,14 +82,32 @@ class ScrapeLadderTest extends UnitTest {
         // refusal. If THIN_CONTENT did not escalate, the rung that fixes the largest
         // single population in the corpus would be unreachable for it (JCLAW-1088).
         assertEquals(ScrapeRung.BROWSER,
-                services.scrape.BlockClassifier.nextRung(ScrapeReason.THIN_CONTENT, ScrapeRung.PLAIN));
+                BlockClassifier.nextRung(ScrapeReason.THIN_CONTENT, ScrapeRung.PLAIN));
+    }
+
+    @Test
+    void everyEscalationPathTerminates() {
+        // climb() loops until nextRung names a rung nothing installed, so a mapping that
+        // ever answered at or below the rung just attempted would spin. That, not the
+        // uninstalled-rung exit, is what makes the loop finite — and it is asserted as
+        // the property rather than by running a climb, which on a host with no sidecar
+        // stops at the first isInstalled check whatever the mapping says.
+        for (var reason : ScrapeReason.values()) {
+            for (var attempted : ScrapeRung.values()) {
+                var next = BlockClassifier.nextRung(reason, attempted);
+                assertTrue(next == ScrapeRung.NONE || next.ordinal() > attempted.ordinal(),
+                        "%s after %s answers %s, which does not advance the ladder"
+                                .formatted(reason, attempted, next));
+            }
+        }
     }
 
     @Test
     void theLadderStopsWhenNothingFurtherWouldHelp() {
         // POLICY_BLOCK is a licensing or geo refusal. No transport defeats it, and a
         // ladder that kept climbing would spend a browser render to be refused again.
-        disableEveryRung();
+        // Rungs are left at whatever this host has: NONE is never installed, so the
+        // climb must return without a request on any host.
         var refused = plain(ScrapeReason.POLICY_BLOCK, null);
         assertSame(refused, ScrapeLadder.climb("https://example.test/", refused));
     }
@@ -90,11 +118,11 @@ class ScrapeLadderTest extends UnitTest {
         // retryable statuses, so what is left is structural — a persistent 400, a
         // redirect loop — which a browser handles natively.
         assertEquals(ScrapeRung.BROWSER,
-                services.scrape.BlockClassifier.nextRung(ScrapeReason.ERROR, ScrapeRung.PLAIN));
+                BlockClassifier.nextRung(ScrapeReason.ERROR, ScrapeRung.PLAIN));
         // A slow origin will not answer a browser faster, and a render is the most
         // expensive possible way to wait.
         assertEquals(ScrapeRung.NONE,
-                services.scrape.BlockClassifier.nextRung(ScrapeReason.TIMEOUT, ScrapeRung.PLAIN));
+                BlockClassifier.nextRung(ScrapeReason.TIMEOUT, ScrapeRung.PLAIN));
     }
 
     @Test
@@ -104,7 +132,7 @@ class ScrapeLadderTest extends UnitTest {
         // ladder declines to. Four corpus entries sit behind this and stay there.
         for (var attempted : java.util.List.of(ScrapeRung.PLAIN, ScrapeRung.IMPERSONATE)) {
             assertEquals(ScrapeRung.NONE,
-                    services.scrape.BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK, attempted),
+                    BlockClassifier.nextRung(ScrapeReason.POLICY_BLOCK, attempted),
                     "policy refusals must not be escalated to a stealth rung");
         }
     }
@@ -114,14 +142,48 @@ class ScrapeLadderTest extends UnitTest {
         // 404/410 used to classify as ERROR, which escalates to BROWSER. Crawls hit dead
         // links constantly, so a handful of them spent the whole escalation budget on
         // renders that return the same 404 — and suppressed the pages that needed it.
-        assertEquals(ScrapeReason.NOT_FOUND, services.scrape.BlockClassifier.classify(
+        assertEquals(ScrapeReason.NOT_FOUND, BlockClassifier.classify(
                 services.scrape.ScrapeObservation.failed(
                         "https://example.test/gone", "HTTP 404 fetching https://example.test/gone")));
         for (var attempted : java.util.List.of(ScrapeRung.PLAIN, ScrapeRung.IMPERSONATE)) {
             assertEquals(ScrapeRung.NONE,
-                    services.scrape.BlockClassifier.nextRung(ScrapeReason.NOT_FOUND, attempted),
+                    BlockClassifier.nextRung(ScrapeReason.NOT_FOUND, attempted),
                     "a page the origin says is absent is not a transport problem");
         }
+    }
+
+    @Test
+    void theBestAttemptIsKeptAndATieGoesToTheLowerRung() throws Exception {
+        // The whole reason climb() carries a "best" alongside "last": rung 3 reads far
+        // more than rung 2 and still loses corpus entries to it, because a browser
+        // earns the JavaScript shell where a plain client was served the article. An
+        // empty shell must never displace a partial page.
+        //
+        // Reached by reflection because the ladder's own escalation path needs a live
+        // sidecar to run, and the tie-break is the one rule in this class that no
+        // sidecar-free test reaches.
+        var better = ScrapeLadder.class.getDeclaredMethod(
+                "better", ScrapeLadder.Attempt.class, ScrapeLadder.Attempt.class);
+        better.setAccessible(true);
+
+        var partial = plain(ScrapeReason.THIN_CONTENT, "some partial content");
+        var shell = attempt(ScrapeRung.BROWSER, ScrapeReason.THIN_CONTENT, "some partial conten");
+        var equalLength = attempt(ScrapeRung.BROWSER, ScrapeReason.THIN_CONTENT, "some partial content");
+        var fuller = attempt(ScrapeRung.BROWSER, ScrapeReason.THIN_CONTENT, "a good deal more content");
+
+        assertSame(partial, better.invoke(null, partial, shell),
+                "a browser returning less than rung 1 did must not displace it");
+        assertSame(partial, better.invoke(null, partial, equalLength),
+                "on a tie the cheaper rung's result is the one kept");
+        assertSame(fuller, better.invoke(null, partial, fuller),
+                "a higher rung that read more is what the climb is for");
+
+        var usableButShort = attempt(ScrapeRung.BROWSER, ScrapeReason.OK, "read");
+        assertSame(usableButShort, better.invoke(null, partial, usableButShort),
+                "a usable page beats a longer unusable one");
+        var usablePlain = plain(ScrapeReason.OK, "some partial content");
+        assertSame(usablePlain, better.invoke(null, usablePlain, fuller),
+                "and a usable lower rung is not traded for a longer failure");
     }
 
     @Test
@@ -182,10 +244,26 @@ class ScrapeLadderTest extends UnitTest {
     }
 
     @Test
-    void escalationIsAvailableWhenEitherSidecarIs() {
-        ConfigService.set(FetchSidecarManager.CFG_ENABLED, "true");
-        ConfigService.set(StealthSidecarManager.CFG_ENABLED, "false");
-        ConfigService.clearCache();
-        assertEquals(FetchSidecarManager.available(), ScrapeLadder.available());
+    void escalationSurvivesLosingEitherRungButNotBoth() {
+        // available() is a disjunction, and comparing it against one of its own operands
+        // would hold for an AND too. Observing the difference needs at least one rung
+        // genuinely installed, so a bare host skips rather than restating x==x.
+        boolean fetch = FetchSidecarManager.available();
+        boolean stealth = StealthSidecarManager.available();
+        assumeTrue(fetch || stealth,
+                "no scrape sidecar installed — the disjunction is unobservable here");
+
+        config.set(FetchSidecarManager.CFG_ENABLED, String.valueOf(fetch));
+        config.set(StealthSidecarManager.CFG_ENABLED, "false");
+        assertEquals(fetch, ScrapeLadder.available(),
+                "rung 2 alone must keep the ladder available");
+
+        config.set(FetchSidecarManager.CFG_ENABLED, "false");
+        config.set(StealthSidecarManager.CFG_ENABLED, String.valueOf(stealth));
+        assertEquals(stealth, ScrapeLadder.available(),
+                "rung 3 alone must keep the ladder available");
+
+        disableEveryRung();
+        assertFalse(ScrapeLadder.available());
     }
 }

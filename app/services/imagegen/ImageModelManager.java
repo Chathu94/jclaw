@@ -9,6 +9,7 @@ import play.Logger;
 import play.Play;
 import services.ConfigService;
 import services.EventLogger;
+import services.LocalSidecarDaemon;
 import utils.HttpFactories;
 import utils.JsonArgs;
 
@@ -165,6 +166,7 @@ public final class ImageModelManager {
                 .build();
         var request = new Request.Builder()
                 .url(baseUrl + "/pull")
+                .header(LocalSidecarDaemon.AUTH_HEADER, LocalImageSidecarManager.authToken())
                 .post(RequestBody.create(new byte[0]))
                 .build();
         try (Response resp = client.newCall(request).execute()) {

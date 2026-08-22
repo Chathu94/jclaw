@@ -13,6 +13,9 @@ import java.nio.file.Files;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -223,5 +226,135 @@ class ScrapeHarnessTest extends UnitTest {
         assertEquals(0, rep.ok(), "ground truth must veto a classifier OK");
         assertEquals(ScrapeReason.JS_CHALLENGE, rep.results().get(0).reason());
         Files.deleteIfExists(f);
+    }
+
+    // ==================== The gate verdict ====================
+
+    /** One entry per stratum, each carrying the outcome that stratum's prevalence weight
+     *  is filed under — so the four together cover the reachable web exactly once. */
+    private static ScrapeCorpus.Corpus fourStratumCorpus() throws Exception {
+        var json = """
+                {"allocation":"equal",
+                 "strata":["unprotected-ssr","challenge","denied","interactive"],
+                 "entries":[
+                  {"url":"https://ssr.test","stratum":"unprotected-ssr","vendor":"none",
+                   "outcome":"served","rendering":"ssr","rank":1,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}},
+                  {"url":"https://challenge.test","stratum":"challenge","vendor":"cloudflare",
+                   "outcome":"challenge","rendering":"ssr","rank":2,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}},
+                  {"url":"https://denied.test","stratum":"denied","vendor":"akamai",
+                   "outcome":"denied","rendering":"ssr","rank":3,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}},
+                  {"url":"https://interactive.test","stratum":"interactive","vendor":"datadome",
+                   "outcome":"interactive","rendering":"ssr","rank":4,
+                   "ground_truth":{"min_chars":300,"reject_markers":[]}}]}
+                """;
+        var f = Files.createTempFile("scrape-gate", ".json");
+        Files.writeString(f, json);
+        var corpus = ScrapeCorpus.load(f);
+        Files.deleteIfExists(f);
+        return corpus;
+    }
+
+    private static ScrapeHarness.GateCheck check(ScrapeHarness.RungReport rep, String criterion) {
+        return rep.gate().checks().stream()
+                .filter(c -> c.criterion().equals(criterion)).findFirst().orElse(null);
+    }
+
+    @Test
+    void aRunThatClearsEveryFloorPasses() throws Exception {
+        // The floors are docs/scrape-access-gate.md's, and they are asserted here so a
+        // silent retune shows up as a test change rather than only as a nicer number.
+        var rep = ScrapeHarness.run("stub", url -> obs("<html><body>x</body></html>", ARTICLE_TEXT),
+                fourStratumCorpus(), 2);
+
+        assertTrue(rep.gate().pass(), "every stratum read: " + rep.gate().checks());
+        assertEquals(88.0, check(rep, "overall, prevalence-weighted").floor(), 1e-9);
+        assertEquals(60.0, check(rep, "local-only, equal-allocation").floor(), 1e-9);
+        assertEquals(36.0, check(rep, "challenge").floor(), 1e-9);
+        assertEquals(40.0, check(rep, "denied").floor(), 1e-9);
+        assertEquals(16.0, check(rep, "interactive").floor(), 1e-9);
+        // A stratum this corpus does not carry is not scored at all — scoring an absent
+        // one as zero would fail every partial sweep.
+        assertNull(check(rep, "edge-served"));
+    }
+
+    @Test
+    void oneStratumBelowItsFloorFailsTheWholeGate() throws Exception {
+        // The aggregate is what an equal-allocation corpus exists to stop carrying the
+        // hard strata: here the weighted figure still clears 88 and the overall rate
+        // still clears 60, and the run is a fail anyway. The stratum dropped is the
+        // rarest one on the live web, so the aggregate stays clear of its floor however
+        // the shipped prevalence file is re-probed.
+        var rep = ScrapeHarness.run("stub",
+                url -> url.contains("interactive.test")
+                        ? obs(CHALLENGE_RAW, CHALLENGE_TEXT)
+                        : obs("<html><body>x</body></html>", ARTICLE_TEXT),
+                fourStratumCorpus(), 2);
+
+        assertFalse(rep.gate().pass(), "a stratum floor missed is a failed gate");
+        assertFalse(check(rep, "interactive").pass());
+        assertTrue(check(rep, "overall, prevalence-weighted").pass(),
+                "the aggregate must not be what caught it: " + rep.gate().checks());
+        assertTrue(check(rep, "local-only, equal-allocation").pass());
+        assertEquals(1, rep.gate().checks().stream().filter(c -> !c.pass()).count(),
+                "exactly one criterion failed: " + rep.gate().checks());
+    }
+
+    // ==================== Which ruler scored the run ====================
+
+    @Test
+    void aCorpusThatDriftedOutOfEqualAllocationIsNoLongerScoredAsEqual() throws Exception {
+        // build_corpus.py deliberately never moves the "allocation" label when
+        // re-classification shifts entries between strata, so a check of the label alone
+        // could never fire. The counts the entries realise are what the gate is scored on.
+        var skewed = """
+                {"allocation":"equal","strata":["a","b"],"entries":[
+                 {"url":"https://1.test","stratum":"a","vendor":"none","outcome":"served",
+                  "rendering":"ssr","rank":1,"ground_truth":{"min_chars":10,"reject_markers":[]}},
+                 {"url":"https://2.test","stratum":"a","vendor":"none","outcome":"served",
+                  "rendering":"ssr","rank":2,"ground_truth":{"min_chars":10,"reject_markers":[]}},
+                 {"url":"https://3.test","stratum":"a","vendor":"none","outcome":"served",
+                  "rendering":"ssr","rank":3,"ground_truth":{"min_chars":10,"reject_markers":[]}},
+                 {"url":"https://4.test","stratum":"b","vendor":"none","outcome":"served",
+                  "rendering":"ssr","rank":4,"ground_truth":{"min_chars":10,"reject_markers":[]}}]}
+                """;
+        var f = Files.createTempFile("scrape-skew", ".json");
+        Files.writeString(f, skewed);
+        var corpus = ScrapeCorpus.load(f);
+        Files.deleteIfExists(f);
+
+        assertEquals("equal", corpus.allocation(), "the declared design is untouched");
+        assertFalse(corpus.isEqualAllocation(), "3 against 1 is not equal allocation");
+        assertEquals(3, corpus.realisedCounts().get("a").intValue());
+        assertEquals(1, corpus.realisedCounts().get("b").intValue());
+
+        assertTrue(fourStratumCorpus().isEqualAllocation(),
+                "and an evenly realised corpus still qualifies");
+    }
+
+    @Test
+    void theCorpusFingerprintMovesWithWhatDecidesAScoreAndNotWithProvenance() throws Exception {
+        var template = """
+                {"allocation":"equal","strata":["a"],"entries":[
+                 {"url":"https://1.test","stratum":"a","vendor":"none","outcome":"served",
+                  "rendering":"ssr","rank":%d,
+                  "ground_truth":{"min_chars":%d,"reject_markers":[]}}]}
+                """;
+        var base = fingerprintOf(template.formatted(1, 300));
+        assertNotNull(base);
+        assertEquals(base, fingerprintOf(template.formatted(9_999, 300)),
+                "rank is provenance — a re-ranked corpus scores every run identically");
+        assertNotEquals(base, fingerprintOf(template.formatted(1, 900)),
+                "a moved pass threshold is a different ruler, and must say so");
+    }
+
+    private static String fingerprintOf(String json) throws Exception {
+        var f = Files.createTempFile("scrape-fp", ".json");
+        Files.writeString(f, json);
+        var fingerprint = ScrapeCorpus.load(f).identity().fingerprint();
+        Files.deleteIfExists(f);
+        return fingerprint;
     }
 }

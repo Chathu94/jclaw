@@ -6,6 +6,21 @@ request to a persistent PEP-723 worker (`synth.py --worker`) over a stdin/stdout
 JSON line protocol, so the model loads once. The Java side (`app/services/tts/`)
 drives it via `TtsSidecarClient` → `TtsSidecarManager` (default port 9531).
 
+## Authentication
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives
+from its own install secret and passes in the child's environment. Without that variable
+the sidecar refuses to start. A custom header is deliberately not CORS-simple, so a page
+the operator visits cannot reach a warm sidecar even though it listens on loopback.
+
+Hand-running: set a token of your own and send it, or pass `--no-auth` (off by default) to
+serve unauthenticated.
+
+```bash
+SIDECAR_TOKEN=dev uv run serve.py --port 9531
+curl -s -H 'X-Sidecar-Token: dev' localhost:9531/health
+```
+
 ## Engines / models
 
 Selection is `tts.engine=sidecar` + `tts.sidecar.model=<id>` (Settings › Speech).

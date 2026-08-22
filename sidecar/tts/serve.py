@@ -12,11 +12,16 @@ inside the worker (Qwen3-TTS variants, Kokoro), mirroring the ASR AsrModel
 routing. Apple silicon runs via mlx-audio (validated JCLAW-788); the
 NVIDIA/vLLM backend is deferred (JCLAW-788 RTX 4090 validation).
 
-Protocol (bound to 127.0.0.1 only):
+Protocol (--host defaults to 127.0.0.1; the server binds what it is given):
   GET  /health -> 200 {status, model, loaded}
   POST /synthesize {text, model?, voice?, ref_audio?, speed?, format?}
         -> 200 audio bytes (Content-Type: audio/wav) | 400/409/500 JSON on error
   POST /shutdown -> 200 (evict an adopted orphan whose identity no longer matches)
+
+Every request must carry `X-Sidecar-Token: $SIDECAR_TOKEN`, the secret the JVM
+derives from its own install secret; without it in the environment the sidecar
+refuses to start.
+`--no-auth` drops both requirements for hand-running (see README).
 
 Weights cache under --cache-dir via HF_HOME, matching jclaw's data/
 runtime-artifact convention.
@@ -24,6 +29,7 @@ runtime-artifact convention.
 
 import argparse
 import base64
+import hmac
 import json
 import os
 import sys
@@ -162,8 +168,23 @@ class SidecarState:
         self.last_activity = time.monotonic()
 
 
+# Not a CORS-simple header, so a page the operator visits cannot forge a request this
+# sidecar honours: the browser would have to preflight, and this server answers no OPTIONS.
+AUTH_HEADER = "X-Sidecar-Token"
+
+
+def _require_token(ap):
+    """The secret the JVM hands the child in its environment. Missing means fail closed —
+    an unauthenticated loopback sidecar is reachable by every local process."""
+    token = os.environ.get("SIDECAR_TOKEN", "")
+    if not token:
+        ap.error("SIDECAR_TOKEN is unset — pass --no-auth to run this sidecar unauthenticated")
+    return token
+
+
 class Handler(BaseHTTPRequestHandler):
     state: SidecarState = None  # injected in main()
+    token = None  # shared secret; None only under --no-auth
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[tts-sidecar] %s\n" % (fmt % args))
@@ -194,7 +215,18 @@ class Handler(BaseHTTPRequestHandler):
         except BrokenPipeError:
             pass  # client went away mid-response — not worth a traceback
 
+    def _authorized(self):
+        if self.token is None:
+            return True
+        if hmac.compare_digest(self.headers.get(AUTH_HEADER, "").encode("utf-8", "replace"),
+                               self.token.encode("utf-8")):
+            return True
+        self._send_json(401, {"error": "missing or invalid %s" % AUTH_HEADER})
+        return False
+
     def do_GET(self):
+        if not self._authorized():
+            return
         if self.path == "/health":
             # A health probe signals imminent use — touching the idle clock closes
             # the evict race between the JVM's check and its subsequent request.
@@ -208,6 +240,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(404, {"error": "unknown path %s" % self.path})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         if self.path == "/shutdown":
             # Lets a restarted JVM evict an adopted orphan whose identity no longer
             # matches config (no Process handle exists for a JVM-crash survivor).
@@ -324,6 +358,8 @@ def main():
     ap.add_argument("--model", default=DEFAULT_IDENTITY)
     ap.add_argument("--cache-dir", default=os.path.join("data", "tts-models"))
     ap.add_argument("--idle-timeout-min", type=float, default=15.0)
+    ap.add_argument("--no-auth", action="store_true",
+                    help="serve unauthenticated — for hand-running this sidecar without the JVM")
     args = ap.parse_args()
 
     cache_dir = os.path.abspath(args.cache_dir)
@@ -331,6 +367,7 @@ def main():
     # Point Hugging Face at jclaw's data dir so weights land under data/.
     os.environ.setdefault("HF_HOME", cache_dir)
 
+    Handler.token = None if args.no_auth else _require_token(ap)
     Handler.state = SidecarState(args.model, args.idle_timeout_min * 60.0)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     threading.Thread(target=_idle_watcher, args=(Handler.state,), daemon=True).start()

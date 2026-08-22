@@ -5,6 +5,9 @@ import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
+import okhttp3.Response;
+import services.EventLogger;
+import services.LocalSidecarDaemon;
 import services.StealthSidecarManager;
 import services.scrape.ScrapeSidecarException;
 import utils.HttpFactories;
@@ -31,12 +34,14 @@ import java.time.Duration;
  *       browser's;</li>
  *   <li>the sidecar's route interceptor range-checks every further host the page
  *       reaches — redirects and subresources both — and aborts the non-public ones,
- *       reporting them back in {@code X-Blocked-Hosts}.</li>
+ *       reporting them back in {@code X-Blocked-Hosts}, which this class logs.</li>
  * </ol>
  */
 public final class RenderedFetcher {
 
     private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
+
+    private static final String EVENT_CATEGORY = "scrape";
 
     /** A render is slow by nature: navigation, then a settle window for a challenge to
      *  resolve itself. Well above the sidecar's own per-render timeout so reaching this
@@ -92,9 +97,11 @@ public final class RenderedFetcher {
             if (parts.length == 3) pins.addProperty(parts[1], parts[2]);
         });
         payload.add("pins", pins);
+        payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
 
         var request = new Request.Builder()
                 .url(baseUrl + "/render")
+                .header(LocalSidecarDaemon.AUTH_HEADER, StealthSidecarManager.authToken())
                 .post(RequestBody.create(payload.toString(), JSON))
                 .build();
 
@@ -108,6 +115,8 @@ public final class RenderedFetcher {
                         .formatted(response.code(), url,
                                 new String(body, StandardCharsets.UTF_8).strip()), null);
             }
+            reportBlockedHosts(response, url);
+            WebExtraction.noteUpstreamTruncated(response.header("X-Upstream-Truncated"), url);
             // "0" is the sidecar's own value for "navigation returned no response
             // object", not a missing header — it is not an error.
             var status = response.header("X-Upstream-Status", "0");
@@ -120,6 +129,18 @@ public final class RenderedFetcher {
             SsrfGuard.assertUrlSafe(URI.create(finalUrl).toString());
             return new WebExtraction.FetchResult(body, "text/html; charset=utf-8", finalUrl);
         }
+    }
+
+    /** The count is logged, never parsed: a total in a shape this JVM does not recognise
+     *  belongs in the line rather than turning a diagnostic into a fault. */
+    private static void reportBlockedHosts(Response response, String url) {
+        var hosts = response.header("X-Blocked-Hosts");
+        var total = response.header("X-Blocked-Hosts-Count");
+        if (hosts == null && total == null) return;
+        EventLogger.info(EVENT_CATEGORY,
+                "%s: the render reached hosts the sidecar aborted".formatted(url),
+                "%s (total: %s)".formatted(hosts == null ? "unnamed" : hosts,
+                        total == null ? "unreported" : total));
     }
 
     /** Fails as a sidecar fault rather than letting an unchecked parse error escape a

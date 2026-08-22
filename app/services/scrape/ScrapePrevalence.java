@@ -1,5 +1,7 @@
 package services.scrape;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.Play;
 
@@ -53,14 +55,11 @@ public final class ScrapePrevalence {
     }
 
     public static Weights load(Path path) throws IOException {
-        var root = JsonParser.parseString(Files.readString(path)).getAsJsonObject();
-        var byOutcome = root.getAsJsonObject("by_outcome");
-
         long unreachable = 0;
         long reachable = 0;
         var counts = new LinkedHashMap<String, Long>();
-        for (var entry : byOutcome.entrySet()) {
-            long n = entry.getValue().getAsLong();
+        for (var entry : byOutcome(path).entrySet()) {
+            long n = count(path, entry.getKey(), entry.getValue());
             if (UNREACHABLE.equals(entry.getKey())) {
                 unreachable = n;
             } else {
@@ -77,5 +76,36 @@ public final class ScrapePrevalence {
             weights.put(e.getKey(), (double) e.getValue() / reachable);
         }
         return new Weights(Map.copyOf(weights), reachable, unreachable);
+    }
+
+    /** Gson signals a malformed or reshaped file with unchecked exceptions, and every
+     *  caller treats an unusable prevalence file as an absent one, so it has to arrive as
+     *  the same checked failure a missing file does. */
+    private static JsonObject byOutcome(Path path) throws IOException {
+        JsonObject byOutcome;
+        try {
+            byOutcome = JsonParser.parseString(Files.readString(path))
+                    .getAsJsonObject().getAsJsonObject("by_outcome");
+        } catch (RuntimeException e) {
+            throw new IOException("prevalence at %s is not the expected JSON: %s"
+                    .formatted(path, e), e);
+        }
+        if (byOutcome == null) {
+            throw new IOException("prevalence has no by_outcome object: " + path);
+        }
+        return byOutcome;
+    }
+
+    private static long count(Path path, String outcome, JsonElement value) throws IOException {
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+            throw new IOException("prevalence at %s: '%s' count is not a number (%s)"
+                    .formatted(path, outcome, value));
+        }
+        long n = value.getAsLong();
+        if (n < 0) {
+            throw new IOException("prevalence at %s: '%s' count is negative (%d)"
+                    .formatted(path, outcome, n));
+        }
+        return n;
     }
 }

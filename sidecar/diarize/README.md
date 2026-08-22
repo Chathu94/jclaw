@@ -66,12 +66,23 @@ wav2vec2 SER can be fine on clean English content. MERaLiON is ungated but under
 the **MERaLiON Public License** — check commercial terms before a paid-edition
 ship.
 
+## Authentication
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives
+from its own install secret and passes in the child's environment. Without that variable
+the sidecar refuses to start. A custom header is deliberately not CORS-simple, so a page
+the operator visits cannot reach a warm sidecar even though it listens on loopback.
+
+Hand-running: set a token of your own and send it, or pass `--no-auth` (off by default) to
+serve unauthenticated.
+
 ## Running by hand (debugging)
 
 ```bash
-uv run serve.py --port 9530            # standalone launch
-curl -s localhost:9530/health
+SIDECAR_TOKEN=dev uv run serve.py --port 9530   # standalone launch
+curl -s -H 'X-Sidecar-Token: dev' localhost:9530/health
 curl -s -X POST localhost:9530/diarize \
+  -H 'X-Sidecar-Token: dev' \
   -H 'Content-Type: application/json' \
   -d '{"audio_path": "/absolute/path/to/recording.mp3"}'
 ```

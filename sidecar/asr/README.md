@@ -67,12 +67,23 @@ design: MMS is small and fast.
 - MERaLiON: [`MERaLiON/MERaLiON-3-3B-ASR`](https://huggingface.co/MERaLiON/MERaLiON-3-3B-ASR) — **not MIT**; ships under the MERaLiON Public License (the same license family flagged in `sidecar/diarize/README.md` for MERaLiON-SER). Check the model card's commercial terms before a paid-edition ship.
 - Forced alignment: torchaudio MMS multilingual aligner (part of [torchaudio](https://github.com/pytorch/audio), BSD-2-Clause).
 
+## Authentication
+
+Every request must carry `X-Sidecar-Token`, matching the `SIDECAR_TOKEN` the JVM derives
+from its own install secret and passes in the child's environment. Without that variable
+the sidecar refuses to start. A custom header is deliberately not CORS-simple, so a page
+the operator visits cannot reach a warm sidecar even though it listens on loopback.
+
+Hand-running: set a token of your own and send it, or pass `--no-auth` (off by default) to
+serve unauthenticated.
+
 ## Running by hand (debugging)
 
 ```bash
-uv run serve.py --port 9529   # standalone launch
-curl -s localhost:9529/health
+SIDECAR_TOKEN=dev uv run serve.py --port 9529   # standalone launch
+curl -s -H 'X-Sidecar-Token: dev' localhost:9529/health
 curl -s -X POST localhost:9529/transcribe \
+  -H 'X-Sidecar-Token: dev' \
   -H 'Content-Type: application/json' \
   -d '{"audio_path": "/absolute/path/to/recording.wav", "model": "large"}'
 ```

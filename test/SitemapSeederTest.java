@@ -9,7 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ConfigService;
 import tools.WebScrapeTool;
 import utils.RobotsCache;
 
@@ -48,17 +47,18 @@ class SitemapSeederTest extends UnitTest {
     private static final String OTHER = "https://elsewhere.test";
     private static final String CFG_RESPECT = "web_scrape.respect-robots";
     private static final String CFG_MAX_URLS = "web_scrape.max-sitemap-urls";
+    private static final String CFG_MAX_DOCUMENTS = "web_scrape.max-sitemap-documents";
+    private static final String CFG_SEED = "web_scrape.seed-from-sitemap";
 
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
     private OkHttpClient original;
-    private String originalRespect;
 
     @BeforeEach
     void setup() throws Exception {
         RobotsCache.resetForTest();
         routes = new RouteInterceptor();
         original = (OkHttpClient) CLIENT_FIELD.get(null);
-        originalRespect = ConfigService.get(CFG_RESPECT, "true");
         CLIENT_FIELD.set(null, new OkHttpClient.Builder()
                 .addInterceptor(routes).callTimeout(5, TimeUnit.SECONDS).build());
     }
@@ -66,10 +66,14 @@ class SitemapSeederTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         CLIENT_FIELD.set(null, original);
-        ConfigService.set(CFG_RESPECT, originalRespect);
-        ConfigService.set(CFG_MAX_URLS, "50");
-        ConfigService.clearCache();
+        config.restore();
         RobotsCache.resetForTest();
+    }
+
+    /** Bounded prefix for an assertion message: the crawl that returns almost nothing is
+     *  exactly the one worth printing, and substring(0, 300) throws on it. */
+    private static String head(String out) {
+        return out.substring(0, Math.min(300, out.length()));
     }
 
     /** A page with no links at all — so anything else that appears came from the sitemap. */
@@ -114,7 +118,7 @@ class SitemapSeederTest extends UnitTest {
         routes.put(HOST + "/orphan-b", page("Orphan B"));
 
         var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");
-        assertTrue(out.contains("# Orphan A"), "sitemap URL was not crawled: " + out.substring(0, 300));
+        assertTrue(out.contains("# Orphan A"), "sitemap URL was not crawled: " + head(out));
         assertTrue(out.contains("# Orphan B"), "second sitemap URL was not crawled");
     }
 
@@ -166,8 +170,7 @@ class SitemapSeederTest extends UnitTest {
     @Test
     void theUrlCapBoundsWhatASitemapCanInject() {
         // A real sitemap can carry tens of thousands of rows against a page budget of 25.
-        ConfigService.set(CFG_MAX_URLS, "1");
-        ConfigService.clearCache();
+        config.set(CFG_MAX_URLS, "1");
         robots("Sitemap: " + HOST + "/sitemap.xml\n");
         routes.put(HOST + "/sitemap.xml",
                 urlset(HOST + "/one", HOST + "/two", HOST + "/three"), "application/xml");
@@ -180,7 +183,60 @@ class SitemapSeederTest extends UnitTest {
         assertEquals(1, seeded, "the cap must bound seeded URLs, got: " + routes.hits);
     }
 
+    @Test
+    void aNestedSitemapIndexIsExpandedAndCostsADocument() {
+        // Sites nest an index inside an index (one per language, each listing per-section
+        // maps). Reaching the leaf is worth three documents; the cap is what stops a
+        // "seed the frontier" step outspending the crawl it is seeding.
+        robots("Sitemap: " + HOST + "/outer.xml\n");
+        routes.put(HOST + "/outer.xml", sitemapIndex(HOST + "/inner.xml"), "application/xml");
+        routes.put(HOST + "/inner.xml", sitemapIndex(HOST + "/leaf.xml"), "application/xml");
+        routes.put(HOST + "/leaf.xml", urlset(HOST + "/deep"), "application/xml");
+        routes.put(HOST + "/", page("Home"));
+        routes.put(HOST + "/deep", page("Deep"));
+
+        assertTrue(scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}").contains("# Deep"),
+                "an index inside an index must still be followed to its urlset");
+    }
+
+    @Test
+    void theDocumentCapStopsANestedIndexBeforeItsLeaf() {
+        // Two documents buys the outer and the inner index and nothing else, so the leaf
+        // is never fetched — the recursion has to spend the parent's budget, not its own.
+        config.set(CFG_MAX_DOCUMENTS, "2");
+        robots("Sitemap: " + HOST + "/outer.xml\n");
+        routes.put(HOST + "/outer.xml", sitemapIndex(HOST + "/inner.xml"), "application/xml");
+        routes.put(HOST + "/inner.xml", sitemapIndex(HOST + "/leaf.xml"), "application/xml");
+        routes.put(HOST + "/leaf.xml", urlset(HOST + "/deep"), "application/xml");
+        routes.put(HOST + "/", page("Home"));
+        routes.put(HOST + "/deep", page("Deep"));
+
+        var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");
+        assertFalse(routes.hits.contains(HOST + "/leaf.xml"),
+                "the third document is past the cap: " + routes.hits);
+        assertFalse(out.contains("# Deep"), "and nothing behind it can be seeded: " + head(out));
+        assertTrue(out.contains("# Home"), "the crawl itself still runs: " + head(out));
+    }
+
     // ==================== The two recorded decisions ====================
+
+    @Test
+    void theKillSwitchStopsTheSitemapBeingReadAtAll() {
+        // Seeding changes which pages a crawl returns, so an operator must be able to
+        // turn it off — and turning it off must cost no request, not merely discard the
+        // rows afterwards.
+        config.set(CFG_SEED, "false");
+        robots("Sitemap: " + HOST + "/sitemap.xml\n");
+        routes.put(HOST + "/sitemap.xml", urlset(HOST + "/orphan"), "application/xml");
+        routes.put(HOST + "/", page("Home"));
+        routes.put(HOST + "/orphan", page("Orphan"));
+
+        var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");
+        assertFalse(routes.hits.contains(HOST + "/sitemap.xml"),
+                "the sitemap must not even be fetched: " + routes.hits);
+        assertFalse(out.contains("# Orphan"), "and nothing may be seeded from it: " + head(out));
+        assertTrue(out.contains("# Home"));
+    }
 
     @Test
     void depthZeroDoesNoSeeding() {
@@ -201,8 +257,7 @@ class SitemapSeederTest extends UnitTest {
         // RobotsCacheTest asserts robots.txt is not fetched when its rules are ignored.
         // Mining it for Sitemap: hints anyway would break that contract to save nobody
         // anything, so seeding turns off with robots compliance.
-        ConfigService.set(CFG_RESPECT, "false");
-        ConfigService.clearCache();
+        config.set(CFG_RESPECT, "false");
         routes.put(HOST + "/", page("Home"));
 
         scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");

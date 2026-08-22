@@ -63,6 +63,10 @@ public final class LocalVideoSidecarManager {
         });
     }
 
+    static String authToken() {
+        return DAEMON.authToken();
+    }
+
     /** Stop the sidecar if running (releases its GPU memory). Wired into {@code jobs.ShutdownJob}.
      *  Clears the engine hint; if this races an in-flight engine-switch the daemon's stop-generation
      *  hand-off keeps it orphan-free and the next {@code ensureRunning} reconciles the hint via the

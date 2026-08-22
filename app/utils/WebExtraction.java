@@ -13,6 +13,7 @@ import org.apache.tika.metadata.Metadata;
 import org.apache.tika.metadata.TikaCoreProperties;
 import org.jsoup.Jsoup;
 import services.ConfigService;
+import services.EventLogger;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -312,6 +313,19 @@ public final class WebExtraction {
      *  transport can be told the same cap and enforce it at its own end. */
     public static long maxBodyBytes() {
         return PlayConfig.longOr(CFG_MAX_BODY_BYTES, DEFAULT_MAX_BODY_BYTES);
+    }
+
+    /**
+     * Record a body an out-of-process transport cut at its own cap: extraction cannot tell
+     * a clipped body from a complete one, so unreported it reads as a whole page that says
+     * less. Presence, not equality — a sidecar reporting the cut as a byte count rather
+     * than {@code true} still counts as truncated.
+     */
+    public static void noteUpstreamTruncated(String header, String url) {
+        if (header == null || "false".equalsIgnoreCase(header)) return;
+        EventLogger.info("scrape",
+                "%s: the sidecar cut the body at its byte cap".formatted(url),
+                "extraction sees a partial page (%s)".formatted(header));
     }
 
     /**

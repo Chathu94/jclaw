@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import services.AgentService;
+import services.EventLogger;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeRung;
@@ -18,8 +19,10 @@ import javax.net.ssl.SSLException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Fetch the content of a URL. Supports two modes:
@@ -80,6 +83,58 @@ public class WebFetchTool implements ToolRegistry.Tool {
     static OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(
             CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
 
+    private static final String EVENT_CATEGORY = "scrape";
+    private static final String CFG_MAX_ESCALATIONS = "web_fetch.max-escalations-per-minute";
+
+    /** A single-URL tool has no crawl to budget within, so the bound spans calls: a page
+     *  extracting under 200 characters classifies THIN_CONTENT, so an agent walking a list
+     *  of short pages paid for a browser render on every one. Five a minute leaves any
+     *  hand-driven fetch escalating and caps the loop. */
+    private static final int DEFAULT_MAX_ESCALATIONS_PER_MINUTE = 5;
+    private static final long ESCALATION_WINDOW_MILLIS = Duration.ofMinutes(1).toMillis();
+
+    /** Agent name to the window it is currently spending, keyed per agent rather than per
+     *  JVM: the loop this bounds runs inside one agent's turn, and a shared counter would
+     *  let it refuse escalation to every other agent for the rest of the minute. */
+    private static final ConcurrentHashMap<String, Window> ESCALATION_WINDOWS =
+            new ConcurrentHashMap<>();
+
+    /** Which window an agent is in, and how many escalations it has admitted there. */
+    private static final class Window {
+        long id;
+        int count;
+    }
+
+    /**
+     * Record an escalation for {@code agentKey} and report whether it fits inside
+     * {@code limit} for the fixed window {@code nowMillis} falls in; a {@code limit} of
+     * zero or less admits nothing. Counts only what it admits, so a refusal does not
+     * deepen the shortfall. Pure in {@code nowMillis}, and the per-key {@code compute} is
+     * atomic, so two parallel fetches by one agent cannot overdraw. Mirrors
+     * {@link services.AppInvokeLimits#tryAcquire}.
+     */
+    public static boolean claimEscalation(String agentKey, int limit, long nowMillis) {
+        long windowId = nowMillis / ESCALATION_WINDOW_MILLIS;
+        boolean[] admitted = {false};
+        ESCALATION_WINDOWS.compute(agentKey, (_, existing) -> {
+            var window = existing != null && existing.id == windowId ? existing : new Window();
+            window.id = windowId;
+            if (window.count < limit) {
+                window.count++;
+                admitted[0] = true;
+            }
+            return window;
+        });
+        return admitted[0];
+    }
+
+    /** {@link #claimEscalation(String, int, long)} against the wall clock + live limit config. */
+    private static boolean claimEscalation(Agent agent) {
+        return claimEscalation(agent == null ? "" : agent.name,
+                services.ConfigService.getInt(CFG_MAX_ESCALATIONS, DEFAULT_MAX_ESCALATIONS_PER_MINUTE),
+                System.currentTimeMillis());
+    }
+
     @Override
     public String name() { return "web_fetch"; }
 
@@ -137,7 +192,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
         try {
             var fetched = WebExtraction.fetch(url, CLIENT, headersFor(mode));
             var text = WebExtraction.toText(fetched);
-            var best = climb(url, fetched, text, null);
+            var best = climb(url, fetched, text, null, agent);
             var body = best.fetched() == null ? fetched : best.fetched();
             var extracted = best.text() == null ? text : best.text();
             return "html".equals(mode) ? rawHtml(body, url, agent) : extracted;
@@ -164,7 +219,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
             // unreachable (JCLAW-1099). The SSRF, host-allowlist and TLS branches above
             // deliberately do NOT escalate: those are our own refusals, and retrying
             // them through a different transport would be a way around the guard.
-            var escalated = climb(url, null, null, e.getMessage());
+            var escalated = climb(url, null, null, e.getMessage(), agent);
             if (escalated.usable()) {
                 return "html".equals(mode) && escalated.fetched() != null
                         ? rawHtml(escalated.fetched(), url, agent) : escalated.text();
@@ -176,13 +231,23 @@ public class WebFetchTool implements ToolRegistry.Tool {
     /** Hand one URL to the ladder, classifying the plain attempt the way the crawler and
      *  the harness both do so all three agree on what counts as a failure. */
     private static ScrapeLadder.Attempt climb(String url, WebExtraction.FetchResult fetched,
-                                              String text, String error) {
+                                              String text, String error, Agent agent) {
         var detail = error == null ? "fetch failed" : error;
         var obs = fetched == null
                 ? ScrapeObservation.failed(url, detail)
                 : ScrapeObservation.of(fetched, text);
-        return ScrapeLadder.climb(url, new ScrapeLadder.Attempt(
-                ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error));
+        var plain = new ScrapeLadder.Attempt(
+                ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error);
+        // Ask before claiming, as the crawler does: a reason no installed rung addresses
+        // would spend the budget without a request ever being issued.
+        if (plain.usable() || !ScrapeLadder.wouldAttempt(plain.reason())) return plain;
+        if (!claimEscalation(agent)) {
+            EventLogger.info(EVENT_CATEGORY,
+                    "%s: not escalated, this agent's budget for the minute is spent".formatted(url),
+                    "%s; raise %s to escalate more often".formatted(plain.reason(), CFG_MAX_ESCALATIONS));
+            return plain;
+        }
+        return ScrapeLadder.climb(url, plain);
     }
 
     /**

@@ -64,9 +64,9 @@ public class ApiScrapeTestController extends Controller {
             // scoring a proportional corpus against the same threshold would report a
             // pass that means nothing. Refuse rather than qualify it in a footnote.
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                    "Corpus allocation is '%s', not 'equal' — the gate threshold is only "
-                            + "meaningful against an equal-allocation corpus."
-                            .formatted(corpus.allocation()));
+                    ("Corpus is not equal-allocation (declared '%s', realised %s) — the gate "
+                            + "threshold is only meaningful against an equal-allocation corpus.")
+                            .formatted(corpus.allocation(), corpus.realisedCounts()));
             throw ApiResponses.unreachable();
         }
 

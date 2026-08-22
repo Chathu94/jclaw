@@ -9,7 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ConfigService;
 import tools.WebScrapeTool;
 import utils.RobotsCache;
 
@@ -43,6 +42,7 @@ class ScrapeContentPreferencesTest extends UnitTest {
     private static final String HOST = "https://prefs.test";
     private static final String CFG_LANGUAGE = "web_scrape.language";
 
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
     private OkHttpClient original;
 
@@ -59,9 +59,14 @@ class ScrapeContentPreferencesTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         CLIENT_FIELD.set(null, original);
-        ConfigService.set(CFG_LANGUAGE, "en");
-        ConfigService.clearCache();
+        config.restore();
         RobotsCache.resetForTest();
+    }
+
+    /** Bounded prefix for an assertion message: a crawl that returned nothing at all is
+     *  exactly when the message is wanted, and substring(0, 400) throws there. */
+    private static String head(String out) {
+        return out.substring(0, Math.min(400, out.length()));
     }
 
     private static String body(String... paragraphs) {
@@ -94,21 +99,43 @@ class ScrapeContentPreferencesTest extends UnitTest {
     void markdownIsUsedVerbatimRatherThanRunThroughReadability() {
         // The point of the whole story: when the origin hands us the target format, the
         // HTML reconstruction is skipped rather than applied to markdown.
-        routes.put(HOST + "/", body("# Real Heading", "Some **bold** prose."), "text/markdown");
+        //
+        // Asserted on the whole source, and with a raw tag in it. "**bold**" is text on
+        // the HTML path too, so it cannot tell the branches apart; a literal <span>
+        // survives only where nothing parsed the body as markup, and any Readability,
+        // html2md or Tika pass would also re-space what surrounds it.
+        var source = body("# Real Heading", "Some **bold** prose.",
+                "<span data-keep=\"1\">raw markup kept</span>");
+        routes.put(HOST + "/", source, "text/markdown");
         var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0}");
-        assertTrue(out.contains("**bold**"),
-                "markdown emphasis must survive verbatim: " + out.substring(0, Math.min(400, out.length())));
+        assertTrue(out.contains(source),
+                "markdown must reach the caller byte for byte: " + head(out));
+    }
+
+    @Test
+    void markdownIsVerbatimUnderTheApplicationTypeToo() {
+        // application/markdown routed to the markdown link parser but fell through to
+        // Tika for the text — one response with two different opinions about what it is.
+        var source = body("# Real Heading", "Some **bold** prose.");
+        routes.put(HOST + "/", source, "application/markdown");
+        assertTrue(scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0}").contains(source),
+                "the application/ spelling must take the same path as text/markdown");
     }
 
     @Test
     void linksAreHarvestedFromMarkdownSoCrawlingStillWorks() {
         // Without markdown link parsing, preferring markdown would silently reduce every
-        // crawl to its seed page.
+        // crawl to its seed page. The seed's own body contains the string "/guide", so
+        // what is asserted is that the link was FOLLOWED: the request, and content only
+        // the linked page carries.
         routes.put(HOST + "/", body("# Index", "See [the guide](/guide) for more."), "text/markdown");
-        routes.put(HOST + "/guide", body("# Guide", "Guide content."), "text/markdown");
+        routes.put(HOST + "/guide", body("# Guide", "Deployment on Tuesdays."), "text/markdown");
 
         var out = scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":1}");
-        assertTrue(out.contains("/guide"), "a markdown link must be followed: " + out);
+        assertTrue(routes.hits.contains(HOST + "/guide"),
+                "a markdown link must be followed: " + routes.hits);
+        assertTrue(out.contains("Deployment on Tuesdays."),
+                "the linked page's own content must be in the result: " + head(out));
     }
 
     @Test
@@ -138,12 +165,28 @@ class ScrapeContentPreferencesTest extends UnitTest {
 
     @Test
     void theLanguagePreferenceDefaultsToEnglish() {
+        // The key is DELETED first: while a value sits in global config this asserts
+        // whatever wrote it, not the compiled-in default.
+        config.delete(CFG_LANGUAGE);
         routes.put(HOST + "/", "<html><head><title>H</title></head><body><article><p>"
                 + "Body text long enough to clear the readability floor. ".repeat(12)
                 + "</p></article></body></html>");
         scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0}");
         assertTrue(routes.languageFor(HOST + "/").startsWith("en"),
                 "English by default: " + routes.languageFor(HOST + "/"));
+    }
+
+    @Test
+    void aBlankConfiguredLanguageFallsBackRatherThanAskingForNothing() {
+        // An operator clearing the field leaves "", which reached the header as
+        // "Accept-Language: , *;q=0.5".
+        config.set(CFG_LANGUAGE, "   ");
+        routes.put(HOST + "/", "<html><head><title>H</title></head><body><article><p>"
+                + "Body text long enough to clear the readability floor. ".repeat(12)
+                + "</p></article></body></html>");
+        scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0}");
+        assertTrue(routes.languageFor(HOST + "/").startsWith("en"),
+                "a blank preference must fall back: " + routes.languageFor(HOST + "/"));
     }
 
     // ==================== JCLAW-1100: locale variants ====================

@@ -1,19 +1,19 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
-import services.ConfigService;
 import services.FetchSidecarManager;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.ImpersonatedFetcher;
-import utils.WebExtraction;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Rung 2 — the TLS-impersonating fetch lane (JCLAW-1087).
@@ -27,51 +27,44 @@ class ImpersonatedFetcherTest extends UnitTest {
 
     private static final Map<String, String> H = Map.of("Accept", "text/html");
 
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
+
     @AfterEach
     void clearOverrides() {
-        ConfigService.set(FetchSidecarManager.CFG_ENABLED, "true");
-        ConfigService.clearCache();
-    }
-
-    /** A transport that replays a canned script, recording what it was asked for. */
-    private static WebExtraction.Transport scripted(List<WebExtraction.Exchange> script,
-                                                    List<URI> seen) {
-        var i = new AtomicInteger();
-        return (uri, headers) -> {
-            seen.add(uri);
-            return script.get(Math.min(i.getAndIncrement(), script.size() - 1));
-        };
+        config.restore();
     }
 
     // ==================== Containment across the seam ====================
 
     @Test
-    void redirectOntoAPrivateAddressIsRefusedOnTheImpersonationLane() {
-        // The whole reason the sidecar is forbidden to follow redirects: it is an
-        // unguarded HTTP client, so a 3xx it chased itself would never reach SsrfGuard.
-        // Handing the hop back must put it through the same guard rung 1 uses.
-        var seen = new java.util.ArrayList<URI>();
-        var transport = scripted(List.of(
-                new WebExtraction.Exchange(302, new byte[0], "", "http://127.0.0.1:9/secret")), seen);
-
-        var boom = assertThrows(SecurityException.class,
-                () -> WebExtraction.fetch("https://example.com", H, transport));
-        assertTrue(boom.getMessage().contains("SSRF guard"),
-                "expected an SsrfGuard refusal, got: " + boom.getMessage());
-        assertEquals(1, seen.size(), "the private-address hop must never be requested");
+    void anUnsafeUrlIsRefusedBeforeTheSidecarIsEvenContacted() {
+        // The guard that actually contains rung 2 is inside the transport, ahead of
+        // FetchSidecarManager.ensureRunning: hostResolverRule throws everything
+        // assertUrlSafe does AND returns the address it validated, so curl is never left
+        // to resolve the name a second time. Running ahead of ensureRunning is also what
+        // makes this assertable with no sidecar installed.
+        var transport = ImpersonatedFetcher.transport();
+        for (var url : List.of("http://127.0.0.1:9/secret",
+                               "http://169.254.169.254/latest/meta-data/",
+                               "http://[::1]:9/")) {
+            assertThrows(SecurityException.class,
+                    () -> transport.exchange(URI.create(url), H),
+                    "expected an SsrfGuard refusal for " + url);
+        }
     }
 
     @Test
-    void redirectsAreWalkedByTheCallerNotTheTransport() throws IOException {
-        var seen = new java.util.ArrayList<URI>();
-        var transport = scripted(List.of(
-                new WebExtraction.Exchange(301, new byte[0], "", "https://example.com/moved"),
-                new WebExtraction.Exchange(200, "hello".getBytes(), "text/plain", null)), seen);
-
-        var result = WebExtraction.fetch("https://example.com", H, transport);
-        assertEquals(2, seen.size(), "each hop must be a separate transport call");
-        assertEquals("https://example.com/moved", result.finalUrl());
-        assertEquals("hello", new String(result.body()));
+    void theSidecarNeverFollowsARedirectItself() throws IOException {
+        // The property this rung's containment rests on lives in the sidecar, where the
+        // JVM cannot observe it: curl following a 3xx on its own would reach an address
+        // SsrfGuard never saw. Asserted against the source, the way StealthBrowserTest
+        // reaches into sidecar/*/ssrf.py for the guard it cannot call.
+        var serve = Files.readString(
+                Path.of(Play.applicationPath.getAbsolutePath(), "sidecar/fetch/serve.py"));
+        assertTrue(serve.contains("allow_redirects=False"),
+                "the fetch sidecar must hand every hop back to the JVM");
+        assertFalse(serve.contains("allow_redirects=True"),
+                "no call site may re-enable redirect following");
     }
 
     // ==================== Feature detection ====================
@@ -80,8 +73,7 @@ class ImpersonatedFetcherTest extends UnitTest {
     void disablingTheRungDegradesRatherThanErroring() {
         // AC: an install without the sidecar falls back to rung 1 silently. available()
         // must answer without spawning anything, so the ladder can skip the rung.
-        ConfigService.set(FetchSidecarManager.CFG_ENABLED, "false");
-        ConfigService.clearCache();
+        config.set(FetchSidecarManager.CFG_ENABLED, "false");
         assertFalse(FetchSidecarManager.available());
         assertFalse(ImpersonatedFetcher.available());
     }
@@ -91,12 +83,11 @@ class ImpersonatedFetcherTest extends UnitTest {
         // --model carries the profile, and LocalSidecarDaemon.isHealthy(expectedModel)
         // compares it, so a repin forces a respawn instead of leaving the old
         // fingerprint in service.
-        assertEquals("chrome", FetchSidecarManager.profile());
-        ConfigService.set(FetchSidecarManager.CFG_PROFILE, "chrome146");
-        ConfigService.clearCache();
+        config.delete(FetchSidecarManager.CFG_PROFILE);
+        assertEquals("chrome", FetchSidecarManager.profile(),
+                "the rolling alias is the compiled-in default, not a value a test wrote");
+        config.set(FetchSidecarManager.CFG_PROFILE, "chrome146");
         assertEquals("chrome146", FetchSidecarManager.profile());
-        ConfigService.set(FetchSidecarManager.CFG_PROFILE, "chrome");
-        ConfigService.clearCache();
     }
 
     // ==================== Ladder-aware escalation advice ====================

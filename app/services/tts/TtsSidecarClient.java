@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
+import services.LocalSidecarDaemon;
 import services.sidecar.SidecarHttpClient;
 
 import java.io.IOException;
@@ -88,6 +89,7 @@ public class TtsSidecarClient extends SidecarHttpClient {
         if (refAudio != null && !refAudio.isBlank()) body.addProperty("ref_audio", refAudio);
         var call = client.newCall(new Request.Builder()
                 .url(baseUrl + "/synthesize")
+                .header(LocalSidecarDaemon.AUTH_HEADER, TtsSidecarManager.authToken())
                 .post(RequestBody.create(body.toString(), JSON))
                 .build());
         call.timeout().timeout(ConfigService.getInt(
