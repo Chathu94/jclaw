@@ -673,15 +673,20 @@ class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    void embeddingProbeAllowsALocalProvider() {
-        // Guards against the refusal being unconditional: a local provider must get past
+    void embeddingProbeAllowsADeclaredLocalProvider() {
+        // Guards against the refusal being unconditional: a declared provider must get past
         // the policy check and fail (if at all) on reachability instead.
+        //
+        // JCLAW-1102: the loopback address is not what admits it — a cloud API behind a local
+        // proxy has one too. Its own provider name, so the sibling refusal test cannot see
+        // this declaration; the suite runs tests concurrently against shared config rows.
         login();
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:1/v1");
-        var response = POST("/api/providers/test-provider/embedding-probe",
+        ConfigService.set("provider.test-provider-declared.baseUrl", "http://127.0.0.1:1/v1");
+        ConfigService.set("provider.test-provider-declared.local", "true");
+        var response = POST("/api/providers/test-provider-declared/embedding-probe",
                 "application/json", "{\"model\":\"nomic-embed-text\"}");
         assertNotEquals(403, response.status.intValue(),
-                "a local provider must not be refused as remote: " + getContent(response));
+                "a declared self-hosted provider must not be refused as remote: " + getContent(response));
     }
 
     private static boolean substituted(String requested, String served) throws Exception {

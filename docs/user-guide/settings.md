@@ -30,6 +30,7 @@ For each provider you can:
 - Set the **API key** (stored encrypted at rest).
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
+- Set **local** — the provider's Remote/Local classification. It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp; absent means remote. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
 - **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, video, thinking) confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess).
 - **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
@@ -283,7 +284,9 @@ How many memories reach the prompt. These two counts are the *only* bound on the
 
 Vector memory — recall finds a memory by meaning rather than wording, and capture recognizes a fact you already stored even when you phrase it differently. Off by default; with it off memory still works, falling back to keyword matching for both recall and duplicate detection.
 
-Enable the toggle, then pick a provider and model. **Only local providers are offered** — Ollama, LM Studio, or anything else with a local base URL. Embedding a memory sends its full text to the provider, so the model has to run on this machine for memory text never to leave it; the backend rejects a non-local provider even if the key is set directly through `POST /api/config`. If no local provider is configured the panel says so instead of listing models.
+Enable the toggle, then pick a provider and model. **Only providers in the Local section of [LLM Providers](#llm-providers) are offered.** Embedding a memory sends its full text to the provider, so it has to run on hardware you control for memory text not to leave it; the backend rejects any other provider even if the key is set directly through `POST /api/config`. If no local provider is configured the panel says so instead of listing models.
+
+The classification is yours to make, not something read off the base URL. An address cannot answer it in either direction: a server on a VPN or tailnet looks remote (Tailscale's `100.64.0.0/10` is shared carrier-NAT space, indistinguishable from another subscriber's), while a cloud API behind a local proxy looks local but runs someone else's model. You say which providers you host.
 
 Models are discovered live from the provider rather than read from the stored catalog, because embedding models generally aren't registered there. Saving is gated on a probe that confirms the model actually embeds and records its dimension. Changing the model later marks the corpus **needs re-embedding** and offers a re-embed action that rewrites existing vectors against the new model.
 
@@ -291,7 +294,7 @@ Models are discovered live from the provider rather than read from the stored ca
 
 An optional second pass that re-orders the shortlist recall produced, before it reaches the prompt. Off by default.
 
-Restricted to local providers for the same reason embeddings are: the reranker renders the whole candidate shortlist into its prompt, so whatever serves it sees memory text.
+Restricted to the same providers as embeddings, for the same reason: the reranker renders the whole candidate shortlist into its prompt, so whatever serves it sees memory text.
 
 | Key | Default | Meaning |
 |-----|---------|---------|

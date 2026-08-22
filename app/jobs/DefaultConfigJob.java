@@ -177,6 +177,10 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.ollama-local.baseUrl", "http://localhost:11434/v1");
         seedIfAbsent("provider.ollama-local.apiKey", "ollama-local");
         seedIfAbsent("provider.ollama-local.models", "[]");
+        // JCLAW-1102: the operator's Remote/Local classification, which ProviderLocality
+        // reads to decide whether memory text may reach a provider. Only the self-hosted
+        // four are seeded true — absent means remote, so cloud rows need no key.
+        seedIfAbsent("provider.ollama-local.local", "true");
 
         // JCLAW-182: lm-studio falls through to OpenAiProvider via the factory
         // default — LM Studio speaks OpenAI-compatible /v1/chat/completions on
@@ -186,6 +190,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.lm-studio.baseUrl", "http://localhost:1234/v1");
         seedIfAbsent("provider.lm-studio.apiKey", "lm-studio");
         seedIfAbsent("provider.lm-studio.models", "[]");
+        seedIfAbsent("provider.lm-studio.local", "true");
 
         // vLLM (self-hosted): OpenAI-compatible /v1/chat/completions + /v1/models, the same factory
         // default (OpenAiProvider) and discovery path (OpenAI-compat /v1/models) as lm-studio. Default
@@ -195,6 +200,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.vllm.baseUrl", "http://localhost:8000/v1");
         seedIfAbsent("provider.vllm.apiKey", "vllm");
         seedIfAbsent("provider.vllm.models", "[]");
+        seedIfAbsent("provider.vllm.local", "true");
 
         // llama.cpp (self-hosted llama-server): OpenAI-compatible /v1/chat/completions
         // + /v1/models, same factory default (OpenAiProvider) and discovery path as
@@ -207,6 +213,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.llama-cpp.baseUrl", "http://localhost:8080/v1");
         seedIfAbsent("provider.llama-cpp.apiKey", "llama-cpp");
         seedIfAbsent("provider.llama-cpp.models", "[]");
+        seedIfAbsent("provider.llama-cpp.local", "true");
 
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");

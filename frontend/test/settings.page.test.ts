@@ -150,8 +150,10 @@ describe('Settings page — provider section', () => {
         { key: 'provider.openrouter.apiKey', value: 'sk-or', updatedAt: '2026-04-29T10:00:00Z' },
         { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1', updatedAt: '2026-04-29T10:00:00Z' },
         { key: 'provider.ollama-local.apiKey', value: 'ollama-local', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.ollama-local.local', value: 'true', updatedAt: '2026-04-29T10:00:00Z' },
         { key: 'provider.lm-studio.baseUrl', value: 'http://localhost:1234/v1', updatedAt: '2026-04-29T10:00:00Z' },
         { key: 'provider.lm-studio.apiKey', value: 'lm-studio', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.lm-studio.local', value: 'true', updatedAt: '2026-04-29T10:00:00Z' },
       ],
     }))
     registerEndpoint('/api/ocr/status', () => ocrStatusPayload)

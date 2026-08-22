@@ -474,7 +474,8 @@ const streamProducing = computed(() =>
 // something read off its baseUrl, which can point at loopback for a remote
 // provider too. Remote turns show "Generating…" from the first frame.
 // selectedModelKey is "<provider>::<modelId>".
-const streamIsLocal = computed(() => isLocalProvider(selectedModelKey.value.split('::')[0]))
+const streamIsLocal = computed(() =>
+  isLocalProvider(selectedModelKey.value.split('::')[0], configDataRef.value))
 
 // JCLAW-1075: a chat-only model leaves the agent answering normally but never
 // acting, which reads as a bad model rather than a configuration mismatch.

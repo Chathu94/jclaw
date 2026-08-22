@@ -345,30 +345,59 @@ describe('useProviders', () => {
 // ---------------------------------------------------------------------------
 
 describe('isLocalProvider', () => {
+  // The classification the backend seeds for the four self-hosted providers.
+  const seeded = {
+    entries: [
+      { key: 'provider.ollama-local.local', value: 'true' },
+      { key: 'provider.lm-studio.local', value: 'true' },
+      { key: 'provider.vllm.local', value: 'true' },
+      { key: 'provider.llama-cpp.local', value: 'true' },
+      { key: 'provider.openai.baseUrl', value: 'https://api.openai.com/v1' },
+      { key: 'provider.together.baseUrl', value: 'https://api.together.xyz/v1' },
+    ],
+  } as ConfigData
+
   it('matches the Local subsection of Settings → LLM Providers', () => {
-    expect(isLocalProvider('ollama-local')).toBe(true)
-    expect(isLocalProvider('lm-studio')).toBe(true)
-    expect(isLocalProvider('vllm')).toBe(true)
-    expect(isLocalProvider('llama-cpp')).toBe(true)
+    expect(isLocalProvider('ollama-local', seeded)).toBe(true)
+    expect(isLocalProvider('lm-studio', seeded)).toBe(true)
+    expect(isLocalProvider('vllm', seeded)).toBe(true)
+    expect(isLocalProvider('llama-cpp', seeded)).toBe(true)
   })
 
   it('treats remote providers as non-local', () => {
-    expect(isLocalProvider('ollama-cloud')).toBe(false)
-    expect(isLocalProvider('openai')).toBe(false)
-    expect(isLocalProvider('openrouter')).toBe(false)
-    expect(isLocalProvider('together')).toBe(false)
+    // Absent means remote, which is why no cloud row carries the key.
+    expect(isLocalProvider('ollama-cloud', seeded)).toBe(false)
+    expect(isLocalProvider('openai', seeded)).toBe(false)
+    expect(isLocalProvider('openrouter', seeded)).toBe(false)
+    expect(isLocalProvider('together', seeded)).toBe(false)
+  })
+
+  it('follows a reclassification rather than the provider name', () => {
+    // JCLAW-1102: the whole point of reading the key. llama-cpp was hardcoded
+    // local and openai hardcoded remote, so a name-based check fails here — and
+    // chat's prefill label would then contradict Settings and the memory gate.
+    const flipped = {
+      entries: [
+        { key: 'provider.llama-cpp.local', value: 'false' },
+        { key: 'provider.openai.local', value: 'true' },
+      ],
+    } as ConfigData
+    expect(isLocalProvider('llama-cpp', flipped)).toBe(false)
+    expect(isLocalProvider('openai', flipped)).toBe(true)
   })
 
   it('defaults an unknown provider to remote', () => {
     // Mirrors the Settings grouping: an operator-added provider lands under
     // Remote until it is declared local, so it never claims a prefill window.
-    expect(isLocalProvider('some-new-provider')).toBe(false)
+    expect(isLocalProvider('some-new-provider', seeded)).toBe(false)
   })
 
-  it('is false for a missing provider name', () => {
-    expect(isLocalProvider(null)).toBe(false)
-    expect(isLocalProvider(undefined)).toBe(false)
+  it('is false for a missing provider name or absent config', () => {
+    expect(isLocalProvider(null, seeded)).toBe(false)
+    expect(isLocalProvider(undefined, seeded)).toBe(false)
     // selectedModelKey is "" before a model resolves, so split('::')[0] is "".
-    expect(isLocalProvider('')).toBe(false)
+    expect(isLocalProvider('', seeded)).toBe(false)
+    // Config has not landed yet on first paint — remote is the safe default.
+    expect(isLocalProvider('ollama-local', null)).toBe(false)
   })
 })

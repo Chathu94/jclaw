@@ -7,39 +7,52 @@ import java.net.URI;
 import java.util.Locale;
 
 /**
- * Whether a provider runs on the operator's own machine or network (JCLAW-939).
+ * Whether a provider runs on the operator's own hardware (JCLAW-939, JCLAW-1102).
  *
- * <p>Decided from the configured base URL, not the provider name. Embedding a memory sends
- * its full text to the provider, so what matters is where the bytes go — a provider named
- * {@code openai} pointed at a local proxy keeps them here, and a provider named
- * {@code my-local-llm} pointed at a public host does not. Names are operator-chosen and
- * carry no such guarantee.
+ * <p>Answered by the operator's Remote/Local classification, {@code provider.<name>.local} —
+ * the same key that groups the Settings cards and gates the chat prefill label. Absent means
+ * remote. Embedding a memory sends its full text to the provider, so this decides where that
+ * text may go.
  *
- * <p>{@link PaymentModality} is deliberately not used for this. Its empty supported-set
- * marks both free-at-point-of-use providers and unrecognised ones, so an unknown cloud
- * provider would read as local.
+ * <p>Not derived from the base URL, and deliberately not merely supplemented by one. A cloud
+ * API behind a loopback proxy has a local address and a remote model: an address check that
+ * could only ever <em>add</em> locality would offer it for embedding and ship the corpus
+ * onward, because the declaration would have no way to say no. A URL cannot answer the
+ * question in the other direction either — a tailnet peer sits in {@code 100.64.0.0/10},
+ * shared carrier-NAT space that {@code SsrfGuard.isNonRoutableIpv4} separately refuses as
+ * reaching the ISP's own equipment, so no range can be blessed on its behalf.
  *
- * <p>Hostnames are never resolved. A DNS lookup on the settings path would be slow, and a
- * name that resolves to a loopback address today can resolve elsewhere tomorrow, which
- * would make the guarantee depend on whoever answers the query. Only address literals and
- * names that are local by definition count; everything else is treated as remote.
+ * <p>That makes locality an assertion rather than a proof. It is the operator's to make:
+ * JClaw cannot tell a tailnet address from a carrier-NAT neighbour, and refusing the whole
+ * class would rule out self-hosting over a VPN entirely.
+ *
+ * <p>{@link PaymentModality} is deliberately not used for this. Its empty supported-set marks
+ * both free-at-point-of-use providers and unrecognised ones, so an unknown cloud provider
+ * would read as local.
+ *
+ * <p>{@link #isLocalUrl} survives as a pure address predicate for callers asking where a
+ * socket goes rather than whether a provider is trusted — the residency pin in
+ * {@code EmbeddingModelKeepAlive} is the one such caller. It never resolves hostnames: a DNS
+ * lookup on the settings path would be slow, and a name that resolves to loopback today can
+ * resolve elsewhere tomorrow.
  */
 public final class ProviderLocality {
 
     private ProviderLocality() {}
 
+    /** Config key suffix for the operator's Remote/Local classification. */
+    public static final String DECLARED_LOCAL_SUFFIX = ".local";
+
     /**
-     * True when {@code providerName} is configured against a local base URL.
+     * True when the operator classified {@code providerName} as self-hosted.
      *
-     * <p>Reads the configured URL directly rather than going through
-     * {@link ProviderRegistry}, so this agrees with the same key the endpoints validate
-     * against. The registry is populated from a sync and can lag a just-saved provider,
-     * which would classify it as remote and refuse a provider the operator has in fact
-     * pointed at their own machine.
+     * <p>Reads config directly rather than going through {@link ProviderRegistry}, which is
+     * populated from a sync and can lag a just-saved provider — that would read as remote and
+     * refuse a provider the operator has in fact just declared their own.
      */
     public static boolean isLocal(String providerName) {
         if (providerName == null || providerName.isBlank()) return false;
-        return isLocalUrl(ConfigService.get("provider." + providerName + ".baseUrl"));
+        return ConfigService.getBoolean("provider." + providerName + DECLARED_LOCAL_SUFFIX, false);
     }
 
     public static boolean isLocalUrl(String baseUrl) {

@@ -41,25 +41,30 @@ export function effectiveThinkingLevels(model: ProviderModel | null | undefined)
 }
 
 /**
- * Providers that run on the operator's own hardware — the "Local" subsection of
+ * Whether a provider runs on the operator's own hardware — the "Local" subsection of
  * Settings → LLM Providers (JCLAW-182). Unknown providers default to remote.
  *
- * This is declared identity, not something inferred from {@code baseUrl}: a
- * remote provider can perfectly well sit behind a loopback or LAN address (a
- * local proxy or gateway fronting a cloud API), so the host tells you where the
- * socket goes, not where the model runs. Settings is where the operator states
- * which is which, so Settings is the source of truth.
+ * Declared identity, not something inferred from {@code baseUrl}: a remote provider can
+ * perfectly well sit behind a loopback or LAN address (a local proxy or gateway fronting a
+ * cloud API), so the host tells you where the socket goes, not where the model runs.
+ *
+ * Reads {@code provider.<name>.local}, the same key the backend's ProviderLocality reads to
+ * decide whether memory embeddings and reranking may use a provider (JCLAW-1102). One key,
+ * because it is one fact: hardware the operator controls both shows a real prefill window
+ * and is somewhere memory text may go. A separate hardcoded list here would drift the moment
+ * an operator reclassified a provider, leaving chat and Settings disagreeing silently.
+ *
+ * Gates the "Prefilling…" status label: prompt prefill / model load is only a long, visible
+ * window on a local model — on a remote provider the pre-first-token gap is a sub-second
+ * network/queue hop, not a prefill worth surfacing.
  */
-const LOCAL_PROVIDERS = new Set(['ollama-local', 'lm-studio', 'vllm', 'llama-cpp'])
-
-/**
- * Whether a provider is self-hosted, per {@link LOCAL_PROVIDERS}. Gates the
- * "Prefilling…" status label: prompt prefill / model load is only a long,
- * visible window on a local model — on a remote provider the pre-first-token
- * gap is a sub-second network/queue hop, not a prefill worth surfacing.
- */
-export function isLocalProvider(name: string | null | undefined): boolean {
-  return !!name && LOCAL_PROVIDERS.has(name)
+export function isLocalProvider(
+  name: string | null | undefined,
+  configData: ConfigData | null | undefined,
+): boolean {
+  if (!name) return false
+  const entry = (configData?.entries ?? []).find(e => e.key === `provider.${name}.local`)
+  return (entry?.value ?? '').toLowerCase() === 'true'
 }
 
 /**

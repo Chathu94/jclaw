@@ -738,7 +738,7 @@ export interface ProviderInfo {
   paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
   subscriptionMonthlyUsd: number
   supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
-  /** Configured against a base URL on this machine or network (JCLAW-939). */
+  /** Local by base URL, or by the operator's classification (JCLAW-939, JCLAW-1102). */
   local: boolean
 }
 

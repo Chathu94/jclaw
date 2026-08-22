@@ -218,10 +218,20 @@ public class ConfigService {
             }
         }
 
+        // JCLAW-1102: this classification is what lets memory text reach a host, so a typo
+        // must not read as "remote". Boolean.parseBoolean maps anything unrecognised to
+        // false, which would leave embeddings refusing a provider the operator declared local.
+        if (key.startsWith("provider.") && key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
+                && value != null && !value.isBlank()
+                && !"true".equalsIgnoreCase(value.trim()) && !"false".equalsIgnoreCase(value.trim())) {
+            return "provider.*" + ProviderLocality.DECLARED_LOCAL_SUFFIX + " must be 'true' or 'false'.";
+        }
+
         // JCLAW-939: embedding a memory ships its full text to the provider, so the vector
-        // provider is restricted to one running on the operator's own machine. Enforced
-        // here rather than only in the Settings picker: this key is reachable through
-        // POST /api/config directly, and a hidden option is not a disabled one.
+        // provider is restricted to one on the operator's own machine or network, or one they
+        // classified as self-hosted (JCLAW-1102). Enforced here rather than only in the
+        // Settings picker: this key is reachable through POST /api/config directly, and a
+        // hidden option is not a disabled one.
         //
         // The reranker is held to the same rule for the same reason: it renders the whole
         // candidate shortlist into its prompt, so whatever serves it sees memory text.
@@ -230,7 +240,8 @@ public class ConfigService {
                 && !ProviderLocality.isLocal(value)) {
             var feature = key.equals(MemoryReranker.KEY_PROVIDER) ? "reranking" : "embeddings";
             return "Provider '" + value + "' is not local. Memory " + feature + " must use a "
-                    + "provider on this machine so memory text never leaves it.";
+                    + "provider classified as self-hosted in Settings > LLM Providers, so "
+                    + "memory text only goes where you allow it.";
         }
 
         // JCLAW-970: both keys are writable through POST /api/config, and a bad value is silent

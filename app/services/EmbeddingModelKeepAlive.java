@@ -74,13 +74,19 @@ public final class EmbeddingModelKeepAlive {
     }
 
     /**
+     * @param declaredLocal whether the operator classified the provider as self-hosted
+     *                      (JCLAW-1102). A self-hosted backend reached over a VPN holds a
+     *                      model resident exactly as a loopback one does, so it earns the
+     *                      same pin.
      * @return the strategy for {@code providerName}, or {@link Strategy#NONE} when the
-     *         provider is hosted or has no client-side pin. Pure, so the routing is testable
-     *         without a provider or a network.
+     *         provider is hosted or has no client-side pin. The classification arrives as an
+     *         argument rather than a config read, so this stays pure and the routing is
+     *         testable without a provider or a network.
      */
-    public static Strategy strategyFor(String providerName, String baseUrl) {
+    public static Strategy strategyFor(String providerName, String baseUrl, boolean declaredLocal) {
         if (providerName == null || providerName.isBlank()) return Strategy.NONE;
-        if (baseUrl == null || baseUrl.isBlank() || !ProviderLocality.isLocalUrl(baseUrl)) return Strategy.NONE;
+        if (baseUrl == null || baseUrl.isBlank()) return Strategy.NONE;
+        if (!declaredLocal && !ProviderLocality.isLocalUrl(baseUrl)) return Strategy.NONE;
         var name = providerName.toLowerCase(Locale.ROOT);
         if (name.contains("ollama")) return Strategy.OLLAMA_KEEP_ALIVE;
         if (name.contains("lmstudio") || name.contains("lm-studio")) return Strategy.LM_STUDIO_TTL;
@@ -100,7 +106,7 @@ public final class EmbeddingModelKeepAlive {
         var baseUrl = ConfigService.get("provider." + providerName + ".baseUrl");
         if (baseUrl == null || baseUrl.isBlank()) return false;
 
-        var strategy = strategyFor(providerName, baseUrl);
+        var strategy = strategyFor(providerName, baseUrl, ProviderLocality.isLocal(providerName));
         if (strategy == Strategy.NONE) return false;
 
         var model = MemoryVectorSettings.model();

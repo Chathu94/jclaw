@@ -552,13 +552,13 @@ const PROVIDER_LABELS: Record<string, string> = {
   'llama-cpp': 'llama.cpp',
 }
 
-// JCLAW-182: split LLM Providers into Remote and Local subsections in the
-// Settings UI. Which providers are self-hosted lives in useProviders as
-// isLocalProvider — this section is where the operator sees that classification,
-// but the chat page's "Prefilling…" gate reads the same predicate, so it can't
-// be a map private to this panel.
+// JCLAW-182: split LLM Providers into Remote and Local subsections. JCLAW-1102 moved the
+// classification to provider.<name>.local — one key behind the grouping here, chat's prefill
+// label, and whether memory embeddings may use the provider, so the three cannot disagree.
+// Read from config rather than /api/providers: a provider with no API key is not in
+// ProviderRegistry and so not in that response, but it still has a card here.
 function providerGroup(name: string): 'remote' | 'local' {
-  return isLocalProvider(name) ? 'local' : 'remote'
+  return isLocalProvider(name, configData.value) ? 'local' : 'remote'
 }
 
 function providerLabel(name: string): string {
