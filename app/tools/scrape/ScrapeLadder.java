@@ -110,7 +110,7 @@ public final class ScrapeLadder {
     private static Attempt attempt(ScrapeRung rung, String url, String language) {
         try {
             var fetched = rung == ScrapeRung.BROWSER
-                    ? RenderedFetcher.fetch(url)
+                    ? RenderedFetcher.fetch(url, language)
                     : ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
             var text = WebExtraction.toText(fetched);
             var obs = ScrapeObservation.of(fetched, text);

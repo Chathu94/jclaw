@@ -38,13 +38,16 @@ class StealthBrowserTest extends UnitTest {
             "169.254.169.254", "fe80::1",                 // link-local (incl. cloud metadata)
             "224.0.0.1", "ff02::1",                       // multicast
             "0.0.0.0", "::",                              // unspecified
-            // Classes where the two implementations do NOT agree. The table held none
-            // of them, so it passed while asserting equality it could not have caught
-            // a drift in. fec0::/10 was the one that mattered: Java rejects it as
-            // site-local, ipaddress called it public, and the sidecar admitted it.
+            // Classes the two implementations once disagreed on. The table held none
+            // of them, so it passed while asserting an equality it could not have
+            // caught a drift in — and the divergences ran in both directions:
+            // ipaddress admitted fec0::/10 that Java blocked, while Java admitted the
+            // five below that ipaddress blocked.
             "fec0::1",                                    // v6 site-local
             "240.0.0.1", "192.0.2.1", "198.18.0.1",       // v4 reserved/doc/benchmark
-            "255.255.255.255", "64:ff9b::7f00:1");        // broadcast, v4-mapped v6
+            "255.255.255.255",                            // broadcast
+            "64:ff9b::7f00:1",                            // NAT64 wrapping 127.0.0.1
+            "100.64.0.1");                                // CGNAT
 
     @AfterEach
     void clearOverrides() {
@@ -80,6 +83,25 @@ class StealthBrowserTest extends UnitTest {
         assertEquals(0, proc.exitValue(), "python3 parity probe failed: " + stdout);
 
         var python = JsonParser.parseString(stdout).getAsJsonObject();
+
+        // Positive control. Without it a guard that answered false for everything —
+        // which would silently stop rung 3 loading any subresource — satisfies every
+        // assertion below and reads as a pass.
+        assertTrue(python.get("8.8.8.8").getAsBoolean(),
+                script + " rejects a public address — the guard is refusing everything");
+
+        // Both guards must reject these outright. The one-directional check below is
+        // the security invariant, but on its own it cannot see the JVM growing a hole:
+        // 64:ff9b::7f00:1 is NAT64-wrapped loopback, and SsrfGuard admitted it while
+        // this table sat here asserting nothing about it.
+        for (var mustBlock : List.of("127.0.0.1", "::1", "169.254.169.254", "10.0.0.1",
+                                     "fec0::1", "64:ff9b::7f00:1")) {
+            assertFalse(python.get(mustBlock).getAsBoolean(),
+                    script + " admits " + mustBlock);
+            assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName(mustBlock)),
+                    "SsrfGuard admits " + mustBlock);
+        }
+
         for (var address : ADDRESSES) {
             boolean pythonSaysPublic = python.get(address).getAsBoolean();
             boolean javaSaysPublic = !SsrfGuard.isUnsafe(InetAddress.getByName(address));

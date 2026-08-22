@@ -12,6 +12,11 @@ against the same address table the Java guard is fed and fail when the two drift
 import ipaddress
 import socket
 
+EXTRA_BLOCKED = (
+    ipaddress.ip_network("100.64.0.0/10"),   # carrier-grade NAT
+    ipaddress.ip_network("fec0::/10"),       # deprecated v6 site-local
+)
+
 
 def is_public_ip(addr):
     """True when `addr` (a string or ip_address) is publicly routable.
@@ -20,16 +25,18 @@ def is_public_ip(addr):
     this side must never be more permissive, and it is allowed to be stricter, which
     is what StealthBrowserTest asserts.
 
-    fec0::/10 is checked explicitly: Java's isSiteLocalAddress() rejects the
-    deprecated IPv6 site-local range, and ipaddress classifies it as neither private
-    nor reserved, so mirroring "is_private" alone admitted an address the JVM blocks.
+    EXTRA_BLOCKED carries the ranges `ipaddress` does not classify for us: fec0::/10
+    is neither private nor reserved to it, though Java rejects it as site-local, and
+    100.64.0.0/10 is not private on every Python version while Java rejects it as
+    carrier-grade NAT reaching the ISP's own equipment.
     """
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
-    if ip.version == 6 and (int(ip) >> 118) == 0x3FB:
-        return False
+    for net in EXTRA_BLOCKED:
+        if ip.version == net.version and ip in net:
+            return False
     return not (ip.is_private or ip.is_loopback or ip.is_link_local
                 or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
 

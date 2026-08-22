@@ -1,4 +1,5 @@
 import org.junit.jupiter.api.AfterEach;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
@@ -128,10 +129,22 @@ class ScrapeLadderTest extends UnitTest {
         // The budget is claimed before the climb, so a caller must be able to ask whether
         // the climb would issue any request at all. Reasons no rung addresses used to
         // spend a slot and be counted in the "escalated N pages" line.
+        //
+        // The assume is load-bearing, not defensive: with no sidecar installed
+        // isInstalled() is false for every rung, so all three answers below are false
+        // whatever the classifier says, and the assertions measure nothing. This test
+        // used to pass on such a host while a POLICY_BLOCK -> BROWSER regression sailed
+        // through, so it now skips rather than pretending to have checked.
+        assumeTrue(ScrapeLadder.available(),
+                "no scrape sidecar installed — wouldAttempt cannot be distinguished here");
+
+        assertTrue(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT),
+                "a client-rendered page is exactly what the browser rung is for");
         assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.POLICY_BLOCK),
                 "a policy refusal reaches no installed rung");
         assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.NOT_FOUND),
                 "a dead link reaches no installed rung");
+
         disableEveryRung();
         assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.THIN_CONTENT),
                 "with no sidecar installed nothing is attempted");
@@ -141,8 +154,31 @@ class ScrapeLadderTest extends UnitTest {
     void anEscalatedFetchCarriesTheCallersLanguage() {
         // A crawl asked for "ja" and the escalated fetch silently reverted to en-US, so
         // the crawl mixed two languages with only a rung marker to explain why.
-        assertEquals("ja, *;q=0.5",
-                ScrapeLadder.impersonatedHeaders("ja").get("Accept-Language"));
+        //
+        // Asserted as a property rather than a literal: the guarantee is that the
+        // caller's language leads and that anything else stays acceptable, not the
+        // exact spacing. A bare "ja" invites a 406 from a site with no Japanese, and a
+        // language preference must never cost us the page.
+        var header = ScrapeLadder.impersonatedHeaders("ja").get("Accept-Language");
+        assertTrue(header.startsWith("ja"), header);
+        assertTrue(header.contains("*"), header);
+    }
+
+    @Test
+    void everyRungAboveTheFirstAcceptsALanguage() {
+        // The header test above passes even if nothing calls impersonatedHeaders with
+        // the crawl's language, and it says nothing at all about rung 3 — which took no
+        // headers when that test was written, so a "ja" crawl escalated to the browser
+        // silently returned English. These pin the plumbing rather than the value.
+        assertNotNull(assertDoesNotThrow(() -> ScrapeLadder.class
+                .getDeclaredMethod("attempt", ScrapeRung.class, String.class, String.class)),
+                "the ladder must carry a language into each rung it attempts");
+        assertNotNull(assertDoesNotThrow(() -> tools.scrape.RenderedFetcher.class
+                .getMethod("fetch", String.class, String.class)),
+                "rung 3 must accept a language, not just rung 2");
+        assertNotNull(assertDoesNotThrow(() -> ScrapeLadder.class
+                .getMethod("climb", String.class, ScrapeLadder.Attempt.class, String.class)),
+                "a caller with a language preference must be able to hand it to the climb");
     }
 
     @Test

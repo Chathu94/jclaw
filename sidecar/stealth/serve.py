@@ -17,7 +17,7 @@ Protocol (bound to 127.0.0.1 only):
   GET  /health   -> 200 {status, model, patchright, browser_ready}
   GET  /capability -> 200 {kind, runnable, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no browser
-  POST /render {url, pins?, timeoutMs?, settleMs?, waitUntil?}
+  POST /render {url, pins?, language?, timeoutMs?, settleMs?, waitUntil?}
         -> 200  rendered HTML; X-Upstream-Status / X-Upstream-Url /
                 X-Blocked-Hosts carry the outcome
         -> 400  {error}  malformed request
@@ -65,6 +65,9 @@ DEFAULT_TIMEOUT_MS = 35_000
 # settles for a fixed interval.
 DEFAULT_SETTLE_MS = 4_000
 DEFAULT_WAIT_UNTIL = "domcontentloaded"
+# Rungs 1 and 2 both state a language; a render that did not silently answered a
+# multilingual site in English while the same crawl asked for something else.
+DEFAULT_LANGUAGE = "en"
 DEFAULT_IDENTITY = "patchright-chromium"
 # Each permit is a live headless Chromium, so this bounds memory rather than
 # correctness. LocalSidecarDaemon passes a fixed argv and has no slot for this, so
@@ -242,11 +245,12 @@ class Handler(BaseHTTPRequestHandler):
         timeout_ms = int(req.get("timeoutMs") or DEFAULT_TIMEOUT_MS)
         settle_ms = int(req.get("settleMs") or DEFAULT_SETTLE_MS)
         wait_until = req.get("waitUntil") or DEFAULT_WAIT_UNTIL
+        language = req.get("language") or DEFAULT_LANGUAGE
 
         with self.state.render_slots:
             try:
                 html, status, final_url, blocked = self._render(
-                    url, pins, timeout_ms, settle_ms, wait_until)
+                    url, pins, timeout_ms, settle_ms, wait_until, language)
             except Exception as exc:
                 self._send_json(502, {"error": "%s: %s" % (type(exc).__name__, exc)})
                 return
@@ -301,7 +305,7 @@ class Handler(BaseHTTPRequestHandler):
                 }
             return _UA_OVERRIDE
 
-    def _render(self, url, pins, timeout_ms, settle_ms, wait_until):
+    def _render(self, url, pins, timeout_ms, settle_ms, wait_until, language):
         args = []
         if pins:
             clauses = ["MAP %s %s" % (h, ip) for h, ip in pins.items()]
@@ -367,7 +371,13 @@ class Handler(BaseHTTPRequestHandler):
                 # Routed on the CONTEXT, not the page: a popup the page opens is a
                 # separate Page with no page-level handler, and service workers issue
                 # requests the page handler never sees at all.
-                context = browser.new_context(service_workers="block")
+                # Carries the caller's language the way rungs 1 and 2 do. locale
+                # sets navigator.language too, so a page branching in JavaScript sees
+                # the same preference the header states.
+                context = browser.new_context(service_workers="block",
+                                              locale=language,
+                                              extra_http_headers={
+                                                  "Accept-Language": language + ", *;q=0.5"})
                 context.route("**/*", gate)
                 context.route_web_socket("**/*", ws_gate)
                 page = context.new_page()

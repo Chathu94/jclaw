@@ -55,6 +55,36 @@ class SsrfGuardTest extends UnitTest {
         assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("239.255.255.255")));
     }
 
+    @Test
+    void isUnsafeRejectsNat64EmbeddedLoopback() throws Exception {
+        // 64:ff9b::/96 is the RFC 6052 well-known prefix: the low 32 bits are an IPv4
+        // address, and a host with a NAT64 path translates the connection to it. So
+        // 64:ff9b::7f00:1 IS 127.0.0.1, and none of the JDK's predicates say so —
+        // isLoopbackAddress() answers false because the address itself is not ::1.
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("64:ff9b::7f00:1")),
+                "NAT64-embedded loopback must be refused");
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("64:ff9b::a9fe:a9fe")),
+                "NAT64-embedded link-local (cloud metadata) must be refused");
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("64:ff9b::c0a8:1")),
+                "NAT64-embedded RFC1918 must be refused");
+        // The embedded address decides it: a NAT64 mapping of a public address is a
+        // legitimate way to reach that public address.
+        assertFalse(SsrfGuard.isUnsafe(InetAddress.getByName("64:ff9b::808:808")),
+                "NAT64-embedded 8.8.8.8 is a public destination");
+    }
+
+    @Test
+    void isUnsafeRejectsNonRoutableIpv4Ranges() throws Exception {
+        // Not routable on the public internet, so a URL naming one is either a mistake
+        // or an attempt to probe the host's own stack. The JDK has no predicate for
+        // any of them.
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("240.0.0.1")), "240/4 reserved");
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("255.255.255.255")), "broadcast");
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("192.0.2.1")), "TEST-NET-1");
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("198.18.0.1")), "benchmark range");
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("100.64.0.1")), "CGNAT");
+    }
+
     // --- isUnsafe: routable public IPs ---
 
     @Test

@@ -106,7 +106,56 @@ public final class SsrfGuard {
                 || addr.isLinkLocalAddress()  // 169.254.0.0/16, fe80::/10
                 || addr.isSiteLocalAddress()  // 10/8, 172.16/12, 192.168/16, fec0::/10
                 || addr.isMulticastAddress() // 224/4
-                || isUniqueLocalIpv6(addr);   // fc00::/7 (not caught by JDK predicates)
+                || isUniqueLocalIpv6(addr)   // fc00::/7 (not caught by JDK predicates)
+                || isNonRoutableIpv4(addr)   // 240/4, 255.255.255.255, doc/bench/CGNAT
+                || isUnsafeNat64(addr);      // 64:ff9b::/96 wrapping a blocked v4
+    }
+
+    /**
+     * IPv4 ranges that are not routable on the public internet and that the JDK has no
+     * predicate for: {@code 240.0.0.0/4} (reserved), {@code 255.255.255.255}
+     * (broadcast), {@code 192.0.2.0/24}, {@code 198.51.100.0/24} and
+     * {@code 203.0.113.0/24} (documentation), {@code 198.18.0.0/15} (benchmarking) and
+     * {@code 100.64.0.0/10} (carrier-grade NAT, which reaches the ISP's own equipment).
+     */
+    private static boolean isNonRoutableIpv4(InetAddress addr) {
+        var b = addr.getAddress();
+        if (b.length != 4) return false;
+        int o1 = b[0] & 0xFF, o2 = b[1] & 0xFF, o3 = b[2] & 0xFF;
+        return o1 >= 240                                        // 240/4 incl. broadcast
+                || (o1 == 100 && o2 >= 64 && o2 <= 127)         // 100.64/10
+                || (o1 == 198 && (o2 == 18 || o2 == 19))        // 198.18/15
+                || (o1 == 192 && o2 == 0 && o3 == 2)            // 192.0.2/24
+                || (o1 == 198 && o2 == 51 && o3 == 100)         // 198.51.100/24
+                || (o1 == 203 && o2 == 0 && o3 == 113);         // 203.0.113/24
+    }
+
+    /**
+     * RFC 6052 NAT64: {@code 64:ff9b::/96} carries an IPv4 address in its low 32 bits,
+     * and a host with a NAT64 path translates the connection to it — so
+     * {@code 64:ff9b::7f00:1} reaches {@code 127.0.0.1} while every JDK predicate
+     * answers false, because the address itself is none of those things.
+     *
+     * <p>The embedded address decides: a NAT64 wrapper around a public destination is a
+     * legitimate way to reach it, so only a wrapped <em>blocked</em> address is refused.
+     */
+    private static boolean isUnsafeNat64(InetAddress addr) {
+        var b = addr.getAddress();
+        if (b.length != 16) return false;
+        // 0064:ff9b:0000:0000:0000:0000 — the /96 well-known prefix.
+        if ((b[0] & 0xFF) != 0x00 || (b[1] & 0xFF) != 0x64
+                || (b[2] & 0xFF) != 0xFF || (b[3] & 0xFF) != 0x9B) {
+            return false;
+        }
+        for (int i = 4; i < 12; i++) {
+            if (b[i] != 0) return false;
+        }
+        try {
+            return isUnsafe(InetAddress.getByAddress(
+                    new byte[] {b[12], b[13], b[14], b[15]}));
+        } catch (UnknownHostException e) {
+            return true; // a four-byte literal cannot fail to parse; refuse if it does
+        }
     }
 
     /**

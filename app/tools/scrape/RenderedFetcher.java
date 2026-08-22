@@ -60,8 +60,21 @@ public final class RenderedFetcher {
         return StealthSidecarManager.available();
     }
 
-    /** Render {@code url} and return it in the same shape the other rungs produce. */
+    /** Render {@code url} in the ladder's default language. */
     public static WebExtraction.FetchResult fetch(String url) throws IOException {
+        return fetch(url, ScrapeLadder.DEFAULT_LANGUAGE);
+    }
+
+    /**
+     * Render {@code url} and return it in the same shape the other rungs produce.
+     *
+     * <p>{@code language} reaches the browser context, so an escalated page comes back
+     * in the language the unescalated one would have. Without it a crawl asking for
+     * Japanese got Japanese from rung 1 and English from rung 3, with only a rung
+     * marker in the output to explain the difference.
+     */
+    public static WebExtraction.FetchResult fetch(String url, String language)
+            throws IOException {
         // Authoritative check stays in the JVM. hostResolverRule throws every
         // SecurityException assertUrlSafe does, so an unsafe entry URL never reaches
         // the browser.
@@ -70,6 +83,7 @@ public final class RenderedFetcher {
 
         var payload = new JsonObject();
         payload.addProperty("url", url);
+        payload.addProperty("language", language);
         var pins = new JsonObject();
         // "MAP <host> <ip>" — the sidecar rebuilds the flag, so the JVM never has to
         // know Chromium's argument syntax and the guard never has to emit it.
