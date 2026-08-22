@@ -6,11 +6,11 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import okhttp3.OkHttpClient;
 import services.AgentService;
-import utils.SsrfGuard;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
+import utils.SsrfGuard;
 import utils.WebExtraction;
 
 import javax.net.ssl.SSLException;
