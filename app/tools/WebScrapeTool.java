@@ -54,7 +54,24 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
 
     private static final String USER_AGENT = "Mozilla/5.0 (compatible; JClaw/1.0)";
-    private static final Map<String, String> HEADERS = Map.of("User-Agent", USER_AGENT);
+    /**
+     * Request headers for a crawl in {@code language}.
+     *
+     * <p>{@code Accept-Language} is the half of language preference that works on sites
+     * doing server-side negotiation — they hand us the right translation directly,
+     * before any of the hreflang machinery is involved. It complements rather than
+     * replaces that: hreflang suppression handles path-segmented sites, this handles
+     * negotiated ones, and neither covers a site that does neither.
+     *
+     * <p>The {@code *;q=0.5} tail is load-bearing. A bare {@code Accept-Language: en}
+     * invites a 406 or an empty body from a site that has no English at all, and a
+     * language preference must never cost us the page — same reasoning as keeping
+     * {@code text/html} acceptable while preferring markdown.
+     */
+    private static Map<String, String> headersFor(String language) {
+        return Map.of("User-Agent", USER_AGENT,
+                "Accept-Language", language + ", *;q=0.5");
+    }
 
     /** {@code jclaw} is the token a site would write in a {@code User-agent:} line;
      *  the header above is what goes on the wire. */
@@ -249,7 +266,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             return ScrapeObservation.failed(url, INTERRUPTED);
         }
         try {
-            var fetched = WebExtraction.fetch(url, CLIENT, HEADERS);
+            var fetched = WebExtraction.fetch(url, CLIENT, headersFor(languageDefault()));
             return ScrapeObservation.of(fetched, WebExtraction.toText(fetched));
         } catch (Exception e) {
             return ScrapeObservation.failed(url, reason(e));
@@ -292,7 +309,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 if (admitted.isEmpty()) {
                     break;
                 }
-                var fetched = fetchLevel(pool, admitted, respectRobots, state);
+                var fetched = fetchLevel(pool, admitted, respectRobots, language, state);
                 if (state.stoppedBecause != null || exhausted(deadline, state)
                         || depth >= maxDepth) {
                     break;
@@ -368,9 +385,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * not comparable.
      */
     private List<WebExtraction.FetchResult> fetchLevel(ExecutorService pool, List<URI> admitted,
-                                                       boolean respectRobots, CrawlState state) {
+                                                       boolean respectRobots, String language,
+                                                       CrawlState state) {
         var futures = admitted.stream()
-                .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots, state)))
+                .map(uri -> pool.submit(() -> fetchOne(uri, respectRobots, language, state)))
                 .toList();
         var fetched = new ArrayList<WebExtraction.FetchResult>();
         for (int i = 0; i < futures.size(); i++) {
@@ -534,7 +552,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
         try {
             var html = WebExtraction.fetch(seed.toString(), CLIENT,
-                    Map.of("User-Agent", IDENTITY.userAgentHeader(), "Accept", "text/html"));
+                    Map.of("User-Agent", IDENTITY.userAgentHeader(),
+                            "Accept", "text/html",
+                            "Accept-Language", language + ", *;q=0.5"));
             suppressLocaleVariants(html, language, state);
         } catch (Exception _) {
             // Best effort. A site that will not serve HTML simply keeps its translations
@@ -592,7 +612,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
     }
 
-    private Outcome fetchOne(URI uri, boolean respectRobots, CrawlState state) {
+    private Outcome fetchOne(URI uri, boolean respectRobots, String language, CrawlState state) {
         try {
             RobotsCache.awaitSlot(uri, respectRobots
                     ? RobotsCache.delayMillis(uri, CLIENT, IDENTITY)
@@ -603,7 +623,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         }
         Outcome plain;
         try {
-            var fetched = WebExtraction.fetch(uri.toString(), CLIENT, HEADERS);
+            var fetched = WebExtraction.fetch(uri.toString(), CLIENT, headersFor(language));
             var text = WebExtraction.toText(fetched);
             plain = classified(uri, fetched, ScrapeObservation.of(fetched, text));
         } catch (Exception e) {

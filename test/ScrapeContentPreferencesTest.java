@@ -121,6 +121,31 @@ class ScrapeContentPreferencesTest extends UnitTest {
         assertTrue(scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0}").contains("# Plain"));
     }
 
+    @Test
+    void theRequestStatesALanguagePreferenceWithoutDemandingIt() {
+        routes.put(HOST + "/", "<html><head><title>H</title></head><body><article><p>"
+                + "Body text long enough to clear the readability floor. ".repeat(12)
+                + "</p></article></body></html>");
+        scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0,\"language\":\"ja\"}");
+
+        var lang = routes.languageFor(HOST + "/");
+        assertNotNull(lang, "no Accept-Language header was sent");
+        assertTrue(lang.startsWith("ja"), "the requested language must lead: " + lang);
+        // A bare "Accept-Language: ja" invites a 406 or an empty body from a site with no
+        // Japanese. A language preference must never cost us the page.
+        assertTrue(lang.contains("*"), "a wildcard fallback must remain acceptable: " + lang);
+    }
+
+    @Test
+    void theLanguagePreferenceDefaultsToEnglish() {
+        routes.put(HOST + "/", "<html><head><title>H</title></head><body><article><p>"
+                + "Body text long enough to clear the readability floor. ".repeat(12)
+                + "</p></article></body></html>");
+        scrape("{\"url\":\"" + HOST + "/\",\"maxDepth\":0}");
+        assertTrue(routes.languageFor(HOST + "/").startsWith("en"),
+                "English by default: " + routes.languageFor(HOST + "/"));
+    }
+
     // ==================== JCLAW-1100: locale variants ====================
 
     private static String withAlternates(String title, String... langToPath) {
@@ -178,6 +203,7 @@ class ScrapeContentPreferencesTest extends UnitTest {
         private final Map<String, String> bodies = new HashMap<>();
         private final Map<String, String> types = new HashMap<>();
         private final Map<String, String> accepts = new HashMap<>();
+        private final Map<String, String> languages = new HashMap<>();
         final List<String> hits = new ArrayList<>();
 
         void put(String url, String b) { put(url, b, "text/html; charset=utf-8"); }
@@ -189,11 +215,14 @@ class ScrapeContentPreferencesTest extends UnitTest {
 
         String acceptFor(String url) { return accepts.get(url); }
 
+        String languageFor(String url) { return languages.get(url); }
+
         @Override
         public Response intercept(Chain chain) throws IOException {
             var url = chain.request().url().toString();
             hits.add(url);
             accepts.put(url, chain.request().header("Accept"));
+            languages.put(url, chain.request().header("Accept-Language"));
             var b = bodies.get(url);
             if (b == null) throw new IOException("no route for " + url);
             var type = types.get(url);
