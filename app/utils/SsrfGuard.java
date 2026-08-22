@@ -121,7 +121,9 @@ public final class SsrfGuard {
     private static boolean isNonRoutableIpv4(InetAddress addr) {
         var b = addr.getAddress();
         if (b.length != 4) return false;
-        int o1 = b[0] & 0xFF, o2 = b[1] & 0xFF, o3 = b[2] & 0xFF;
+        int o1 = b[0] & 0xFF;
+        int o2 = b[1] & 0xFF;
+        int o3 = b[2] & 0xFF;
         return o1 >= 240                                        // 240/4 incl. broadcast
                 || (o1 == 100 && o2 >= 64 && o2 <= 127)         // 100.64/10
                 || (o1 == 198 && (o2 == 18 || o2 == 19))        // 198.18/15
@@ -153,7 +155,7 @@ public final class SsrfGuard {
         try {
             return isUnsafe(InetAddress.getByAddress(
                     new byte[] {b[12], b[13], b[14], b[15]}));
-        } catch (UnknownHostException e) {
+        } catch (UnknownHostException _) {
             return true; // a four-byte literal cannot fail to parse; refuse if it does
         }
     }

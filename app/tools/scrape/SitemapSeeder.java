@@ -113,6 +113,11 @@ public final class SitemapSeeder {
                             // content-negotiating origin would rank that above the XML.
                             "Accept", "application/xml, text/xml;q=0.9"));
             parsed = parser.parseSiteMap(fetched.body(), URI.create(fetched.finalUrl()).toURL());
+        } catch (InterruptedException _) {
+            // Restored and propagated rather than folded into the catch below: swallowing
+            // it leaves the crawl being torn down still walking sitemap children.
+            Thread.currentThread().interrupt();
+            return documentsLeft;
         } catch (Exception _) {
             return 1;   // the request was still spent
         }

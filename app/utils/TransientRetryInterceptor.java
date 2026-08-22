@@ -95,27 +95,35 @@ public final class TransientRetryInterceptor implements Interceptor {
 
     /** {@code Retry-After} when the origin sends a usable one, else exponential. */
     private static Duration backoff(int attempt, Response response) {
-        if (response != null) {
-            var header = response.header("Retry-After");
-            if (header != null && !header.isBlank()) {
-                try {
-                    var seconds = Long.parseLong(header.strip());
-                    if (seconds >= 0) {
-                        // Floored, not honoured literally: "Retry-After: 0" asks for an
-                        // immediate retry against a limiter that has just refused us,
-                        // which is the outcome the scoping rationale above rules out.
-                        var asked = Duration.ofSeconds(seconds).compareTo(BASE_BACKOFF) < 0
-                                ? BASE_BACKOFF : Duration.ofSeconds(seconds);
-                        return asked.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : asked;
-                    }
-                } catch (NumberFormatException _) {
-                    // An HTTP-date form is legal and rare; fall through to exponential
-                    // rather than parse a second grammar for a value we cap anyway.
-                }
-            }
+        var asked = retryAfter(response);
+        return capped(asked != null ? asked : BASE_BACKOFF.multipliedBy(1L << (attempt - 1)));
+    }
+
+    /**
+     * The origin's own {@code Retry-After} in seconds, floored at {@link #BASE_BACKOFF},
+     * or null when it sent none this code can use.
+     *
+     * <p>Floored, not honoured literally: "Retry-After: 0" asks for an immediate retry
+     * against a limiter that has just refused us, which the scoping rationale above rules
+     * out. An HTTP-date form is legal and rare, and falls through to the exponential
+     * rather than earning a second grammar for a value that gets capped anyway.
+     */
+    private static Duration retryAfter(Response response) {
+        if (response == null) return null;
+        var header = response.header("Retry-After");
+        if (header == null || header.isBlank()) return null;
+        try {
+            var seconds = Long.parseLong(header.strip());
+            if (seconds < 0) return null;
+            var asked = Duration.ofSeconds(seconds);
+            return asked.compareTo(BASE_BACKOFF) < 0 ? BASE_BACKOFF : asked;
+        } catch (NumberFormatException _) {
+            return null;
         }
-        var exponential = BASE_BACKOFF.multipliedBy(1L << (attempt - 1));
-        return exponential.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : exponential;
+    }
+
+    private static Duration capped(Duration wait) {
+        return wait.compareTo(MAX_BACKOFF) > 0 ? MAX_BACKOFF : wait;
     }
 
     /**

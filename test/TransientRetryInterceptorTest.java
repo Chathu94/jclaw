@@ -73,7 +73,7 @@ class TransientRetryInterceptorTest extends UnitTest {
     }
 
     @Test
-    void aGuardRefusalIsSurfacedWithoutRetrying() throws IOException {
+    void aGuardRefusalIsSurfacedWithoutRetrying() {
         // SsrfGuard signals a blocked address by throwing UnknownHostException, which is
         // an IOException and so was indistinguishable from a transient connect failure:
         // the guard's own refusal was re-issued three times with 1.5s of sleep behind
@@ -84,7 +84,7 @@ class TransientRetryInterceptorTest extends UnitTest {
     }
 
     @Test
-    void aTlsFailureIsSurfacedWithoutRetrying() throws IOException {
+    void aTlsFailureIsSurfacedWithoutRetrying() {
         // A handshake the peer refused is a decision about that peer, not a blip.
         canned.add(new javax.net.ssl.SSLHandshakeException("cert rejected"));
         assertThrows(javax.net.ssl.SSLException.class, this::get);

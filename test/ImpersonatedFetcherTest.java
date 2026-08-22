@@ -47,8 +47,11 @@ class ImpersonatedFetcherTest extends UnitTest {
         for (var url : List.of("http://127.0.0.1:9/secret",
                                "http://169.254.169.254/latest/meta-data/",
                                "http://[::1]:9/")) {
+            // Parsed outside the lambda so the assertion can only pass on the guard's
+            // refusal, never on a URI that failed to parse.
+            var uri = URI.create(url);
             assertThrows(SecurityException.class,
-                    () -> transport.exchange(URI.create(url), H),
+                    () -> transport.exchange(uri, H),
                     "expected an SsrfGuard refusal for " + url);
         }
     }
