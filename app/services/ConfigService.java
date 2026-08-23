@@ -30,6 +30,9 @@ public class ConfigService {
 
     private ConfigService() {}
 
+    /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
+    private static final String PROVIDER_KEY_PREFIX = "provider.";
+
     // The cache stores Optional<String> rather than String so we can distinguish
     // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
     // (cache miss, triggers a DB lookup). The previous hand-rolled cache
@@ -221,10 +224,10 @@ public class ConfigService {
         // JCLAW-1102: this classification is what lets memory text reach a host, so a typo
         // must not read as "remote". Boolean.parseBoolean maps anything unrecognised to
         // false, which would leave embeddings refusing a provider the operator declared local.
-        if (key.startsWith("provider.") && key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
+        if (key.startsWith(PROVIDER_KEY_PREFIX) && key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
                 && value != null && !value.isBlank()
                 && !"true".equalsIgnoreCase(value.trim()) && !"false".equalsIgnoreCase(value.trim())) {
-            return "provider.*" + ProviderLocality.DECLARED_LOCAL_SUFFIX + " must be 'true' or 'false'.";
+            return PROVIDER_KEY_PREFIX + "*" + ProviderLocality.DECLARED_LOCAL_SUFFIX + " must be 'true' or 'false'.";
         }
 
         // JCLAW-939: embedding a memory ships its full text to the provider, so the vector
@@ -266,7 +269,7 @@ public class ConfigService {
             TtsSidecarManager.prewarmModelAsync();
         }
 
-        if (key.startsWith("provider.")) {
+        if (key.startsWith(PROVIDER_KEY_PREFIX)) {
             AgentService.syncEnabledStates();
         }
         // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
@@ -376,7 +379,7 @@ public class ConfigService {
      */
     public static void deleteWithSideEffects(String key) {
         delete(key);
-        if (key.startsWith("provider.")) {
+        if (key.startsWith(PROVIDER_KEY_PREFIX)) {
             AgentService.syncEnabledStates();
         }
         // JCLAW-930: see setWithSideEffects — clearing a vector key changes the
