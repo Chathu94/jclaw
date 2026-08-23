@@ -306,20 +306,6 @@ public final class TaskExecutionHandler {
     }
 
     /**
-     * Shared stop-already-done body for the recurring completion handlers.
-     * Both INTERVAL and CRON callers have already invoked
-     * {@link #stopCurrentRow} on the current row; this computes
-     * the next-fire instant via {@code nextFire}, null-checks the wired
-     * {@link #schedulerClient}, schedules the next row under the same
-     * {@code task_instance}, and emits the symmetric INFO/ERROR logging.
-     * {@code kind} names the recurrence type in the log lines and
-     * {@code detailSuffix} appends a type-specific tail (e.g. the interval
-     * cadence) to the success message. A {@code null} next-fire (malformed
-     * CRON expression) is logged and the self-reschedule is paused — the
-     * current row is already dropped, so the Task picks back up on the next
-     * {@code BootConsistencyCheck} sweep.
-     */
-    /**
      * Drop the {@code scheduled_tasks} row this fire was picked from, so
      * {@link #rescheduleNext} can insert the next one under the same
      * {@code task_instance} without tripping the unique constraint.
@@ -341,6 +327,20 @@ public final class TaskExecutionHandler {
         }
     }
 
+    /**
+     * Shared stop-already-done body for the recurring completion handlers.
+     * Both INTERVAL and CRON callers have already invoked
+     * {@link #stopCurrentRow} on the current row; this computes
+     * the next-fire instant via {@code nextFire}, null-checks the wired
+     * {@link #schedulerClient}, schedules the next row under the same
+     * {@code task_instance}, and emits the symmetric INFO/ERROR logging.
+     * {@code kind} names the recurrence type in the log lines and
+     * {@code detailSuffix} appends a type-specific tail (e.g. the interval
+     * cadence) to the success message. A {@code null} next-fire (malformed
+     * CRON expression) is logged and the self-reschedule is paused — the
+     * current row is already dropped, so the Task picks back up on the next
+     * {@code BootConsistencyCheck} sweep.
+     */
     private static void rescheduleNext(Task task, Supplier<Instant> nextFire,
                                        String kind, String detailSuffix) {
         try {
