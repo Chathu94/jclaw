@@ -8,6 +8,7 @@ import play.jobs.Job;
 import services.EventLogger;
 import services.LostTaskDetector;
 import services.TaskExecutionHandler;
+import services.TaskRunRegistry;
 import services.TaskSchedulingService;
 import services.Tx;
 
@@ -15,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Set;
 
 /**
  * JCLAW-21: at JVM start, register existing non-terminal
@@ -46,7 +48,9 @@ import java.util.HashSet;
  *   {@code scheduled_tasks.last_heartbeat} is older than 60 s is
  *   reconciled to {@link Task.Status#LOST} immediately on restart,
  *   rather than the operator seeing a stale RUNNING pill for up
- *   to the next periodic detector tick.</li>
+ *   to the next periodic detector tick. Both of those need the row:
+ *   JCLAW-1103 added {@link #reconcileStrandedRunning} for a RUNNING
+ *   Task that has lost it, which neither can see.</li>
  *
  *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELLED)
  *   — they shouldn't have rows in {@code scheduled_tasks} and we
@@ -195,6 +199,53 @@ public class BootConsistencyCheck extends Job<Void> {
     }
 
     /**
+     * Return Tasks stuck in {@link Task.Status#RUNNING} with no
+     * {@code scheduled_tasks} row to their alive state, so the caller's re-arm
+     * pass registers a fresh row for them.
+     *
+     * <p>No other sweep can see this state: {@link LostTaskDetector} reads
+     * staleness <em>off</em> the row, so a missing row reads as healthy, and the
+     * re-arm scan below walks only PENDING and ACTIVE.
+     *
+     * <p>All three guards are load-bearing — RUNNING-with-no-row is also the
+     * momentary state of a healthy fire between its completion handler's stop and
+     * re-schedule: no row in {@code alreadyScheduled}, no fire claimed in
+     * {@link TaskRunRegistry} (an in-flight fire on this node), and no write since
+     * {@code staleBefore}.
+     *
+     * @param alreadyScheduled {@code task_instance} ids currently holding a
+     *                         {@code scheduled_tasks} row
+     * @param staleBefore      cutoff; only Tasks untouched since this are
+     *                         reconciled. Production passes {@code now -
+     *                         STALE_THRESHOLD}; tests pass an explicit instant so
+     *                         the assertion doesn't ride on wall-clock drift.
+     * @return number of Tasks returned to an alive state
+     */
+    public static int reconcileStrandedRunning(Set<String> alreadyScheduled, Instant staleBefore) {
+        return Tx.run(() -> {
+            int count = 0;
+            for (var task : Task.findByStatus(Task.Status.RUNNING)) {
+                if (alreadyScheduled.contains(task.id.toString())
+                        || TaskRunRegistry.isTaskActive(task.id)
+                        || task.updatedAt == null
+                        || task.updatedAt.isAfter(staleBefore)) {
+                    continue;
+                }
+                long strandedSeconds = Duration.between(task.updatedAt, Instant.now()).toSeconds();
+                task.transitionTo(Task.initialStatusFor(task.type));
+                task.save();
+                EventLogger.warn("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        ("BootConsistencyCheck: Task '%s' (id=%d) stranded in RUNNING with no schedule "
+                                + "row for %ds; returned to %s for re-arm")
+                                .formatted(task.name, task.id, strandedSeconds, task.status));
+                count++;
+            }
+            return count;
+        });
+    }
+
+    /**
      * Re-arm orphaned non-terminal Tasks: register a fresh
      * {@code scheduled_tasks} row for any PENDING or ACTIVE Task that has
      * lost one. Split out of {@link #sweep} (JCLAW-22) so the periodic
@@ -215,6 +266,11 @@ public class BootConsistencyCheck extends Job<Void> {
         for (var row : scheduler.getScheduledExecutionsForTask(TaskExecutionHandler.TASK_NAME)) {
             alreadyScheduled.add(row.getTaskInstance().getId());
         }
+
+        // JCLAW-1103: reconcile stranded RUNNING Tasks before the alive scan below,
+        // so this same pass re-registers whatever it returns to an alive state.
+        reconcileStrandedRunning(alreadyScheduled,
+                Instant.now().minus(LostTaskDetector.STALE_THRESHOLD));
 
         // Scan both PENDING (one-shot waiting) and ACTIVE (recurring
         // ongoing). Both need their scheduled_tasks rows reconstructed

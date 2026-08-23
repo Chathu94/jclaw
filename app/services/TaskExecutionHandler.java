@@ -2,6 +2,7 @@ package services;
 
 import com.github.kagkarlsson.scheduler.SchedulerClient;
 import com.github.kagkarlsson.scheduler.task.CompletionHandler;
+import com.github.kagkarlsson.scheduler.task.ExecutionOperations;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.helper.CustomTask;
 import com.github.kagkarlsson.scheduler.task.helper.Tasks;
@@ -141,18 +142,19 @@ public final class TaskExecutionHandler {
             // dead (heartbeat stalled after a restart) and re-fires the row
             // while the original may still be running on this JVM. Without this
             // gate every revive opens a fresh concurrent fire, piling up zombie
-            // agent loops and tripping the "removed 0" stop() error when a stale
-            // fire finally completes. Claim the Task id atomically; if a live
-            // fire already holds it here, drop this redundant revive via
-            // defaultCompletion (remove this row only) — the in-flight fire owns
-            // the reschedule. A RUNNING row orphaned by a crashed prior JVM is
-            // not claimed here, so it is still re-fired normally on recovery.
+            // agent loops. Claim the Task id atomically; if a live fire already
+            // holds it here, skip the body but still re-arm the schedule. A
+            // RUNNING row orphaned by a crashed prior JVM is not claimed here,
+            // so it is still re-fired normally on recovery.
             if (!TaskRunRegistry.tryClaimTask(jclawTaskId)) {
                 EventLogger.warn("task",
                         jclawTask.agent != null ? jclawTask.agent.name : null, null,
                         "TaskExecutionHandler: Task id %d already has a live fire on this node; dropping duplicate revive"
                                 .formatted(jclawTaskId));
-                return defaultCompletion();
+                // JCLAW-1103: NOT defaultCompletion. A Task holds at most one
+                // scheduled_tasks row, so removing "this" row removes the one the
+                // still-live fire is running on, stranding the Task with no schedule.
+                return scheduleNextIfRecurring(jclawTask);
             }
             try {
                 // Drive the fire. Any RuntimeException propagates to
@@ -297,7 +299,7 @@ public final class TaskExecutionHandler {
      */
     private static CompletionHandler<Void> scheduleIntervalNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
-            executionOperations.stop();
+            stopCurrentRow(task, executionOperations);
             rescheduleNext(task, () -> Instant.now().plusSeconds(task.intervalSeconds),
                     "INTERVAL", " (every %ds)".formatted(task.intervalSeconds));
         };
@@ -306,7 +308,7 @@ public final class TaskExecutionHandler {
     /**
      * Shared stop-already-done body for the recurring completion handlers.
      * Both INTERVAL and CRON callers have already invoked
-     * {@code executionOperations.stop()} on the current row; this computes
+     * {@link #stopCurrentRow} on the current row; this computes
      * the next-fire instant via {@code nextFire}, null-checks the wired
      * {@link #schedulerClient}, schedules the next row under the same
      * {@code task_instance}, and emits the symmetric INFO/ERROR logging.
@@ -317,6 +319,28 @@ public final class TaskExecutionHandler {
      * current row is already dropped, so the Task picks back up on the next
      * {@code BootConsistencyCheck} sweep.
      */
+    /**
+     * Drop the {@code scheduled_tasks} row this fire was picked from, so
+     * {@link #rescheduleNext} can insert the next one under the same
+     * {@code task_instance} without tripping the unique constraint.
+     *
+     * <p>{@code stop()} deletes by {@code (id, version)} and throws when that
+     * matches no row — which a concurrent JCLAW-803 revive causes by bumping the
+     * version. Letting it escape skips the reschedule that follows and ends the
+     * recurrence silently (JCLAW-1103), so fall back to the identity-keyed delete.
+     */
+    private static void stopCurrentRow(Task task, ExecutionOperations<Void> executionOperations) {
+        try {
+            executionOperations.stop();
+        } catch (RuntimeException e) {
+            EventLogger.warn("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Task '%s' schedule row was re-picked mid-fire; removing it by identity instead: %s"
+                            .formatted(task.name, e.getMessage()));
+            TaskSchedulingService.forceRemoveStaleRow(task.id);
+        }
+    }
+
     private static void rescheduleNext(Task task, Supplier<Instant> nextFire,
                                        String kind, String detailSuffix) {
         try {
@@ -352,7 +376,7 @@ public final class TaskExecutionHandler {
 
     /**
      * Two-step CRON re-schedule: drop the current row via
-     * {@code executionOperations.stop()}, then insert the next-fire
+     * {@link #stopCurrentRow}, then insert the next-fire
      * row with the same task_instance id via
      * {@link SchedulerClient#schedule}. The stop-then-schedule order
      * is load-bearing for the unique-constraint reasons documented at
@@ -366,7 +390,7 @@ public final class TaskExecutionHandler {
      */
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
-            executionOperations.stop();
+            stopCurrentRow(task, executionOperations);
             rescheduleNext(task, () -> {
                 // JCLAW-261: same zone resolution as the first-fire computation
                 // in TaskSchedulingService so the next fire matches the user's

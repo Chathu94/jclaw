@@ -267,6 +267,74 @@ class TaskExecutionHandlerTest extends UnitTest {
                 "next INTERVAL fire must be in the future relative to the completion");
     }
 
+    // === JCLAW-1103: duplicate revive / stop() failure must not strand the schedule ===
+
+    @Test
+    void droppedDuplicateReviveReArmsScheduleInsteadOfRemovingRow() throws Exception {
+        var agent = createAgent("dup-revive-agent");
+        var task = persistTask(agent, "DupRevive", "Tick.",
+                Task.Type.INTERVAL, null, null, 1800L);
+
+        commitAndReopen();
+
+        // Stand in for a fire already live on this node, so the dedup guard trips.
+        assertTrue(services.TaskRunRegistry.tryClaimTask(task.id),
+                "test must own the claim it is simulating");
+        CompletionHandler<Void> handler;
+        try {
+            handler = driveFireCaptureHandler(task.id);
+        } finally {
+            services.TaskRunRegistry.releaseTask(task.id);
+        }
+        JPA.em().clear();
+
+        assertFalse(handler instanceof CompletionHandler.OnCompleteRemove,
+                "a dropped revive must not return OnCompleteRemove — a Task holds at most one "
+                        + "scheduled_tasks row, so removing it strands the live fire");
+
+        var ops = new RecordingExecutionOperations(
+                new Execution(Instant.now(), instance(task.id)));
+        handler.complete(ExecutionComplete.success(
+                ops.execution(), Instant.now().minusSeconds(1), Instant.now()), ops);
+
+        assertEquals(1, stub.schedules.size(),
+                "dropped revive must re-arm the next INTERVAL fire");
+        assertEquals(task.id.toString(), stub.schedules.getFirst().instance.getId());
+
+        assertEquals(0L, TaskRun.count("task.id = ?1", task.id),
+                "the duplicate revive must not open a second run");
+    }
+
+    @Test
+    void recurringCompletionReSchedulesEvenWhenStopThrows() throws Exception {
+        startLlmServer(simpleResponse("ok"));
+        configureProvider();
+
+        var agent = createAgent("stop-throws-agent");
+        var task = persistTask(agent, "StopThrows", "Tick.",
+                Task.Type.INTERVAL, null, null, 1800L);
+
+        commitAndReopen();
+
+        var handler = driveFireCaptureHandler(task.id);
+        JPA.em().clear();
+
+        // db-scheduler's stop() deletes by (id, version) and throws when that
+        // matches nothing — what a concurrent revive causes by bumping the version.
+        var ops = new ThrowingStopExecutionOperations(
+                new Execution(Instant.now(), instance(task.id)));
+        try {
+            handler.complete(ExecutionComplete.success(
+                    ops.execution(), Instant.now().minusSeconds(1), Instant.now()), ops);
+        } catch (RuntimeException ex) {
+            fail("completion handler must absorb a failing stop(); threw " + ex);
+        }
+
+        assertEquals(1, stub.schedules.size(),
+                "a failing stop() must not skip the re-schedule — that silently ends the recurrence");
+        assertEquals(task.id.toString(), stub.schedules.getFirst().instance.getId());
+    }
+
     // === Missing-Task / undecodable id: log + exit cleanly ===
 
     @Test
@@ -754,6 +822,19 @@ class TaskExecutionHandlerTest extends UnitTest {
         @Override public void remove() { stopped = true; }
         @Override public void reschedule(ExecutionComplete c, Instant n) { /* no-op: this test doesn't exercise reschedule paths */ }
         @Override public void removeAndScheduleNew(SchedulableInstance<?> i) { /* no-op: this test doesn't exercise reschedule paths */ }
+    }
+
+    /**
+     * {@link RecordingExecutionOperations} whose {@code stop()} fails the way
+     * db-scheduler's does when the row was re-picked or already removed.
+     */
+    private static class ThrowingStopExecutionOperations extends RecordingExecutionOperations {
+        ThrowingStopExecutionOperations(Execution execution) { super(execution); }
+
+        @Override public void stop() {
+            throw new com.github.kagkarlsson.scheduler.exceptions.ExecutionException(
+                    "Expected one execution to be removed, but removed 0.", execution());
+        }
     }
 
     /**

@@ -4,15 +4,19 @@ import com.github.kagkarlsson.scheduler.task.Execution;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import jobs.BootConsistencyCheck;
 import models.Agent;
+import models.EventLog;
 import models.Task;
 import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.DB;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.EventLogger;
 import services.TaskExecutionHandler;
+import services.TaskRunRegistry;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -20,6 +24,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Functional test for {@link BootConsistencyCheck#sweep}. Drives
@@ -315,6 +320,117 @@ class BootConsistencyCheckTest extends UnitTest {
                 ps.executeUpdate();
             }
         }
+    }
+
+    // === JCLAW-1103: RUNNING with no scheduled_tasks row ===
+
+    @Test
+    void strandedRunningTaskIsReturnedToAliveStateAndLogged() {
+        var task = persistRecurringTask("jclaw1103-stranded", Task.Status.RUNNING);
+
+        int reconciled = BootConsistencyCheck.reconcileStrandedRunning(
+                Set.of(), Instant.now().plusSeconds(60));
+
+        assertEquals(1, reconciled);
+        var reloaded = (Task) Task.findById(task.id);
+        assertEquals(Task.Status.ACTIVE, reloaded.status,
+                "a recurring Task stranded in RUNNING must return to ACTIVE so the re-arm registers it");
+
+        EventLogger.flush();
+        assertEquals(1L, EventLog.count("message LIKE ?1", "%jclaw1103-stranded%"),
+                "reconciliation must name the Task in an operator-visible event");
+    }
+
+    @Test
+    void strandedRunningOneShotReturnsToPending() {
+        var task = persistTask("jclaw1103-oneshot", Task.Status.RUNNING);
+
+        BootConsistencyCheck.reconcileStrandedRunning(Set.of(), Instant.now().plusSeconds(60));
+
+        assertEquals(Task.Status.PENDING, ((Task) Task.findById(task.id)).status,
+                "a one-shot returns to PENDING, not ACTIVE");
+    }
+
+    @Test
+    void runningTaskHoldingAScheduledRowIsLeftAlone() {
+        var task = persistRecurringTask("jclaw1103-has-row", Task.Status.RUNNING);
+
+        int reconciled = BootConsistencyCheck.reconcileStrandedRunning(
+                Set.of(task.id.toString()), Instant.now().plusSeconds(60));
+
+        assertEquals(0, reconciled);
+        assertEquals(Task.Status.RUNNING, ((Task) Task.findById(task.id)).status,
+                "a RUNNING Task that still holds its row is db-scheduler's to recover, not ours");
+    }
+
+    @Test
+    void runningTaskWithALiveFireClaimedOnThisNodeIsLeftAlone() {
+        var task = persistRecurringTask("jclaw1103-live-fire", Task.Status.RUNNING);
+
+        assertTrue(TaskRunRegistry.tryClaimTask(task.id));
+        int reconciled;
+        try {
+            reconciled = BootConsistencyCheck.reconcileStrandedRunning(
+                    Set.of(), Instant.now().plusSeconds(60));
+        } finally {
+            TaskRunRegistry.releaseTask(task.id);
+        }
+
+        assertEquals(0, reconciled);
+        assertEquals(Task.Status.RUNNING, ((Task) Task.findById(task.id)).status,
+                "an in-flight fire must never be reconciled out from under itself");
+    }
+
+    @Test
+    void freshlyStartedRunningTaskIsLeftAlone() {
+        var task = persistRecurringTask("jclaw1103-fresh", Task.Status.RUNNING);
+
+        // Cutoff in the past: the Task was written after it, so it is not yet stale.
+        int reconciled = BootConsistencyCheck.reconcileStrandedRunning(
+                Set.of(), Instant.now().minusSeconds(60));
+
+        assertEquals(0, reconciled);
+        assertEquals(Task.Status.RUNNING, ((Task) Task.findById(task.id)).status,
+                "the stop-then-schedule window of a healthy fire must survive the sweep");
+    }
+
+    @Test
+    void sweepReArmsAStrandedRunningTaskEndToEnd() {
+        var task = persistRecurringTask("jclaw1103-end-to-end", Task.Status.RUNNING);
+        ageUpdatedAt(task.id, Instant.now().minusSeconds(600));
+
+        BootConsistencyCheck.reArmOrphans(stub.proxy());
+
+        assertEquals(Task.Status.ACTIVE, ((Task) Task.findById(task.id)).status);
+        assertTrue(stub.schedules.stream()
+                        .anyMatch(c -> task.id.toString().equals(c.instance.getId())),
+                "the same sweep that reconciles the Task must also register its new row");
+    }
+
+    /**
+     * Backdate {@code updatedAt} so the Task reads as stale. A JPQL bulk update
+     * rather than a field write + save(): bulk updates skip {@code @PreUpdate},
+     * which would otherwise stamp the value straight back to now.
+     */
+    private void ageUpdatedAt(Long taskId, Instant when) {
+        JPA.em().createQuery("UPDATE Task SET updatedAt = :when WHERE id = :id")
+                .setParameter("when", when)
+                .setParameter("id", taskId)
+                .executeUpdate();
+        JPA.em().clear();
+    }
+
+    private Task persistRecurringTask(String name, Task.Status status) {
+        var t = new Task();
+        t.agent = agent;
+        t.name = name;
+        t.description = "Test task";
+        t.type = Task.Type.INTERVAL;
+        t.intervalSeconds = 1800L;
+        t.status = status;
+        t.nextRunAt = Instant.now();
+        t.save();
+        return t;
     }
 
     private Task persistTask(String name, Task.Status status) {
