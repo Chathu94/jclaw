@@ -2783,13 +2783,17 @@ do_start_prod() {
         "-XX:+UseZGC"
         "-XX:SoftMaxHeapSize=${softmax}"
         "-XX:+HeapDumpOnOutOfMemoryError"
-        "-XX:HeapDumpPath=$SCRIPT_DIR/logs/heap-oom.hprof"
+        # Both file paths below are relative: do_start_prod cd's to $SCRIPT_DIR, so the JVM
+        # inherits it. Absolute breaks Windows, where the bundle runs under Git Bash against a
+        # native java.exe: /c/Users/... is unresolvable, and -Xlog splits its spec on ':', so a
+        # translated C:/... path fails the parser instead of fixing it.
+        "-XX:HeapDumpPath=logs/heap-oom.hprof"
         "-XX:+ExitOnOutOfMemoryError"
         "-XX:MaxDirectMemorySize=256m"
         "-Dio.netty.leakDetection.level=DISABLED"
         "-Dnetworkaddress.cache.ttl=30"
         "-Dnetworkaddress.cache.negative.ttl=0"
-        "-Xlog:gc*:file=$SCRIPT_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
+        "-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
     # User-supplied extras go last so last-wins semantics let them override
