@@ -348,6 +348,33 @@ if ($gitBash -or $useWsl) {
     try { Install-Completion $AppDir } catch { Warn "shell completion setup skipped: $($_.Exception.Message)" }
 }
 
+# Put `jclaw` on PATH for PowerShell and cmd.exe. jclaw.sh's write_shim drops the
+# jclaw.cmd there — the shim itself stays single-sourced in the bundle so
+# `upgrade` refreshes it. This adds the one piece bash cannot: a persistent
+# Windows PATH entry, which only the registry (User scope) provides.
+#
+# Idempotent by exact segment match, so re-running never stacks duplicates.
+function Add-ToUserPath($dir) {
+    $cur = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $parts = @($cur -split ';' | Where-Object { $_ -ne '' })
+    if ($parts -contains $dir) { Substep "$dir already on your PATH"; return $false }
+    [Environment]::SetEnvironmentVariable('Path', (($parts + $dir) -join ';'), 'User')
+    # Current process too, so anything later in this script can find it.
+    $env:Path = "$env:Path;$dir"
+    Substep "added $dir to your PATH"
+    return $true
+}
+
+$BinDir      = Join-Path $env:USERPROFILE '.local\bin'
+$pathChanged = $false
+if ($gitBash -or $useWsl) {
+    Step 'Putting jclaw on PATH'
+    try {
+        New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
+        $pathChanged = Add-ToUserPath $BinDir
+    } catch { Warn "PATH setup skipped: $($_.Exception.Message)" }
+}
+
 $started = $false
 if (-not $NoStart -and ($gitBash -or $useWsl)) {
     Step 'Starting JClaw'
@@ -367,6 +394,12 @@ if ($started) {
     Write-Host '  Open       ' -NoNewline; Write-Host "http://localhost:$Port" -ForegroundColor Cyan
 }
 Write-Host "  Installed  $AppDir" -ForegroundColor DarkGray
+Write-Host '  Command    ' -NoNewline; Write-Host 'jclaw start | stop | status' -ForegroundColor Cyan
+if ($pathChanged) {
+    # A User PATH change reaches new processes only. Without saying so, the very
+    # first `jclaw` looks exactly like the "not recognized" bug this replaces.
+    Write-Host '             open a NEW terminal first — this one predates the PATH change' -ForegroundColor Yellow
+}
 Write-Host '  Uninstall  ' -NoNewline; Write-Host './jclaw.sh uninstall' -ForegroundColor Cyan -NoNewline
 Write-Host "  (run via your shell; removes $JclawHome, undoes completion)" -ForegroundColor DarkGray
 if (-not $started) {
