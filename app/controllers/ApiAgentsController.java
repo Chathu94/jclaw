@@ -120,7 +120,7 @@ public class ApiAgentsController extends Controller {
 
     @SuppressWarnings("java:S2259")
     private static Agent requireAgent(Long id) {
-        var agent = AgentService.findById(id);
+        var agent = AgentService.findReadableById(id);
         if (agent == null || isReservedName(agent.name)) {
             notFound();
             throw ApiResponses.unreachable();
@@ -142,6 +142,8 @@ public class ApiAgentsController extends Controller {
                              String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
                              String createdAt, String updatedAt, boolean providerConfigured,
+                             Long tenantId, String tenantSlug, Long teamId, String teamSlug,
+                             Long ownerUserId, String ownerUsername,
                              boolean compressionEnabled,
                              boolean compressionJson, boolean compressionCode,
                              boolean compressionText, double compressionTargetRatio,
@@ -169,6 +171,12 @@ public class ApiAgentsController extends Controller {
             return new AgentView(a.id, a.name, a.description, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
                     a.createdAt.toString(), a.updatedAt.toString(), configured,
+                    a.tenant != null ? a.tenant.id : null,
+                    a.tenant != null ? a.tenant.slug : null,
+                    a.team != null ? a.team.id : null,
+                    a.team != null ? a.team.slug : null,
+                    a.ownerUser != null ? a.ownerUser.id : null,
+                    a.ownerUser != null ? a.ownerUser.username : null,
                     a.compressionEffective(),
                     a.compressionJsonEffective(), a.compressionCodeEffective(),
                     a.compressionTextEffective(),
@@ -186,7 +194,7 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
     @Operation(summary = "List agents (id, name, modelProvider, modelId, enabled, isMain)")
     public static void list() {
-        var agents = AgentService.listAll();
+        var agents = AgentService.listReadable();
         var configuredKeys = AgentService.configuredModelKeys();
         // Subagents (parentAgent != null) are scoped to their parent's spawn
         // tree and don't belong in the user-facing dropdown — they appear on

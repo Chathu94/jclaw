@@ -31,10 +31,18 @@ public class ApiChannelsController extends Controller {
     private record ChannelView(Long id, String channelType, JsonElement config,
                                boolean enabled, String createdAt, String updatedAt) {
         static ChannelView of(ChannelConfig c) {
-            return new ChannelView(c.id, c.channelType,
+            return new ChannelView(c.id, displayChannelType(c.channelType),
                     maskConfig(c.configJson),
                     c.enabled, c.createdAt.toString(), c.updatedAt.toString());
         }
+    }
+
+    private static String storageChannelType(String channelType) {
+        return ConfigService.storageKeyForCurrentScope(channelType);
+    }
+
+    private static String displayChannelType(String storedChannelType) {
+        return ConfigService.displayKeyForCurrentScope(storedChannelType);
     }
 
     /**
@@ -64,7 +72,10 @@ public class ApiChannelsController extends Controller {
     @Operation(summary = "List all stored channel configurations")
     public static void list() {
         List<ChannelConfig> configs = ChannelConfig.findAll();
-        var result = configs.stream().map(ChannelView::of).toList();
+        var result = configs.stream()
+                .filter(c -> ConfigService.belongsToCurrentConfigScope(c.channelType))
+                .map(ChannelView::of)
+                .toList();
         renderJSON(gson.toJson(result));
     }
 
@@ -91,7 +102,7 @@ public class ApiChannelsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     @ChatHidden("channel config detail may include secrets")
     public static void get(String channelType) {
-        var config = ChannelConfig.findByType(channelType);
+        var config = ChannelConfig.findByType(storageChannelType(channelType));
         if (config == null) notFound();
         renderJSON(gson.toJson(ChannelView.of(config)));
     }
@@ -105,11 +116,12 @@ public class ApiChannelsController extends Controller {
         if (body == null) badRequest();
 
         // Evict cache before lookup so we get a managed (attached) entity for write
-        ChannelConfig.evictCache(channelType);
-        var config = ChannelConfig.findByType(channelType);
+        var storedChannelType = storageChannelType(channelType);
+        ChannelConfig.evictCache(storedChannelType);
+        var config = ChannelConfig.findByType(storedChannelType);
         if (config == null) {
             config = new ChannelConfig();
-            config.channelType = channelType;
+            config.channelType = storedChannelType;
         }
 
         if (body.has("config")) {
@@ -119,9 +131,11 @@ public class ApiChannelsController extends Controller {
             config.enabled = body.get("enabled").getAsBoolean();
         }
         config.save();
-        ChannelConfig.evictCache(channelType); // evict again so next read sees the update
+        ChannelConfig.evictCache(storedChannelType); // evict again so next read sees the update
 
-        reconcileRunner(channelType);
+        if (ConfigService.currentConfigScopeIsGlobal()) {
+            reconcileRunner(channelType);
+        }
 
         EventLogger.info("channel", null, channelType, "Channel config updated");
         renderJSON(gson.toJson(ChannelView.of(config)));

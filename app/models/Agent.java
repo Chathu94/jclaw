@@ -7,6 +7,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
+import jakarta.persistence.Index;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.ColumnDefault;
@@ -16,7 +17,11 @@ import org.hibernate.annotations.OnDeleteAction;
 import java.util.List;
 
 @Entity
-@Table(name = "agent")
+@Table(name = "agent", indexes = {
+        @Index(name = "idx_agent_tenant", columnList = "tenant_id"),
+        @Index(name = "idx_agent_team", columnList = "team_id"),
+        @Index(name = "idx_agent_owner_user", columnList = "owner_user_id")
+})
 // JCLAW-205: Hibernate L2 cache via Caffeine. Agent is the most-looked-up
 // entity in the chat path (Agent.findById / findByName, ~30 call sites);
 // READ_WRITE strategy keeps strict consistency on save/delete via the
@@ -52,6 +57,18 @@ public class Agent extends TimestampedModel {
 
     @Column(nullable = false)
     public boolean enabled = true;
+
+    @ManyToOne
+    @JoinColumn(name = "tenant_id")
+    public Tenant tenant;
+
+    @ManyToOne
+    @JoinColumn(name = "team_id")
+    public Team team;
+
+    @ManyToOne
+    @JoinColumn(name = "owner_user_id")
+    public UserAccount ownerUser;
 
     /**
      * JCLAW-465: per-agent content-compression enable. Nullable so rows created

@@ -2093,9 +2093,12 @@ do_reset() {
     # pattern — passing -user sa -password "" lands a 28000 invalid-
     # auth error against the very database we created.
     local jdbc_url="jdbc:h2:file:$SCRIPT_DIR/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE"
-    local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';"
+    local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';
+ALTER TABLE user_account ADD COLUMN IF NOT EXISTS password_hash VARCHAR(512);
+ALTER TABLE user_account ADD COLUMN IF NOT EXISTS credential_version BIGINT DEFAULT 0;
+UPDATE user_account SET password_hash=NULL, credential_version=COALESCE(credential_version, 0) + 1 WHERE password_hash IS NOT NULL;"
 
-    echo "==> Clearing auth.admin.passwordHash..."
+    echo "==> Clearing auth.admin.passwordHash and user password hashes..."
     if ! java -cp "$h2_jar" org.h2.tools.Shell -url "$jdbc_url" -sql "$sql"; then
         echo "Error: H2 Shell command failed. Inspect the output above."
         exit 1
@@ -2271,7 +2274,7 @@ do_setup() {
     # install files and ~42 generated skill manifests respectively. Tracking
     # them caused massive diffs every time BMAD upgraded between minor
     # versions (e.g. 6.2.2 → 6.5.0 deleted/moved hundreds of files), so we
-    # let setup regenerate them instead. Quick-update is the lightest action
+    # let setup regenerate them instead. Update is the lightest action
     # that keeps existing module settings AND re-registers the IDE; -y skips
     # the prompts that would otherwise hang in non-interactive contexts;
     # --directory pins it to this clone (otherwise it asks).
@@ -2281,7 +2284,7 @@ do_setup() {
     else
         npx bmad-method install \
             --directory "$SCRIPT_DIR" \
-            --action quick-update \
+            --action update \
             --tools claude-code \
             -y 2>&1 | tail -5
     fi

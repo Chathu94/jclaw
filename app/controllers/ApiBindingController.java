@@ -41,7 +41,7 @@ public abstract class ApiBindingController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     protected static Agent requireEnabledAgent(Long agentId) {
-        Agent agent = AgentService.findById(agentId);
+        Agent agent = AgentService.findReadableById(agentId);
         if (agent == null || !agent.enabled) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
             throw ApiResponses.unreachable();
@@ -76,7 +76,7 @@ public abstract class ApiBindingController extends Controller {
     protected static <T extends AgentBoundBinding> void applyAgentUpdate(T binding, JsonObject body,
             Function<Agent, T> findByAgent, String channelLabel, String conflictCode) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
-        Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
+        Agent agent = AgentService.findReadableById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId must reference an enabled agent");
         }

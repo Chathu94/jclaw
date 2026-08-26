@@ -477,10 +477,17 @@ public final class LocalSidecarDaemon {
         return serve && onPort && ourCache;
     }
 
-    /** No live owner: reparented to init or gone entirely. A sidecar whose parent is a running
-     *  process belongs to that JVM — possibly a sibling worktree's — and is never ours to kill. */
+    /** No live owner: reparented to init/a subreaper or gone entirely. A sidecar whose parent is a
+     *  running JVM belongs to that JVM — possibly a sibling worktree's — and is never ours to kill. */
     public static boolean hasNoLiveOwner(ProcessHandle h) {
-        return h.parent().map(p -> p.pid() == 1).orElse(true);
+        return h.parent()
+                .map(p -> p.pid() == 1 || p.info().command().map(LocalSidecarDaemon::isNotJavaCommand).orElse(true))
+                .orElse(true);
+    }
+
+    private static boolean isNotJavaCommand(String command) {
+        var name = new File(command).getName();
+        return !("java".equals(name) || "javac".equals(name) || name.startsWith("java-"));
     }
 
     /** Poll until the port clears — a kill is asynchronous and the socket outlives the process. */

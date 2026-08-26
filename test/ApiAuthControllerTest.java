@@ -171,4 +171,15 @@ class ApiAuthControllerTest extends FunctionalTest {
         // After reset the password is no longer set.
         assertTrue(getContent(GET("/api/auth/status")).contains("\"passwordSet\":false"));
     }
+
+    @Test
+    void loginMigratesLegacyAdminHashToUserAccount() {
+        seedPassword("changeme");
+        var loginResp = POST("/api/auth/login", "application/json",
+                "{\"username\":\"admin\",\"password\":\"changeme\"}");
+        assertIsOk(loginResp);
+        var user = services.Tx.run(() -> models.UserAccount.findByUsername("admin"));
+        assertNotNull(user);
+        assertTrue(user.passwordHash != null && !user.passwordHash.isBlank());
+    }
 }

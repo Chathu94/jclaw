@@ -30,7 +30,15 @@ public final class AuthFixture {
      *  fresh tx so tests that exercise the "password unset" flow see an
      *  empty Config row from the HTTP-handler side. */
     public static void clearAdminPassword() {
-        runInFreshTx(() -> ConfigService.delete(ApiAuthController.PASSWORD_HASH_KEY));
+        runInFreshTx(() -> {
+            ConfigService.delete(ApiAuthController.PASSWORD_HASH_KEY);
+            var admin = models.UserAccount.findByUsername("admin");
+            if (admin != null) {
+                admin.passwordHash = null;
+                admin.bumpCredentialVersion();
+                admin.save();
+            }
+        });
     }
 
     /** Mint a dedicated bearer token row and commit it, returning the plaintext.

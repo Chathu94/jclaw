@@ -76,13 +76,13 @@ public class ApiConfigController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
     @Operation(summary = "List all config rows (sensitive values masked)")
     public static void list() {
-        var configs = ConfigService.listAll();
+        var configs = ConfigService.listForCurrentScope();
         var entries = configs.stream()
-                .filter(c -> !isReservedKey(c.key))
                 .map(c -> new ConfigEntry(
-                        c.key,
-                        ConfigService.maskValue(c.key, c.value),
+                        ConfigService.displayKeyForCurrentScope(c.key),
+                        ConfigService.maskValue(ConfigService.displayKeyForCurrentScope(c.key), c.value),
                         c.updatedAt.toString()))
+                .filter(c -> !isReservedKey(c.key))
                 .toList();
         renderJSON(gson.toJson(new ConfigListResponse(entries)));
     }
@@ -92,12 +92,12 @@ public class ApiConfigController extends Controller {
     @Operation(summary = "Read a config value by key")
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
-        var config = Config.findByKey(key);
+        var config = Config.findByKey(ConfigService.storageKeyForCurrentScope(key));
         if (config == null) {
             notFound();
         }
         renderJSON(gson.toJson(new ConfigEntry(
-                config.key,
+                ConfigService.displayKeyForCurrentScope(config.key),
                 ConfigService.maskValue(config.key, config.value),
                 config.updatedAt.toString())));
     }
@@ -134,7 +134,8 @@ public class ApiConfigController extends Controller {
                     .formatted(RESERVED_KEY_PREFIX));
         }
 
-        var rejection = ConfigService.setWithSideEffects(key, value);
+        var storedKey = ConfigService.storageKeyForCurrentScope(key);
+        var rejection = ConfigService.setWithSideEffects(storedKey, value);
         if (rejection != null) {
             ApiResponses.error(403, "forbidden", rejection);
         }
@@ -153,7 +154,7 @@ public class ApiConfigController extends Controller {
             ApiResponses.error(409, "reserved_key", "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
-        ConfigService.deleteWithSideEffects(key);
+        ConfigService.deleteWithSideEffects(ConfigService.storageKeyForCurrentScope(key));
         renderJSON(gson.toJson(new ConfigDeleteResponse("ok", key)));
     }
 

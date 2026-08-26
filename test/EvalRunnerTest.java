@@ -165,23 +165,29 @@ class EvalRunnerTest extends UnitTest {
 
     @Test
     void casesRunConcurrently() {
-        // Eight cases blocking 200 ms each: serial execution needs 1.6 s, so a run
-        // under 800 ms can only come from the fan-out.
+        // Eight cases blocking 200 ms each should overlap. Assert the overlap
+        // directly instead of wall-clocking the whole run; loaded hosts can run
+        // late without changing the concurrency property.
         var cases = IntStream.range(0, 8)
                 .mapToObj(i -> caseSaying("case-" + i, "ok"))
                 .toList();
         var suite = new EvalSuite("slow", "fixture", cases);
+        var inFlight = new AtomicInteger();
+        var peak = new AtomicInteger();
 
-        var startNs = System.nanoTime();
         var report = EvalRunner.run(suite, testCase -> {
-            Thread.sleep(200);
-            return new EvalScorer.Response("ok", List.of(), 1);
+            peak.accumulateAndGet(inFlight.incrementAndGet(), Math::max);
+            try {
+                Thread.sleep(200);
+                return new EvalScorer.Response("ok", List.of(), 1);
+            } finally {
+                inFlight.decrementAndGet();
+            }
         });
-        var elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
 
         assertEquals(8, report.results().size());
         assertEquals(1.0, report.passRate(), 0.0001);
-        assertTrue(elapsedMs < 800, "expected concurrent execution, took " + elapsedMs + " ms");
+        assertTrue(peak.get() > 1, "expected concurrent execution, peaked at " + peak.get());
         assertTrue(report.results().getFirst().latencyMs() >= 150,
                 "per-case latency should reflect the responder, got " + report.results().getFirst().latencyMs());
     }

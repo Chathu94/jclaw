@@ -5,17 +5,22 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import models.UserAccount;
+import models.UserRole;
 import play.Play;
 import play.mvc.Controller;
+import services.AccessControlService;
 import services.BreachedPasswordChecker;
 import services.ConfigService;
 import services.EventLogger;
+import services.Tx;
 import utils.ApiResponses;
 import utils.PasswordHasher;
 import utils.PlayConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 
 import static utils.GsonHolder.GSON;
 
@@ -49,6 +54,7 @@ public class ApiAuthController extends Controller {
 
     /** Session key holding the generation a cookie was minted under. */
     static final String SESSION_CREDENTIAL_VERSION = "cv";
+    static final String SESSION_USER_CREDENTIAL_VERSION = "uv";
 
     /** The current credential generation; {@code "0"} before one has ever been recorded. */
     static String credentialVersion() {
@@ -78,8 +84,8 @@ public class ApiAuthController extends Controller {
     // minimum length and a sane maximum that bounds per-attempt PBKDF2 cost,
     // no composition rules. The floor is enforced here (authoritative); the
     // frontend strength meter is advisory above it.
-    private static final int MIN_PASSWORD_LENGTH = 12;
-    private static final int MAX_PASSWORD_LENGTH = 128;
+    public static final int MIN_PASSWORD_LENGTH = 12;
+    public static final int MAX_PASSWORD_LENGTH = 128;
 
     // JCLAW-741: failed-login throttle tunables (application.conf overridable).
     private static final String CFG_LOGIN_MAX_FAILURES = "auth.login.rate-limit.max-failures";
@@ -109,8 +115,8 @@ public class ApiAuthController extends Controller {
      *  has been set, so the login/setup routing decision lives client-side. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AuthStatusResponse.class)))
     public static void status() {
-        var hash = ConfigService.get(PASSWORD_HASH_KEY);
-        var passwordSet = hash != null && !hash.isBlank();
+        var passwordSet = hasBootstrapPassword() || Tx.run(() ->
+                UserAccount.<UserAccount>count("passwordHash IS NOT NULL AND passwordHash <> ''") > 0);
         renderJSON(gson.toJson(new AuthStatusResponse(passwordSet)));
     }
 
@@ -140,8 +146,7 @@ public class ApiAuthController extends Controller {
             EventLogger.warn("auth", "Setup throttled for %s (too many recent attempts)".formatted(clientIp));
             ApiResponses.error(429, "too_many_attempts", "Too many setup attempts. Try again later.");
         }
-        var existing = ConfigService.get(PASSWORD_HASH_KEY);
-        if (existing != null && !existing.isBlank()) {
+        if (hasBootstrapPassword() || hasUserPasswords()) {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             ApiResponses.error(409, "already_set", "Password is already set");
         }
@@ -154,29 +159,25 @@ public class ApiAuthController extends Controller {
         if (body == null) badRequest();
         var password = JsonBodyReader.optString(body, "password", false);
         if (password == null) badRequest();
-        if (password.length() < MIN_PASSWORD_LENGTH) {
-            ApiResponses.error(400, "password_too_short",
-                    "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH));
-        }
-        if (password.length() > MAX_PASSWORD_LENGTH) {
-            ApiResponses.error(400, "password_too_long",
-                    "Password must be at most %d characters".formatted(MAX_PASSWORD_LENGTH));
-        }
-        // JCLAW-741: reject passwords found in a known breach. Never blocks on
-        // the network — a slow/unreachable HIBP lookup degrades to the offline
-        // list (see BreachedPasswordChecker).
-        if (BreachedPasswordChecker.isBreached(password)) {
-            ApiResponses.error(400, "password_breached",
-                    "This password appears in a known data breach. Choose a different one.");
-        }
+        validateNewPassword(password);
         // JCLAW-782: the check above is a fast, friendly reject; the write itself
         // must be atomic so two setup() calls that both pass the check can't both
         // land a hash (last-writer-wins). setIfAbsent inserts only if the key is
         // still absent, so a losing concurrent bootstrap gets the same 409.
-        if (!ConfigService.setIfAbsent(PASSWORD_HASH_KEY, PasswordHasher.hash(password))) {
+        var hash = PasswordHasher.hash(password);
+        if (!ConfigService.setIfAbsent(PASSWORD_HASH_KEY, hash)) {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
             ApiResponses.error(409, "already_set", "Password is already set");
         }
+        Tx.run(() -> {
+            var admin = AccessControlService.ensureUser(adminUsername());
+            admin.passwordHash = hash;
+            admin.bumpCredentialVersion();
+            admin.enabled = true;
+            admin.role = UserRole.ALL_ADMIN;
+            if (admin.approvedAt == null) admin.approvedAt = Instant.now();
+            admin.save();
+        });
         bumpCredentialVersion();
         LoginRateLimiter.recordSuccess(clientIp);
         EventLogger.info("auth", "Admin password set for the first time");
@@ -210,44 +211,78 @@ public class ApiAuthController extends Controller {
         var password = JsonBodyReader.optString(body, "password", false);
         if (username == null || password == null) badRequest();
 
-        var expectedUser = Play.configuration.getProperty("jclaw.admin.username", "admin");
+        var expectedUser = adminUsername();
         var storedHash = ConfigService.get(PASSWORD_HASH_KEY);
 
-        if (storedHash == null || storedHash.isBlank()) {
-            // Fresh install (or post-reset) — clients should route to
-            // /setup-password via /api/auth/status. Surface the same
-            // 401 as an invalid login so a curler can't tell whether
-            // any account exists.
+        if (!hasBootstrapPassword() && !hasUserPasswords()) {
             ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
         }
 
-        if (constantTimeEquals(expectedUser, username)
-                && PasswordHasher.verify(password, storedHash)) {
+        var result = Tx.run(() -> authenticateUser(username, password, expectedUser, storedHash));
+        if (result != null) {
             LoginRateLimiter.recordSuccess(clientIp);
             session.put("authenticated", "true");
-            session.put("username", username);
+            session.put("username", result.username());
             session.put(SESSION_CREDENTIAL_VERSION, credentialVersion());
-            // JCLAW-731: transparent rehash-on-login. We hold the plaintext and
-            // the verify just succeeded, so upgrade a hash written at an older,
-            // weaker PBKDF2 work factor to the current one. Best-effort — a
-            // ConfigService hiccup must never fail an otherwise-valid login.
-            if (PasswordHasher.needsRehash(storedHash)) {
-                try {
-                    ConfigService.set(PASSWORD_HASH_KEY, PasswordHasher.hash(password));
-                    EventLogger.info("auth", "Upgraded admin password hash to the current work factor");
-                }
-                catch (Exception e) {
-                    EventLogger.warn("auth", "Password-hash upgrade failed (login still succeeds): " + e.getMessage());
-                }
-            }
-            EventLogger.info("auth", "Admin login successful");
-            renderJSON(gson.toJson(new LoginResponse("ok", username)));
+            session.put(SESSION_USER_CREDENTIAL_VERSION, String.valueOf(result.userCredentialVersion()));
+            EventLogger.info("auth", "Login successful for username: %s".formatted(result.username()));
+            renderJSON(gson.toJson(new LoginResponse("ok", result.username())));
         }
         else {
             LoginRateLimiter.recordFailure(clientIp, loginWindowSeconds());
-            EventLogger.warn("auth", "Admin login failed for username: %s".formatted(username));
+            EventLogger.warn("auth", "Login failed for username: %s".formatted(username));
             ApiResponses.error(401, "invalid_credentials", "Invalid credentials");
         }
+    }
+
+    static void validateNewPassword(String password) {
+        if (password.length() < MIN_PASSWORD_LENGTH) {
+            ApiResponses.error(400, "password_too_short",
+                    "Password must be at least %d characters".formatted(MIN_PASSWORD_LENGTH));
+        }
+        if (password.length() > MAX_PASSWORD_LENGTH) {
+            ApiResponses.error(400, "password_too_long",
+                    "Password must be at most %d characters".formatted(MAX_PASSWORD_LENGTH));
+        }
+        if (BreachedPasswordChecker.isBreached(password)) {
+            ApiResponses.error(400, "password_breached",
+                    "This password appears in a known data breach. Choose a different one.");
+        }
+    }
+
+    private record LoginResult(String username, long userCredentialVersion) {}
+
+    private static LoginResult authenticateUser(String username, String password,
+                                                String expectedUser, String storedHash) {
+        var normalized = normalizeUsername(username);
+        var user = UserAccount.findByUsername(normalized);
+        if (user != null && user.enabled && user.isApprovedForAccess()
+                && PasswordHasher.verify(password, user.passwordHash)) {
+            if (PasswordHasher.needsRehash(user.passwordHash)) {
+                user.passwordHash = PasswordHasher.hash(password);
+                user.bumpCredentialVersion();
+                user.save();
+            }
+            AccessControlService.ensurePersonalAgent(user);
+            return new LoginResult(user.username, user.credentialVersionValue());
+        }
+
+        if (constantTimeEquals(expectedUser, normalized) && PasswordHasher.verify(password, storedHash)) {
+            var admin = AccessControlService.ensureUser(expectedUser);
+            admin.passwordHash = storedHash;
+            admin.enabled = true;
+            admin.role = UserRole.ALL_ADMIN;
+            if (admin.approvedAt == null) admin.approvedAt = Instant.now();
+            if (PasswordHasher.needsRehash(storedHash)) {
+                admin.passwordHash = PasswordHasher.hash(password);
+                ConfigService.set(PASSWORD_HASH_KEY, admin.passwordHash);
+                EventLogger.info("auth", "Upgraded admin password hash to the current work factor");
+            }
+            admin.save();
+            AccessControlService.ensurePersonalAgent(admin);
+            return new LoginResult(admin.username, admin.credentialVersionValue());
+        }
+        return null;
     }
 
     private static int loginMaxFailures() {
@@ -296,11 +331,46 @@ public class ApiAuthController extends Controller {
         if (!"true".equals(authed)) {
             ApiResponses.error(401, "authentication_required", "Authentication required");
         }
+        var username = session.get("username");
         ConfigService.delete(PASSWORD_HASH_KEY);
+        Tx.run(() -> {
+            var user = UserAccount.findByUsername(normalizeUsername(username));
+            if (user == null) return;
+            user.passwordHash = null;
+            user.bumpCredentialVersion();
+            user.save();
+        });
         bumpCredentialVersion();
         session.clear();
         EventLogger.info("auth", "Admin password reset — every other session signed out too");
         renderJSON(gson.toJson(new ResetPasswordResponse("ok")));
+    }
+
+    static boolean userCredentialVersionMatches(String username, String sessionVersion) {
+        if (username == null || username.isBlank()) return true;
+        return Tx.run(() -> {
+            var user = UserAccount.findByUsername(normalizeUsername(username));
+            if (user == null) return true;
+            return String.valueOf(user.credentialVersionValue()).equals(sessionVersion);
+        });
+    }
+
+    private static boolean hasBootstrapPassword() {
+        var hash = ConfigService.get(PASSWORD_HASH_KEY);
+        return hash != null && !hash.isBlank();
+    }
+
+    private static boolean hasUserPasswords() {
+        return Tx.run(() -> UserAccount.<UserAccount>count("passwordHash IS NOT NULL AND passwordHash <> ''") > 0);
+    }
+
+    private static String adminUsername() {
+        return Play.configuration.getProperty("jclaw.admin.username", "admin");
+    }
+
+    private static String normalizeUsername(String username) {
+        var normalized = username == null ? "" : username.strip();
+        return normalized.isEmpty() ? adminUsername() : normalized;
     }
 
     private static boolean constantTimeEquals(String expected, String actual) {

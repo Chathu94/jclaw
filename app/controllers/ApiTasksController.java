@@ -282,9 +282,9 @@ public class ApiTasksController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
             throw ApiResponses.unreachable();
         }
-        var agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
+        var agent = AgentService.findReadableById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
-            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId does not resolve to an existing agent");
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId does not resolve to a readable agent");
             throw ApiResponses.unreachable();
         }
         return agent;

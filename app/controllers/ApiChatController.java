@@ -123,7 +123,7 @@ public class ApiChatController extends Controller {
         // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
         // no lazy fields used downstream, so reading String columns on the
         // detached entity after the tx closes is safe.
-        Agent agent = Tx.run(() -> AgentService.findById(agentId));
+        Agent agent = Tx.run(() -> AgentService.findReadableById(agentId));
         if (agent == null) {
             notFound();
             throw ApiResponses.unreachable();
@@ -237,7 +237,7 @@ public class ApiChatController extends Controller {
     @SuppressWarnings("java:S2259")
     public static void uploadChatFiles(Long agentId, Upload[] files) {
         if (agentId == null) badRequest();
-        Agent agent = AgentService.findById(agentId);
+        Agent agent = AgentService.findReadableById(agentId);
         if (agent == null) notFound();
 
         // JCLAW-765: chat and the App->Agent invoke endpoint share ONE staging path

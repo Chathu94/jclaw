@@ -20,6 +20,16 @@ POST    /api/auth/login                         ApiAuthController.login
 POST    /api/auth/logout                        ApiAuthController.logout
 POST    /api/auth/reset-password                ApiAuthController.resetPassword
 
+# Access-control API
+GET     /api/access/tenants                     ApiAccessController.tenants
+POST    /api/access/tenants                     ApiAccessController.createTenant
+GET     /api/access/teams                       ApiAccessController.teams
+POST    /api/access/teams                       ApiAccessController.createTeam
+GET     /api/access/users                       ApiAccessController.users
+POST    /api/access/users                       ApiAccessController.createUser
+POST    /api/access/users/{id}/approve          ApiAccessController.approveUser
+POST    /api/access/users/{id}/password         ApiAccessController.setUserPassword
+
 # Onboarding API
 GET     /api/onboarding/tour-status             ApiOnboardingController.status
 POST    /api/onboarding/tour-progress           ApiOnboardingController.recordProgress

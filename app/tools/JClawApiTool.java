@@ -57,9 +57,10 @@ import java.util.Set;
  * {@link #PATH_BLOCKLIST} is an unconditional <em>deny-floor</em> applied first
  * -- coarse, whole-subsystem categories that must never be reached: chat-send
  * (recursion), auth (privilege escalation), token CRUD (lockout), webhooks
- * (caller-verified), SSE (we buffer full responses), plus secret-bearing /
- * infra / resource-abuse subsystems (bindings, telegram bindings, tailscale,
- * logs, the load-test harness). On top of that, individual actions carry
+ * (caller-verified), SSE (we buffer full responses), plus privilege-bearing /
+ * secret-bearing / infra / resource-abuse subsystems (access control,
+ * bindings, telegram bindings, tailscale, logs, the load-test harness).
+ * On top of that, individual actions carry
  * {@link controllers.ChatHidden} as a precise per-action opt-out (see
  * {@link #isCallable}). Any {@code /api/} route that resolves to a controller
  * action and is caught by neither layer is callable -- so a newly-added endpoint
@@ -94,6 +95,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
             "/api/chat/",                 // recursion via send/stream/upload
             "/api/auth/",                 // login/setup/reset -- admin-only via UI
             "/api/api-tokens",            // privilege-escalation surface
+            "/api/access/",               // user/password/admin-approval management
             "/api/webhooks/",             // verified by their own signature
             "/api/events",                // SSE; we buffer full bodies
             "/api/bindings",              // channel routing -- comms redirection / secrets

@@ -14,6 +14,13 @@ export interface Agent {
   thinkingMode: string | null
   /** True when the selected provider has an API key configured (populated by GET /api/agents). */
   providerConfigured?: boolean
+  /** Multi-tenant ownership metadata. Null on legacy rows until backfilled. */
+  tenantId?: number | null
+  tenantSlug?: string | null
+  teamId?: number | null
+  teamSlug?: string | null
+  ownerUserId?: number | null
+  ownerUsername?: string | null
   /** JCLAW-465: effective per-agent content-compression enable (main on, custom off by default). */
   compressionEnabled: boolean
   /** JCLAW-463: effective per-type sub-toggles (master AND per-type, both default on under the master). */
@@ -31,6 +38,38 @@ export interface Agent {
   /** JCLAW-534: effective extractor provider/model — the agent's default when inherited, else the override. */
   memoryAutocaptureProvider: string
   memoryAutocaptureModel: string
+}
+
+export interface Tenant {
+  id: number
+  slug: string
+  name: string
+  enabled: boolean
+}
+
+export interface Team {
+  id: number
+  tenantId: number
+  tenantSlug: string
+  slug: string
+  name: string
+  enabled: boolean
+}
+
+export interface UserAccount {
+  id: number
+  username: string
+  displayName: string | null
+  role: 'ALL_ADMIN' | 'TENANT_ADMIN' | 'TEAM_ADMIN' | 'USER'
+  tenantId: number | null
+  tenantSlug: string | null
+  teamId: number | null
+  teamSlug: string | null
+  enabled: boolean
+  approved: boolean
+  passwordSet: boolean
+  approvedByUserId: number | null
+  approvedAt: string | null
 }
 
 /**
