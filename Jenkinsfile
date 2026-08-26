@@ -558,19 +558,29 @@ pipeline {
 
     post {
         cleanup {
-            // Wipe the workspace EXCEPT .gradle/. gradle.properties sets
-            // org.gradle.configuration-cache=true, and Gradle stores those
+            // Wipe the workspace EXCEPT .gradle/ and .git/. gradle.properties
+            // sets org.gradle.configuration-cache=true, and Gradle stores those
             // entries in <project>/.gradle/configuration-cache — so a blanket
             // cleanWs() guaranteed a cold configuration on every Gradle
             // invocation (this pipeline runs two or three per build, against a
             // Kotlin-DSL script that validates the play1 fork and declares a
-            // large dependency graph). Excluding it lets the cache actually
-            // hit. An empty include set means "everything", so the two EXCLUDE
-            // entries below are the whole filter; the second keeps the
-            // directory itself, the first its contents.
+            // large dependency graph). Excluding it lets the cache actually hit.
+            //
+            // .git is excluded for a different reason: cleanWs defaults to
+            // deleteDirs:false, so emptying it left the directory standing and
+            // every build opened with "Workspace has a .git repository, but it
+            // appears to be corrupt" followed by a full re-clone. Keeping the
+            // repo makes that an incremental fetch instead; the working tree is
+            // still wiped here and force-checked-out to the build's own sha.
+            //
+            // An empty include set means "everything", so the EXCLUDE entries
+            // below are the whole filter; each pair keeps a directory itself
+            // and its contents.
             cleanWs(patterns: [
                 [pattern: '.gradle/**', type: 'EXCLUDE'],
                 [pattern: '.gradle', type: 'EXCLUDE'],
+                [pattern: '.git/**', type: 'EXCLUDE'],
+                [pattern: '.git', type: 'EXCLUDE'],
             ])
         }
     }
