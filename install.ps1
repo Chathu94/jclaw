@@ -354,15 +354,22 @@ if ($gitBash -or $useWsl) {
 # Windows PATH entry, which only the registry (User scope) provides.
 #
 # Idempotent by exact segment match, so re-running never stacks duplicates.
+# Returns whether $dir is on the User PATH *after* the attempt. Read back rather
+# than trusting the write: a managed machine can block the registry update by
+# policy without SetEnvironmentVariable throwing, and "we wrote it" is not "it is
+# there" — which is the difference between a working install and one that reports
+# success and then cannot find jclaw.
 function Add-ToUserPath($dir) {
-    $cur = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $parts = @($cur -split ';' | Where-Object { $_ -ne '' })
-    if ($parts -contains $dir) { Substep "$dir already on your PATH"; return $false }
-    [Environment]::SetEnvironmentVariable('Path', (($parts + $dir) -join ';'), 'User')
-    # Current process too, so anything later in this script can find it.
-    $env:Path = "$env:Path;$dir"
-    Substep "added $dir to your PATH"
-    return $true
+    $parts = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -ne '' })
+    if ($parts -notcontains $dir) {
+        try {
+            [Environment]::SetEnvironmentVariable('Path', (($parts + $dir) -join ';'), 'User')
+            # Current process too, so anything later in this script can find it.
+            $env:Path = "$env:Path;$dir"
+        } catch { Warn "could not write your PATH: $($_.Exception.Message)" }
+    }
+    $now = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';')
+    return ($now -contains $dir)
 }
 
 # C:\Users\x\.local\bin -> /c/Users/x/.local/bin. Git Bash needs the POSIX form,
@@ -381,6 +388,7 @@ function ConvertTo-PosixPath($p) {
 # at an empty directory (JCLAW-1105 follow-up).
 $BinDir      = Join-Path $env:USERPROFILE '.local\bin'
 $pathChanged = $false
+$pathOk      = $false
 if ($gitBash -or $useWsl) {
     Step 'Linking the jclaw command'
     try {
@@ -402,8 +410,13 @@ if ($gitBash -or $useWsl) {
     } catch { Warn "could not link the jclaw command: $($_.Exception.Message)" }
 
     Step 'Putting jclaw on PATH'
-    try { $pathChanged = Add-ToUserPath $BinDir }
-    catch { Warn "PATH setup skipped: $($_.Exception.Message)" }
+    try {
+        $alreadyOnPath = @([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -contains $BinDir
+        $pathOk        = Add-ToUserPath $BinDir
+        $pathChanged   = ($pathOk -and -not $alreadyOnPath)
+        if ($pathOk)   { Substep $(if ($pathChanged) { "added $BinDir to your PATH" } else { "$BinDir already on your PATH" }) }
+        else           { Warn "$BinDir is not on your PATH — the jclaw command will not resolve." }
+    } catch { Warn "PATH setup skipped: $($_.Exception.Message)" }
 }
 
 $started = $false
@@ -425,11 +438,18 @@ if ($started) {
     Write-Host '  Open       ' -NoNewline; Write-Host "http://localhost:$Port" -ForegroundColor Cyan
 }
 Write-Host "  Installed  $AppDir" -ForegroundColor DarkGray
-Write-Host '  Command    ' -NoNewline; Write-Host 'jclaw start | stop | status' -ForegroundColor Cyan
-if ($pathChanged) {
-    # A User PATH change reaches new processes only. Without saying so, the very
-    # first `jclaw` looks exactly like the "not recognized" bug this replaces.
-    Write-Host '             open a NEW terminal first — this one predates the PATH change' -ForegroundColor Yellow
+if ($pathOk) {
+    Write-Host '  Command    ' -NoNewline; Write-Host 'jclaw start | stop | status' -ForegroundColor Cyan
+    if ($pathChanged) {
+        # A User PATH change reaches new processes only. Without saying so, the very
+        # first jclaw looks exactly like the "not recognized" bug this replaces.
+        Write-Host '             open a NEW terminal first - this one predates the PATH change' -ForegroundColor Yellow
+    }
+} elseif ($gitBash -or $useWsl) {
+    # PATH did not take. The install root carries the same launcher, so name the
+    # one command that works rather than leaving the operator to find it.
+    Write-Host '  Command    ' -NoNewline; Write-Host 'PATH could not be set - run it from the folder:' -ForegroundColor Yellow
+    Write-Host "               cd '$AppDir'; .\jclaw.cmd start" -ForegroundColor Cyan
 }
 Write-Host '  Uninstall  ' -NoNewline; Write-Host './jclaw.sh uninstall' -ForegroundColor Cyan -NoNewline
 Write-Host "  (run via your shell; removes $JclawHome, undoes completion)" -ForegroundColor DarkGray

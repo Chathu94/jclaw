@@ -4197,13 +4197,20 @@ EOF
     # directly sidesteps a second round of quote parsing, so `jclaw config set x
     # "a b"` survives cmd -> bash intact. -l is required for play/java to be on
     # PATH. install.ps1 owns the one part bash cannot do — the Windows PATH entry.
+    #
+    # Written to the install root as well as the PATH directory. Same generator,
+    # so the two cannot drift — and the root copy is the fallback when the PATH
+    # entry does not take (locked-down profile, policy-blocked registry write):
+    # `cd` to the folder the installer names and run `.\jclaw.cmd start`. It is a
+    # degraded fallback, not a replacement — no file in the install folder can
+    # give you `jclaw` from anywhere — but it beats the alternative, which is
+    # knowing to invoke bash.exe against jclaw.sh by hand.
     if [[ "$IS_WINDOWS" == 1 ]]; then
-        local bash_win
+        local bash_win cmd_body
         bash_win="$(native_path "$(command -v bash)")" || return 1
-        cat > "$bin_dir/jclaw.cmd" <<EOF
-@echo off
-"$bash_win" -l "$SCRIPT_DIR/jclaw.sh" %*
-EOF
+        cmd_body="$(printf '@echo off\n"%s" -l "%s/jclaw.sh" %%*\n' "$bash_win" "$SCRIPT_DIR")"
+        printf '%s' "$cmd_body" > "$bin_dir/jclaw.cmd"
+        printf '%s' "$cmd_body" > "$SCRIPT_DIR/jclaw.cmd"
     fi
 }
 
