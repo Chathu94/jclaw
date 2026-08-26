@@ -365,14 +365,45 @@ function Add-ToUserPath($dir) {
     return $true
 }
 
+# C:\Users\x\.local\bin -> /c/Users/x/.local/bin. Git Bash needs the POSIX form,
+# and it has to be derived from the SAME $BinDir that goes on PATH: a shim written
+# to one directory while PATH names another leaves `jclaw` unrecognised with no
+# error anywhere to explain it.
+function ConvertTo-PosixPath($p) {
+    $q = $p -replace '\\','/'
+    if ($q -match '^([A-Za-z]):(.*)$') { return "/$($Matches[1].ToLower())$($Matches[2])" }
+    return $q
+}
+
+# Write the shim, then put its directory on PATH. Both are needed and neither is
+# sufficient: install.sh runs `jclaw.sh shim` (line ~455) and this must too —
+# write_shim's only caller is that subcommand, so without it the PATH entry points
+# at an empty directory (JCLAW-1105 follow-up).
 $BinDir      = Join-Path $env:USERPROFILE '.local\bin'
 $pathChanged = $false
 if ($gitBash -or $useWsl) {
-    Step 'Putting jclaw on PATH'
+    Step 'Linking the jclaw command'
     try {
         New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
-        $pathChanged = Add-ToUserPath $BinDir
-    } catch { Warn "PATH setup skipped: $($_.Exception.Message)" }
+        if ($gitBash) {
+            $u  = $AppDir -replace '\\','/'
+            $bp = ConvertTo-PosixPath $BinDir
+            & $gitBash -lc "JCLAW_BIN_DIR='$bp' '$u/jclaw.sh' shim"
+        } else {
+            $wp = (wsl.exe wslpath -a "$AppDir").Trim()
+            $wb = (wsl.exe wslpath -a "$BinDir").Trim()
+            wsl.exe bash -lc "JCLAW_BIN_DIR='$wb' '$wp/jclaw.sh' shim"
+        }
+        if (Test-Path (Join-Path $BinDir 'jclaw.cmd')) {
+            Substep "wrote $BinDir\jclaw.cmd"
+        } else {
+            Warn "the jclaw launcher was not created in $BinDir - the jclaw command will not be recognised."
+        }
+    } catch { Warn "could not link the jclaw command: $($_.Exception.Message)" }
+
+    Step 'Putting jclaw on PATH'
+    try { $pathChanged = Add-ToUserPath $BinDir }
+    catch { Warn "PATH setup skipped: $($_.Exception.Message)" }
 }
 
 $started = $false
