@@ -233,10 +233,12 @@ describe('Access page', () => {
     await component.find('button[aria-label="Set password for tenant-admin"]').trigger('click')
     await flushPromises()
     const dialogInputs = Array.from(document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[type="password"]'))
-    dialogInputs[0].value = 'tenant-admin-new-password'
-    dialogInputs[0].dispatchEvent(new Event('input', { bubbles: true }))
-    dialogInputs[1].value = 'different-password'
-    dialogInputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    expect(dialogInputs).toHaveLength(2)
+    const [passwordInput, confirmPasswordInput] = dialogInputs as [HTMLInputElement, HTMLInputElement]
+    passwordInput.value = 'tenant-admin-new-password'
+    passwordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    confirmPasswordInput.value = 'different-password'
+    confirmPasswordInput.dispatchEvent(new Event('input', { bubbles: true }))
     document.querySelector<HTMLFormElement>('[role="dialog"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await flushPromises()
 
@@ -295,10 +297,12 @@ describe('Access page', () => {
     await component.find('button[aria-label="Set password for tenant-admin"]').trigger('click')
     await flushPromises()
     const dialogInputs = Array.from(document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[type="password"]'))
-    dialogInputs[0].value = 'tenant-admin-new-password'
-    dialogInputs[0].dispatchEvent(new Event('input', { bubbles: true }))
-    dialogInputs[1].value = 'tenant-admin-new-password'
-    dialogInputs[1].dispatchEvent(new Event('input', { bubbles: true }))
+    expect(dialogInputs).toHaveLength(2)
+    const [passwordInput, confirmPasswordInput] = dialogInputs as [HTMLInputElement, HTMLInputElement]
+    passwordInput.value = 'tenant-admin-new-password'
+    passwordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    confirmPasswordInput.value = 'tenant-admin-new-password'
+    confirmPasswordInput.dispatchEvent(new Event('input', { bubbles: true }))
     document.querySelector<HTMLFormElement>('[role="dialog"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     for (let i = 0; i < 6; i++) {
       await flushPromises()
