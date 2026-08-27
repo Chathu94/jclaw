@@ -460,7 +460,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp-jvm:5.5.0")
 
     // JCLAW-185: SSE + MockWebServer 5.x (plain POMs, no -jvm suffix).
-    implementation("com.squareup.okhttp3:okhttp-sse:5.4.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:5.5.0")
     implementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
 
     // JCLAW-83: Slack SDK (official com.slack.api), a la carte — slack-api-client
