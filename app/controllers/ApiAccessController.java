@@ -14,7 +14,6 @@ import utils.ApiResponses;
 import utils.JsonArgs;
 import utils.PasswordHasher;
 
-import java.util.List;
 import java.time.Instant;
 
 import static utils.GsonHolder.GSON;

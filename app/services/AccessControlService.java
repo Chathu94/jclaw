@@ -2,6 +2,7 @@ package services;
 
 import controllers.RequestPrincipal;
 import models.Agent;
+import models.Config;
 import models.Team;
 import models.TeamMembership;
 import models.Tenant;
@@ -12,6 +13,7 @@ import play.mvc.Scope;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Tenant/team/user access boundary for the admin API.
@@ -22,6 +24,13 @@ import java.util.List;
  * usable while new rows gain ownership metadata.
  */
 public class AccessControlService {
+
+    private static final String CONFIG_SEEDED_KEY = "auth.initialConfigSeeded";
+    private static final String AGENT_MAIN_CONFIG_PREFIX = "agent." + Agent.MAIN_AGENT_NAME + ".";
+    private static final Set<String> USER_CONFIG_TEMPLATE_EXCLUDED_PREFIXES = Set.of(
+            "auth.",
+            "logging.level.",
+            "provider.loadtest-mock.");
 
     public record Principal(UserAccount user, UserRole role, Tenant tenant, Team team,
                             boolean agentOriginated) {
@@ -120,6 +129,7 @@ public class AccessControlService {
         if (isBootstrapAdmin(user.username)) return Agent.findByName(Agent.MAIN_AGENT_NAME);
 
         var name = "user-" + user.id + "-main";
+        ensureInitialUserConfig(user, name);
         var existing = Agent.findByName(name);
         if (existing != null) {
             boolean touched = false;
@@ -148,6 +158,37 @@ public class AccessControlService {
                 ? user.displayName : user.username;
         return AgentService.createForOwner(name, provider, model, thinking,
                 "Personal default agent for " + display, user);
+    }
+
+    /**
+     * Seed a user's private config namespace once from the current global defaults.
+     * Generic settings stay value-for-value, while main-agent defaults are copied to
+     * the user's personal default agent keyspace. Later edits remain independent.
+     */
+    private static void ensureInitialUserConfig(UserAccount user, String personalAgentName) {
+        var marker = ConfigService.storageKeyForUser(user, CONFIG_SEEDED_KEY);
+        if (Config.findByKey(marker) != null) return;
+
+        for (var config : ConfigService.configMapForGlobalScope().entrySet()) {
+            var key = templateKeyForUser(config.getKey(), personalAgentName);
+            if (key == null) continue;
+            var scopedKey = ConfigService.storageKeyForUser(user, key);
+            if (Config.findByKey(scopedKey) == null) {
+                ConfigService.set(scopedKey, config.getValue());
+            }
+        }
+        ConfigService.set(marker, "true");
+    }
+
+    private static String templateKeyForUser(String key, String personalAgentName) {
+        if (key == null || ConfigService.isUserScopedStorageKey(key)) return null;
+        for (var prefix : USER_CONFIG_TEMPLATE_EXCLUDED_PREFIXES) {
+            if (key.startsWith(prefix)) return null;
+        }
+        if (key.startsWith(AGENT_MAIN_CONFIG_PREFIX)) {
+            return "agent." + personalAgentName + "." + key.substring(AGENT_MAIN_CONFIG_PREFIX.length());
+        }
+        return key;
     }
 
     public static void stampNewAgent(Agent agent) {

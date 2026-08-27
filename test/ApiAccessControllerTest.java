@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.AgentService;
+import services.ConfigService;
 import services.Tx;
 
 import java.util.function.Supplier;
@@ -109,6 +110,53 @@ class ApiAccessControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"name\":\"user-" + userId + "-main\""), body);
         assertTrue(body.contains("\"ownerUsername\":\"erin\""), body);
         assertFalse(body.contains("\"name\":\"main\""), body);
+    }
+
+    @Test
+    void tenantUserReceivesPrivateCopyOfInitialConfigDefaults() {
+        login();
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.baseUrl\",\"value\":\"http://template-provider.test\"}"));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.apiKey\",\"value\":\"sk-template\"}"));
+        assertIsOk(POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"template-model\",\"name\":\"Template Model\"}"));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"agent.main.queue.mode\",\"value\":\"collect\"}"));
+
+        var tenantId = idOf(POST("/api/access/tenants", "application/json",
+                "{\"slug\":\"defaultsco\",\"name\":\"Defaults Co\"}"));
+        var teamId = idOf(POST("/api/access/teams", "application/json",
+                "{\"tenantId\":%d,\"slug\":\"support\",\"name\":\"Support\"}".formatted(tenantId)));
+        var userResp = POST("/api/access/users", "application/json",
+                ("{\"username\":\"gina\",\"displayName\":\"Gina\",\"tenantId\":%d,"
+                        + "\"teamId\":%d,\"role\":\"USER\",\"password\":\"gina-password-123\"}")
+                        .formatted(tenantId, teamId));
+        assertIsOk(userResp);
+        var userId = idOf(userResp);
+        var userPrefix = "user." + userId + ".";
+        var personalAgent = "user-" + userId + "-main";
+
+        assertEquals("http://template-provider.test",
+                ConfigService.get(userPrefix + "provider.test-provider.baseUrl"));
+        assertNotNull(ConfigService.get(userPrefix + "provider.test-provider.models"));
+        assertEquals("collect",
+                ConfigService.get(userPrefix + "agent." + personalAgent + ".queue.mode"));
+        assertNull(ConfigService.get(userPrefix + "agent.main.queue.mode"));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\":\"gina\",\"password\":\"gina-password-123\"}"));
+        var userModels = getContent(GET("/api/providers/test-provider/models"));
+        assertTrue(userModels.contains("template-model"), userModels);
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.baseUrl\",\"value\":\"http://gina-provider.test\"}"));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        login();
+        var adminProvider = getContent(GET("/api/config/provider.test-provider.baseUrl"));
+        assertTrue(adminProvider.contains("http://template-provider.test"), adminProvider);
+        assertFalse(adminProvider.contains("gina-provider"), adminProvider);
     }
 
     @Test

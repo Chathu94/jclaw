@@ -85,6 +85,10 @@ public class ConfigService {
     public static String storageKeyForCurrentScope(String key) {
         if (currentConfigScopeIsGlobal()) return key;
         var user = AccessControlService.currentPrincipal().user();
+        return storageKeyForUser(user, key);
+    }
+
+    public static String storageKeyForUser(models.UserAccount user, String key) {
         return USER_KEY_PREFIX + user.id + "." + key;
     }
 

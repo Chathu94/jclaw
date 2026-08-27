@@ -125,7 +125,9 @@ class ApiConfigControllerTest extends FunctionalTest {
         POST("/api/auth/logout", "application/json", "{}");
         assertIsOk(POST("/api/auth/login", "application/json",
                 "{\"username\":\"settings-user\",\"password\":\"settings-password-123\"}"));
-        assertEquals(404, GET("/api/config/ui.theme").status.intValue());
+        var userInitial = GET("/api/config/ui.theme");
+        assertIsOk(userInitial);
+        assertTrue(getContent(userInitial).contains("\"value\":\"admin-dark\""), getContent(userInitial));
         assertIsOk(POST("/api/config", "application/json",
                 "{\"key\":\"ui.theme\",\"value\":\"user-light\"}"));
 
@@ -172,7 +174,9 @@ class ApiConfigControllerTest extends FunctionalTest {
         POST("/api/auth/logout", "application/json", "{}");
         assertIsOk(POST("/api/auth/login", "application/json",
                 "{\"username\":\"provider-user\",\"password\":\"provider-password-123\"}"));
-        assertEquals(404, GET("/api/providers/test-provider/models").status.intValue());
+        var userInitialModels = GET("/api/providers/test-provider/models");
+        assertIsOk(userInitialModels);
+        assertTrue(getContent(userInitialModels).contains("admin-model"), getContent(userInitialModels));
         assertIsOk(POST("/api/config", "application/json",
                 "{\"key\":\"provider.test-provider.baseUrl\",\"value\":\"http://user-provider.test\"}"));
         assertIsOk(POST("/api/config", "application/json",
@@ -181,8 +185,8 @@ class ApiConfigControllerTest extends FunctionalTest {
                 "{\"id\":\"user-model\",\"name\":\"User Model\"}"));
 
         var userModels = getContent(GET("/api/providers/test-provider/models"));
+        assertTrue(userModels.contains("admin-model"), userModels);
         assertTrue(userModels.contains("user-model"), userModels);
-        assertFalse(userModels.contains("admin-model"), userModels);
 
         POST("/api/auth/logout", "application/json", "{}");
         login();
