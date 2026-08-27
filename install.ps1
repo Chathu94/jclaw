@@ -1,7 +1,7 @@
 <#
   JClaw one-line installer (Windows)
 
-    irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Chathu94/jclaw/windows-dev/install.ps1 | iex
 
   Downloads the self-contained jclaw-bundle.zip from GitHub Releases, ensures a
   Java 25+ runtime (the bundle's only dependency), extracts it to %USERPROFILE%\.jclaw,
@@ -40,7 +40,7 @@
 $ErrorActionPreference = 'Stop'
 
 # ─── Configuration ───────────────────────────────────────────────────────────
-$Repo      = 'tsukhani/jclaw'
+$Repo      = 'Chathu94/jclaw'
 $JclawHome = if ($env:JCLAW_HOME)    { $env:JCLAW_HOME }    else { Join-Path $env:USERPROFILE '.jclaw' }
 $Version   = if ($env:JCLAW_VERSION) { $env:JCLAW_VERSION } else { 'latest' }
 $Port      = if ($env:JCLAW_PORT)    { $env:JCLAW_PORT }    else { '9000' }

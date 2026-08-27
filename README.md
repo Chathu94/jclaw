@@ -32,16 +32,16 @@ Get JClaw running in one command. The installer downloads the self-contained
 **only** runtime dependency), extracts it to `~/.jclaw`, and starts JClaw on
 <http://localhost:9000>.
 
-**macOS & Linux**
+**macOS & Linux** Do not use or merge to main ( this is a fork and this is for testing only )
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Chathu94/jclaw/windows-dev/install.sh | sh
 ```
 
-**Windows (PowerShell)**
+**Windows (PowerShell)** Do not use or merge to main ( this is a fork and this is for testing only )
 
 ```powershell
-irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/Chathu94/jclaw/windows-dev/install.ps1 | iex
 ```
 
 > On Windows the bundle runs through **Git Bash** or **WSL2**. The installer
