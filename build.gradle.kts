@@ -1,7 +1,7 @@
 plugins {
     id("org.playframework.play1")
     id("org.sonarqube") version "7.4.0.8496"
-    id("com.diffplug.spotless") version "8.9.0"
+    id("com.diffplug.spotless") version "8.10.0"
 }
 
 // Import hygiene enforcement for production Java (JCLAW code-audit follow-up). Two
@@ -47,8 +47,8 @@ play1 {
     // the repo root so both Dockerfiles can read it (avoids a stale parse
     // of this Gradle file from inside Docker, which silently broke when
     // build.gradle.kts switched to the dynamic `installed` variable). To
-    // bump play1: edit .play-version AND ensure /opt/play1 is on the
-    // matching release.
+    // bump play1: edit .play-version AND ensure PLAY1_HOME (default /opt/play1)
+    // is on the matching release.
     val declaredFile = rootProject.file(".play-version")
     require(declaredFile.isFile) {
         "Missing $declaredFile — expected a single line with the pinned play1 version (e.g. 1.13.7)."
@@ -459,11 +459,11 @@ dependencies {
     // OkHttp 5.x JVM artifact (the bare `okhttp` artifact is Gradle-Metadata
     // only and Play 1.x's Ivy didn't understand it; under Gradle Metadata is
     // native, but we keep the jvm-suffixed coord to mirror the python config).
-    implementation("com.squareup.okhttp3:okhttp-jvm:5.4.0")
+    implementation("com.squareup.okhttp3:okhttp-jvm:5.5.0")
 
     // JCLAW-185: SSE + MockWebServer 5.x (plain POMs, no -jvm suffix).
-    implementation("com.squareup.okhttp3:okhttp-sse:5.4.0")
-    implementation("com.squareup.okhttp3:mockwebserver3:5.4.0")
+    implementation("com.squareup.okhttp3:okhttp-sse:5.5.0")
+    implementation("com.squareup.okhttp3:mockwebserver3:5.5.0")
 
     // JCLAW-83: Slack SDK (official com.slack.api), a la carte — slack-api-client
     // (Web API + Block Kit) + slack-app-backend (SlackSignature.Verifier + event

@@ -111,4 +111,11 @@ class JvmStatsTest extends UnitTest {
                 "RSS availability must not vary run to run on one platform");
         if (first != null) assertTrue(first > 0, "a resident set is never zero bytes");
     }
+
+    @Test
+    void parsesWindowsPowerShellWorkingSetOutput() {
+        assertEquals(123456789L, ProcessRss.parseWindowsWorkingSet(" 123456789\r\n"));
+        assertNull(ProcessRss.parseWindowsWorkingSet(""));
+        assertNull(ProcessRss.parseWindowsWorkingSet("not-a-number"));
+    }
 }

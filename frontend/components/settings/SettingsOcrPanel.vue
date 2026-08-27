@@ -10,7 +10,7 @@ const { saving, refresh } = useSettingsConfig()
 
 // JCLAW-177 follow-up: probe state + Config DB toggle for the OCR section.
 // Fetched separately from /api/config so the section can render the toggle
-// as uninteractive when the binary isn't on PATH (probe.available=false),
+// as uninteractive when the binary isn't discoverable (probe.available=false),
 // regardless of what the stored ocr.tesseract.enabled row says.
 const { data: ocrStatus, refresh: refreshOcrStatus }
   = await useFetch<OcrStatusResponse>('/api/ocr/status')
@@ -103,6 +103,10 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
       </div>
       <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed">
         {{ backend.description }}
+        <span
+          v-if="backend.available && backend.executable"
+          class="block mt-1 font-mono text-[10px] break-all"
+        >{{ backend.executable }}</span>
         <span
           v-if="!backend.available"
           class="block mt-1 text-amber-700 dark:text-amber-400"

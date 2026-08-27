@@ -21,6 +21,7 @@ import services.SubagentRegistry;
 import services.Tx;
 import utils.ChannelOriginTrust;
 import utils.GsonHolder;
+import utils.PlatformProcess;
 import utils.SubprocessEnv;
 
 import java.io.File;
@@ -293,7 +294,7 @@ final class SubagentAcpRunner {
             // the origin trust so the untrusted-only mode can confine this run.
             var launched = HarnessSandbox.wrap(
                     command, workdir, new GenericAdapter(), sandboxTrustedOrigin(runId));
-            var pb = new ProcessBuilder(launched);
+            var pb = new ProcessBuilder(PlatformProcess.command(launched));
             if (workdir != null) pb.directory(workdir);
             SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
             proc = pb.start();
@@ -354,8 +355,8 @@ final class SubagentAcpRunner {
         boolean taskOnStdin = !argv.contains(task);
         Process proc = null;
         try {
-            var pb = new ProcessBuilder(
-                    HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
+            var pb = new ProcessBuilder(PlatformProcess.command(
+                    HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId))));
             if (workdir != null) pb.directory(workdir);
             SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
             proc = pb.start();
@@ -418,8 +419,8 @@ final class SubagentAcpRunner {
         Process proc = null;
         OutputStream stdin = null;
         try {
-            var pb = new ProcessBuilder(
-                    HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
+            var pb = new ProcessBuilder(PlatformProcess.command(
+                    HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId))));
             if (workdir != null) pb.directory(workdir);
             SubprocessEnv.apply(pb);   // JCLAW-779: strip inherited host secrets from the harness env
             proc = pb.start();
@@ -503,6 +504,7 @@ final class SubagentAcpRunner {
             @Override
             protected ProcessBuilder getProcessBuilder() {
                 var pb = super.getProcessBuilder();
+                pb.command(PlatformProcess.command(pb.command()));
                 SubprocessEnv.apply(pb);
                 return pb;
             }

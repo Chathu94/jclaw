@@ -24,6 +24,7 @@
 | Touching local ML (ASR, diarization, TTS, image, video) | [Sidecar Architecture](architecture-sidecar.md) |
 | Setting up / committing | [Development Guide](development-guide.md) |
 | Releasing / running in prod | [Deployment Guide](deployment-guide.md) |
+| Running on Windows | [Windows Support](../windows.md) |
 
 ## Document map
 
@@ -39,6 +40,7 @@
 | [integration-architecture.md](integration-architecture.md) | REST + SSE transports, external channels, deploy-artifact unification. |
 | [development-guide.md](development-guide.md) | Local setup, test commands, post-coding workflow (required). |
 | [deployment-guide.md](deployment-guide.md) | Jenkins pipeline, `jclaw.sh` / bundle, Docker, production config. |
+| [../windows.md](../windows.md) | Git Bash, WSL2 and Docker paths; native tools, OCR, setup, and platform boundaries. |
 | [architecture-sidecar.md](architecture-sidecar.md) | The five local Python ML daemons: two-tier uv split, protocols, engines, lifecycle. |
 | [project-parts.json](project-parts.json) | Machine-readable part/tech/integration metadata. |
 

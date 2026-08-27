@@ -32,7 +32,7 @@ public class ApiOcrController extends Controller {
     private static final Gson gson = GSON;
 
     public record OcrProvider(String name, String displayName, boolean available,
-                              String version, String reason, boolean enabled,
+                              String version, String reason, String executable, boolean enabled,
                               String configKey, String description, String installHint) {}
 
     public record OcrStatusResponse(List<OcrProvider> providers) {}
@@ -50,6 +50,7 @@ public class ApiOcrController extends Controller {
                 probe.available(),
                 probe.version(),
                 probe.reason(),
+                probe.executable(),
                 enabled,
                 "ocr.tesseract.enabled",
                 "Apache Tika's TesseractOCRParser. Extracts text from images and "
@@ -57,8 +58,9 @@ public class ApiOcrController extends Controller {
                         + "predictable for English-language print scans; weaker on "
                         + "handwriting and complex layouts.",
                 "Install tesseract on the host: brew install tesseract (macOS), "
-                        + "apt-get install tesseract-ocr (Debian/Ubuntu). A JVM restart is "
-                        + "required for the startup probe to re-detect the binary.");
+                        + "apt-get install tesseract-ocr (Debian/Ubuntu), or winget install "
+                        + "--id UB-Mannheim.TesseractOCR (Windows). If it is outside PATH, set "
+                        + "ocr.tesseract.path to its executable or install directory, then restart JClaw.");
 
         renderJSON(gson.toJson(new OcrStatusResponse(List.of(tesseract))));
     }

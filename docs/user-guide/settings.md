@@ -80,11 +80,11 @@ Two engines:
 
 Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
 
-- **active** — binary detected on PATH *and* enabled.
+- **active** — binary detected *and* enabled. The resolved executable is shown under the backend description.
 - **disabled** — detected but turned off.
-- **not detected** — binary missing on PATH; install hint shown inline.
+- **not detected** — binary not found on `PATH`, at `ocr.tesseract.path`, or in a standard Windows install location; install hint shown inline.
 
-Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
+Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. On Windows, JClaw automatically checks the UB Mannheim and Scoop locations because their installers do not always update the service process's `PATH`. For a portable or custom install, set `ocr.tesseract.path` in `conf/application.conf` to either `tesseract.exe` or its directory. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
 
 ## Image Captioning
 

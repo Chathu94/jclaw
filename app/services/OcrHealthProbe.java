@@ -14,7 +14,11 @@ package services;
  */
 public class OcrHealthProbe {
 
-    public record ProbeResult(boolean available, String version, String reason) { }
+    public record ProbeResult(boolean available, String version, String reason, String executable) {
+        public ProbeResult(boolean available, String version, String reason) {
+            this(available, version, reason, null);
+        }
+    }
 
     private static final ProbeCache<ProbeResult> CACHE = new ProbeCache<>(
             new ProbeResult(false, null, "tesseract probe has not run yet"));
@@ -31,12 +35,19 @@ public class OcrHealthProbe {
      * first line is surfaced as before.
      */
     public static ProbeResult probe() {
-        var r = ExecutableProbeSupport.probeCapturing("tesseract", "--version", "");
+        var resolution = OcrExecutableResolver.resolve();
+        if (resolution != null && !resolution.available()) {
+            return CACHE.set(new ProbeResult(false, null,
+                    "%s does not exist (%s)".formatted(resolution.executable(), resolution.source()),
+                    resolution.executable().toString()));
+        }
+        var executable = resolution == null ? "tesseract" : resolution.executable().toString();
+        var r = ExecutableProbeSupport.probeCapturing(executable, "--version", "");
         if (r.available()) {
             var firstLine = r.output().lines().findFirst().orElse("(no version output)").trim();
-            return CACHE.set(new ProbeResult(true, firstLine, null));
+            return CACHE.set(new ProbeResult(true, firstLine, null, executable));
         }
-        return CACHE.set(new ProbeResult(false, null, r.reason()));
+        return CACHE.set(new ProbeResult(false, null, r.reason(), executable));
     }
 
     public static ProbeResult lastResult() {

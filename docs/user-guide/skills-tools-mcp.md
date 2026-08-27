@@ -136,6 +136,8 @@ Each row has a **Test** button. JClaw connects, lists the server's tools, and re
 
 A successful test doesn't guarantee a server's tools will work end-to-end — you still need to attach it to an agent and try one.
 
+On Windows, commands installed by npm such as `npx.cmd` are resolved and launched through `cmd.exe` automatically. MCP configuration can therefore use the same `npx -y …` command shown by a server's documentation; no Windows-only command rewrite is needed.
+
 ### Binding a server to an agent
 
 Same flow as tools: open [Agents](/agents), open the agent, scroll to **MCP Servers**, tick the box. The agent now sees that server's tools the next time it generates.

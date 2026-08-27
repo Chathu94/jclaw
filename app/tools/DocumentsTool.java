@@ -534,7 +534,9 @@ public class DocumentsTool implements ToolRegistry.Tool {
         if (probe.available()) return null;
         return "Note: tesseract is unavailable (" + probe.reason() + "). "
                 + "OCR-dependent inputs (image-only PDFs, plain images, scanned documents) "
-                + "require tesseract on PATH. Install: brew install tesseract (macOS), "
-                + "apt-get install tesseract-ocr (Debian/Ubuntu).";
+                + "require tesseract. Install: brew install tesseract (macOS), "
+                + "apt-get install tesseract-ocr (Debian/Ubuntu), or winget install "
+                + "--id UB-Mannheim.TesseractOCR (Windows). If it is outside PATH, set "
+                + "ocr.tesseract.path in conf/application.conf.";
     }
 }

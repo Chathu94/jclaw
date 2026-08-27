@@ -8,6 +8,46 @@ pwd -P >/dev/null 2>&1 || cd "${0%/*}" 2>/dev/null || cd / 2>/dev/null
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_PID_FILE="frontend.pid"
 
+# Git Bash / MSYS2 / Cygwin drive NATIVE Windows binaries (the java.exe the
+# Windows installer unpacks) from a POSIX shell. Those cannot resolve a /c/...
+# path and split classpaths on ';', so anything handed to them needs translating
+# — and where a relative path will do, it is the portable answer (JCLAW-1104).
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1; CP_SEP=';' ;;
+    *)                    IS_WINDOWS=0; CP_SEP=':' ;;
+esac
+
+# Absolute POSIX path -> native form. No-op off Windows.
+native_path() {
+    if [[ "$IS_WINDOWS" == 1 ]]; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
+}
+
+# One pid per line for sockets on $1; pass "listen" to keep only LISTENing ones.
+# lsof is absent from Git Bash, so Windows falls back to netstat. Exit 2 means
+# NEITHER tool exists: callers must not read that as "the port is free", which is
+# how the pre-start conflict check would quietly stop guarding (JCLAW-1105).
+_port_pids() {
+    local port="$1" mode="${2:-}"
+    if command -v lsof >/dev/null 2>&1; then
+        if [[ "$mode" == listen ]]; then
+            lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true
+        else
+            lsof -ti :"$port" 2>/dev/null || true
+        fi
+        return 0
+    fi
+    if command -v netstat >/dev/null 2>&1; then
+        # Windows: "TCP  0.0.0.0:9000  0.0.0.0:0  LISTENING  1234"
+        netstat -ano 2>/dev/null | awk -v p="$port" -v m="$mode" '
+            $1 == "TCP" && $2 ~ ":" p "$" { if (m != "listen" || $4 == "LISTENING") print $5 }' \
+            | sort -u
+        return 0
+    fi
+    return 2
+}
+port_pids()          { _port_pids "$1"; }
+port_listener_pids() { _port_pids "$1" listen; }
+
 # How to refer to this script in help/usage text: the global `jclaw` shim when
 # it's on PATH and resolves to THIS install (the shim `exec`s jclaw.sh, so $0
 # can't tell a shim call from a direct ./jclaw.sh call — we detect the shim
@@ -2098,8 +2138,8 @@ ALTER TABLE user_account ADD COLUMN IF NOT EXISTS password_hash VARCHAR(512);
 ALTER TABLE user_account ADD COLUMN IF NOT EXISTS credential_version BIGINT DEFAULT 0;
 UPDATE user_account SET password_hash=NULL, credential_version=COALESCE(credential_version, 0) + 1 WHERE password_hash IS NOT NULL;"
 
-    echo "==> Clearing auth.admin.passwordHash and user password hashes..."
-    if ! java -cp "$h2_jar" org.h2.tools.Shell -url "$jdbc_url" -sql "$sql"; then
+    echo "==> Clearing auth.admin.passwordHash..."
+    if ! java -cp "$(native_path "$h2_jar")" org.h2.tools.Shell -url "$jdbc_url" -sql "$sql"; then
         echo "Error: H2 Shell command failed. Inspect the output above."
         exit 1
     fi
@@ -2242,6 +2282,17 @@ do_setup() {
     echo "    Node:     $(node -v)"
     echo "    Play:     $(command -v play)"
     echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
+    if command -v tesseract >/dev/null 2>&1; then
+        echo "    OCR:      $(tesseract --version 2>&1 | head -1)"
+    else
+        echo "    OCR:      optional tesseract not found"
+        if [[ "$IS_WINDOWS" == 1 ]]; then
+            echo "              runtime also checks standard Windows install locations"
+            echo "              winget install --id UB-Mannheim.TesseractOCR"
+        else
+            echo "              brew install tesseract (macOS) or apt-get install tesseract-ocr (Debian/Ubuntu)"
+        fi
+    fi
 
     echo ""
     echo "==> Wiring git hooks (.githooks/)..."
@@ -2274,10 +2325,9 @@ do_setup() {
     # install files and ~42 generated skill manifests respectively. Tracking
     # them caused massive diffs every time BMAD upgraded between minor
     # versions (e.g. 6.2.2 → 6.5.0 deleted/moved hundreds of files), so we
-    # let setup regenerate them instead. Update is the lightest action
-    # that keeps existing module settings AND re-registers the IDE; -y skips
-    # the prompts that would otherwise hang in non-interactive contexts;
-    # --directory pins it to this clone (otherwise it asks).
+    # let setup regenerate them instead. Update keeps existing module settings
+    # and re-registers the IDE; -y skips prompts that would otherwise hang in
+    # non-interactive contexts; --directory pins it to this clone.
     if ! command -v npx &>/dev/null; then
         echo "    Warning: npx not on PATH. Install Node.js to enable BMAD."
         echo "             Then re-run: ${INVOKE} setup"
@@ -2573,9 +2623,13 @@ do_start_prod() {
     # socket on the port, including client-side CLOSE_WAITs (e.g. a Chrome
     # tab that was talking to a now-dead JVM). Only a LISTENing socket
     # blocks bind(), so filtering by state avoids false positives.
-    if lsof -ti :"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    local listeners probe_rc=0
+    listeners=$(port_listener_pids "$BACKEND_PORT") || probe_rc=$?
+    if (( probe_rc == 2 )); then
+        echo "Warning: cannot tell whether port $BACKEND_PORT is free (no lsof, no netstat); starting anyway." >&2
+    elif [[ -n "$listeners" ]]; then
         local holder
-        holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
+        holder=$(port_pids "$BACKEND_PORT" | tr '\n' ' ')
         echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
         echo "       Run '$0 stop' first, or kill the holder."
         exit 1
@@ -2860,6 +2914,9 @@ do_start_prod() {
 # generation per dev reload. Sweep by process signature instead: every Play
 # JVM carries -Dapplication.path=<project dir> on its command line.
 kill_orphan_jvms() {
+    # Git Bash ships no pgrep and Windows offers no cheap command-line match, so
+    # the signature sweep is skipped there rather than reporting "no orphans".
+    command -v pgrep >/dev/null 2>&1 || return 0
     local orphans
     orphans=$(pgrep -f "application.path=${SCRIPT_DIR}" 2>/dev/null || true)
     [[ -z "$orphans" ]] && return 0
@@ -2980,9 +3037,13 @@ do_start_dev() {
     # socket on the port, including client-side CLOSE_WAITs (e.g. a Chrome
     # tab that was talking to a now-dead JVM). Only a LISTENing socket
     # blocks bind(), so filtering by state avoids false positives.
-    if lsof -ti :"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+    local listeners probe_rc=0
+    listeners=$(port_listener_pids "$BACKEND_PORT") || probe_rc=$?
+    if (( probe_rc == 2 )); then
+        echo "Warning: cannot tell whether port $BACKEND_PORT is free (no lsof, no netstat); starting anyway." >&2
+    elif [[ -n "$listeners" ]]; then
         local holder
-        holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
+        holder=$(port_pids "$BACKEND_PORT" | tr '\n' ' ')
         echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
         echo "       Run '$0 --dev stop' first, or kill the holder."
         exit 1
@@ -3092,6 +3153,13 @@ do_start_dev() {
 
 kill_tree() {
     local pid=$1
+    # No pgrep under Git Bash, so the descent below cannot enumerate children;
+    # taskkill /T does the same job natively. The doubled slashes stop MSYS
+    # rewriting /PID and /T into paths (JCLAW-1105).
+    if [[ "$IS_WINDOWS" == 1 ]] && command -v taskkill >/dev/null 2>&1; then
+        taskkill //PID "$pid" //T >/dev/null 2>&1 || true
+        return 0
+    fi
     local children
     children=$(pgrep -P "$pid" 2>/dev/null) || true
     for child in $children; do
@@ -3109,7 +3177,7 @@ wait_for_port_free() {
     local port=$1
     local timeout=${2:-30}
     local waited=0
-    while lsof -ti :"$port" >/dev/null 2>&1; do
+    while [[ -n "$(port_pids "$port")" ]]; do
         sleep 1
         waited=$((waited + 1))
         (( waited >= timeout )) && return 1
@@ -3147,7 +3215,7 @@ do_stop_dev() {
     # exactly what the flag exists to preserve.
     if [[ "$BACKEND_ONLY" != true ]]; then
         local orphan
-        orphan=$(lsof -ti :"$FRONTEND_PORT" 2>/dev/null) || true
+        orphan=$(port_pids "$FRONTEND_PORT") || true
         if [[ -n "$orphan" ]]; then
             echo "    Cleaning up orphan process on port $FRONTEND_PORT (pid: $orphan)..."
             kill $orphan 2>/dev/null || true
@@ -3168,7 +3236,7 @@ do_stop_dev() {
 
             if ! wait_for_port_free "$BACKEND_PORT" 30; then
                 local stragglers
-                stragglers=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null) || true
+                stragglers=$(port_pids "$BACKEND_PORT") || true
                 if [[ -n "$stragglers" ]]; then
                     echo "    Port $BACKEND_PORT still bound after 30s; SIGKILL on residual pids: $stragglers"
                     kill -9 $stragglers 2>/dev/null || true
@@ -3696,7 +3764,7 @@ do_evals() {
     fi
     lib_dir=$(dirname "$h2_jar")
 
-    java -cp "$classes:$lib_dir/*" services.evals.EvalRunner ${EVAL_ARGS[@]+"${EVAL_ARGS[@]}"}
+    java -cp "$(native_path "$classes")${CP_SEP}$(native_path "$lib_dir")/*" services.evals.EvalRunner ${EVAL_ARGS[@]+"${EVAL_ARGS[@]}"}
 }
 
 # ─── Consolidated test runner ───
@@ -3719,9 +3787,9 @@ do_e2e() {
     if [[ -z "$base" ]]; then
         # -sTCP:LISTEN is load-bearing: a plain `lsof -ti :PORT` also matches
         # client sockets connected to that port, not just the listener.
-        if lsof -ti :"$FRONTEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        if [[ -n "$(port_listener_pids "$FRONTEND_PORT")" ]]; then
             base="http://localhost:$FRONTEND_PORT"
-        elif lsof -ti :"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        elif [[ -n "$(port_listener_pids "$BACKEND_PORT")" ]]; then
             base="http://localhost:$BACKEND_PORT"
         else
             echo "Error: no JClaw server is listening on :$FRONTEND_PORT or :$BACKEND_PORT." >&2
@@ -4131,6 +4199,32 @@ pwd -P >/dev/null 2>&1 || cd / 2>/dev/null
 exec "$SCRIPT_DIR/jclaw.sh" "\$@"
 EOF
     chmod +x "$bin_dir/jclaw"
+
+    # PowerShell and cmd.exe cannot run the extensionless POSIX shim above, so
+    # Windows needs a .cmd alongside it — .cmd rather than .ps1 because it works
+    # from both shells and needs no execution-policy change. Emitted here rather
+    # than by install.ps1 for the reason this function exists: `upgrade` refreshes
+    # whatever write_shim produces, and an installer-written shim would go stale.
+    #
+    # `bash -l <script> %*` rather than `bash -lc "... $@"`: passing the script
+    # directly sidesteps a second round of quote parsing, so `jclaw config set x
+    # "a b"` survives cmd -> bash intact. -l is required for play/java to be on
+    # PATH. install.ps1 owns the one part bash cannot do — the Windows PATH entry.
+    #
+    # Written to the install root as well as the PATH directory. Same generator,
+    # so the two cannot drift — and the root copy is the fallback when the PATH
+    # entry does not take (locked-down profile, policy-blocked registry write):
+    # `cd` to the folder the installer names and run `.\jclaw.cmd start`. It is a
+    # degraded fallback, not a replacement — no file in the install folder can
+    # give you `jclaw` from anywhere — but it beats the alternative, which is
+    # knowing to invoke bash.exe against jclaw.sh by hand.
+    if [[ "$IS_WINDOWS" == 1 ]]; then
+        local bash_win cmd_body
+        bash_win="$(native_path "$(command -v bash)")" || return 1
+        cmd_body="$(printf '@echo off\n"%s" -l "%s/jclaw.sh" %%*\n' "$bash_win" "$SCRIPT_DIR")"
+        printf '%s' "$cmd_body" > "$bin_dir/jclaw.cmd"
+        printf '%s' "$cmd_body" > "$SCRIPT_DIR/jclaw.cmd"
+    fi
 }
 
 # True when writing the shim would not take one over from a different install:
@@ -4210,6 +4304,12 @@ do_uninstall() {
 
     if [[ -n "$shim" ]]; then
         rm -f "$shim" && echo "    removed $shim"
+        # The Windows sibling write_shim emits; harmless to attempt elsewhere.
+        if [[ -f "${shim%/*}/jclaw.cmd" ]]; then
+            rm -f "${shim%/*}/jclaw.cmd" && echo "    removed ${shim%/*}/jclaw.cmd"
+            echo "    NOTE: the Windows PATH entry is not removed here — drop"
+            echo "          ${shim%/*} from your User PATH if nothing else uses it."
+        fi
     fi
 
     cd / 2>/dev/null || true   # step out of the tree before deleting it

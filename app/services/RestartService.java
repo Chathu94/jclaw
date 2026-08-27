@@ -1,6 +1,7 @@
 package services;
 
 import play.Play;
+import utils.PlatformProcess;
 
 import java.io.File;
 import java.io.IOException;
@@ -190,7 +191,7 @@ public final class RestartService {
 
         var shell = "sleep " + RESPONSE_FLUSH_DELAY_SECONDS + "; exec " + shellQuote(plan.command());
 
-        new ProcessBuilder("/bin/sh", "-c", shell)
+        new ProcessBuilder(PlatformProcess.posixShellCommand(shell))
                 .directory(Play.applicationPath)
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                 .redirectErrorStream(true)

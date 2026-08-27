@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import play.Logger;
 import play.Play;
+import utils.PlatformProcess;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -75,7 +76,8 @@ public final class SidecarCapabilityProbe {
     private void runProbe() {
         try {
             var sidecarDir = new File(Play.applicationPath, sidecarRelDir);
-            var proc = new ProcessBuilder(List.of("uv", "run", "serve.py", "--probe"))
+            var proc = new ProcessBuilder(PlatformProcess.command(
+                    List.of("uv", "run", "serve.py", "--probe")))
                     .directory(sidecarDir).start();
             // Drain stderr concurrently so a chatty torch/uv import can't fill the pipe and deadlock the
             // stdout read (the classic ProcessBuilder pitfall).
