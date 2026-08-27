@@ -2133,7 +2133,10 @@ do_reset() {
     # pattern — passing -user sa -password "" lands a 28000 invalid-
     # auth error against the very database we created.
     local jdbc_url="jdbc:h2:file:$SCRIPT_DIR/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE"
-    local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';"
+    local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';
+ALTER TABLE user_account ADD COLUMN IF NOT EXISTS password_hash VARCHAR(512);
+ALTER TABLE user_account ADD COLUMN IF NOT EXISTS credential_version BIGINT DEFAULT 0;
+UPDATE user_account SET password_hash=NULL, credential_version=COALESCE(credential_version, 0) + 1 WHERE password_hash IS NOT NULL;"
 
     echo "==> Clearing auth.admin.passwordHash..."
     if ! java -cp "$(native_path "$h2_jar")" org.h2.tools.Shell -url "$jdbc_url" -sql "$sql"; then

@@ -18,6 +18,10 @@ pluginManagement {
         "play1 framework not found at $versionFile — set PLAY1_HOME to the Play 1.13.x install"
     }
     val installed = versionFile.readText().trim()
+    repositories {
+        maven { url = uri(playRoot.resolve("framework/gradle-plugin-repo")) }
+        gradlePluginPortal()
+    }
     plugins {
         id("org.playframework.play1") version installed
     }

@@ -22,9 +22,12 @@ import utils.HttpFactories;
 
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 public class ConfigService {
 
@@ -32,6 +35,8 @@ public class ConfigService {
 
     /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
     private static final String PROVIDER_KEY_PREFIX = "provider.";
+    private static final String USER_KEY_PREFIX = "user.";
+    private static final Pattern USER_SCOPED_KEY = Pattern.compile("user\\.\\d+\\..+");
 
     // The cache stores Optional<String> rather than String so we can distinguish
     // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
@@ -63,6 +68,83 @@ public class ConfigService {
     public static String get(String key, String defaultValue) {
         var value = get(key);
         return value != null ? value : defaultValue;
+    }
+
+    public static boolean currentConfigScopeIsGlobal() {
+        try {
+            return AccessControlService.currentPrincipal().allAdmin();
+        } catch (RuntimeException _) {
+            return true;
+        }
+    }
+
+    public static boolean isUserScopedStorageKey(String key) {
+        return key != null && USER_SCOPED_KEY.matcher(key).matches();
+    }
+
+    public static String storageKeyForCurrentScope(String key) {
+        if (currentConfigScopeIsGlobal()) return key;
+        var user = AccessControlService.currentPrincipal().user();
+        return storageKeyForUser(user, key);
+    }
+
+    public static String storageKeyForUser(models.UserAccount user, String key) {
+        return USER_KEY_PREFIX + user.id + "." + key;
+    }
+
+    public static String displayKeyForCurrentScope(String storedKey) {
+        if (currentConfigScopeIsGlobal()) return storedKey;
+        var user = AccessControlService.currentPrincipal().user();
+        var prefix = USER_KEY_PREFIX + user.id + ".";
+        return storedKey != null && storedKey.startsWith(prefix)
+                ? storedKey.substring(prefix.length())
+                : storedKey;
+    }
+
+    public static boolean belongsToCurrentConfigScope(String storedKey) {
+        if (currentConfigScopeIsGlobal()) {
+            return storedKey != null && !isUserScopedStorageKey(storedKey);
+        }
+        var user = AccessControlService.currentPrincipal().user();
+        return storedKey != null && storedKey.startsWith(USER_KEY_PREFIX + user.id + ".");
+    }
+
+    public static List<Config> listForCurrentScope() {
+        return listAll().stream()
+                .filter(c -> belongsToCurrentConfigScope(c.key))
+                .toList();
+    }
+
+    public static Map<String, String> configMapForCurrentScope() {
+        var out = new HashMap<String, String>();
+        for (var c : listForCurrentScope()) {
+            out.put(displayKeyForCurrentScope(c.key), c.value);
+        }
+        return out;
+    }
+
+    public static Map<String, String> configMapForGlobalScope() {
+        var out = new HashMap<String, String>();
+        for (var c : listAll()) {
+            if (!isUserScopedStorageKey(c.key)) out.put(c.key, c.value);
+        }
+        return out;
+    }
+
+    public static String getForCurrentScope(String key) {
+        return get(storageKeyForCurrentScope(key));
+    }
+
+    public static String logicalKeyForStorage(String key) {
+        if (!isUserScopedStorageKey(key)) return key;
+        var secondDot = key.indexOf('.', USER_KEY_PREFIX.length());
+        return secondDot >= 0 ? key.substring(secondDot + 1) : key;
+    }
+
+    private static String siblingStorageKey(String key, String logicalSiblingKey) {
+        if (!isUserScopedStorageKey(key)) return logicalSiblingKey;
+        var logicalKey = logicalKeyForStorage(key);
+        return key.substring(0, key.length() - logicalKey.length()) + logicalSiblingKey;
     }
 
     public static int getInt(String key, int defaultValue) {
@@ -192,17 +274,18 @@ public class ConfigService {
      * @return an error message if the key is rejected, or {@code null} on success
      */
     public static String setWithSideEffects(String key, String value) {
+        var logicalKey = logicalKeyForStorage(key);
         // JCLAW-1022: a row that would loosen a conf-capped key is already inert at the read.
         // Refusing it here is for the operator: a save that cannot take effect would otherwise
         // answer 200 and then read back as something else.
-        var capped = PrivilegedConfig.rejectionFor(key, value);
+        var capped = PrivilegedConfig.rejectionFor(logicalKey, value);
         if (capped != null) {
             return capped;
         }
 
         // Shell exec privileges are restricted to the main agent
-        if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
-            var agentName = key.split("\\.")[1];
+        if (logicalKey.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
+            var agentName = logicalKey.split("\\.")[1];
             var agent = Agent.findByName(agentName);
             if (agent == null || !agent.isMain()) {
                 return "Shell exec privileges can only be set for the main agent.";
@@ -212,7 +295,7 @@ public class ConfigService {
         // Operator timezone must be a valid IANA zone id. Reject typos here so
         // the system prompt never injects a bad zone — TimezoneResolver.appZone
         // would silently fall back to the server default, hiding the mistake.
-        if (key.equals(TimezoneResolver.APP_CONFIG_KEY)) {
+        if (logicalKey.equals(TimezoneResolver.APP_CONFIG_KEY)) {
             try {
                 ZoneId.of(value == null ? "" : value.trim());
             } catch (Exception _) {
@@ -224,7 +307,7 @@ public class ConfigService {
         // JCLAW-1102: this classification is what lets memory text reach a host, so a typo
         // must not read as "remote". Boolean.parseBoolean maps anything unrecognised to
         // false, which would leave embeddings refusing a provider the operator declared local.
-        if (key.startsWith(PROVIDER_KEY_PREFIX) && key.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
+        if (logicalKey.startsWith(PROVIDER_KEY_PREFIX) && logicalKey.endsWith(ProviderLocality.DECLARED_LOCAL_SUFFIX)
                 && value != null && !value.isBlank()
                 && !"true".equalsIgnoreCase(value.trim()) && !"false".equalsIgnoreCase(value.trim())) {
             return PROVIDER_KEY_PREFIX + "*" + ProviderLocality.DECLARED_LOCAL_SUFFIX + " must be 'true' or 'false'.";
@@ -238,10 +321,10 @@ public class ConfigService {
         //
         // The reranker is held to the same rule for the same reason: it renders the whole
         // candidate shortlist into its prompt, so whatever serves it sees memory text.
-        if ((key.equals(MemoryVectorSettings.KEY_PROVIDER) || key.equals(MemoryReranker.KEY_PROVIDER))
+        if ((logicalKey.equals(MemoryVectorSettings.KEY_PROVIDER) || logicalKey.equals(MemoryReranker.KEY_PROVIDER))
                 && value != null && !value.isBlank()
                 && !ProviderLocality.isLocal(value)) {
-            var feature = key.equals(MemoryReranker.KEY_PROVIDER) ? "reranking" : "embeddings";
+            var feature = logicalKey.equals(MemoryReranker.KEY_PROVIDER) ? "reranking" : "embeddings";
             return "Provider '" + value + "' is not local. Memory " + feature + " must use a "
                     + "provider classified as self-hosted in Settings > LLM Providers, so "
                     + "memory text only goes where you allow it.";
@@ -250,10 +333,10 @@ public class ConfigService {
         // JCLAW-970: both keys are writable through POST /api/config, and a bad value is silent
         // at read — a negative rrfK pins one memory above every other, a non-finite minCosine
         // drops the vector leg entirely. Rejected here for the reason the timezone guard gives.
-        if (key.equals(JpaMemoryStore.KEY_RRF_K) && !isNonNegativeInt(value)) {
+        if (logicalKey.equals(JpaMemoryStore.KEY_RRF_K) && !isNonNegativeInt(value)) {
             return "memory.recall.rrfK must be a non-negative integer.";
         }
-        if (key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)) {
+        if (logicalKey.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)) {
             return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
         }
 
@@ -264,12 +347,12 @@ public class ConfigService {
         // turn — so pay the load now rather than on their first utterance. Gated
         // on the sidecar already running: a Settings change should not spawn a
         // Python process, and a later spawn prewarms on its own.
-        if (key.equals("tts." + TtsEngine.SIDECAR.id() + ".model")
+        if (logicalKey.equals("tts." + TtsEngine.SIDECAR.id() + ".model")
                 && TtsSidecarManager.isRunning()) {
             TtsSidecarManager.prewarmModelAsync();
         }
 
-        if (key.startsWith(PROVIDER_KEY_PREFIX)) {
+        if (logicalKey.startsWith(PROVIDER_KEY_PREFIX)) {
             AgentService.syncEnabledStates();
         }
         // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
@@ -277,13 +360,13 @@ public class ConfigService {
         // old provider/model for the life of the process and the settings change looks
         // like it did nothing. reset() only clears the reference — the rebuild happens on
         // next use, keeping pgvector re-provisioning off the settings-save path.
-        if (key.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
+        if (logicalKey.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
             MemoryStoreFactory.reset();
         }
         // JCLAW-172: shell.enabled / playwright.enabled are gone — the tools
         // register unconditionally now. Only the loadtest mock provider still
         // toggles a tool registration via this side effect.
-        if (key.equals("provider.loadtest-mock.enabled")) {
+        if (logicalKey.equals("provider.loadtest-mock.enabled")) {
             ToolRegistrationJob.registerAll();
         }
 
@@ -291,16 +374,16 @@ public class ConfigService {
         // requiring a restart. HttpFactories.applyDispatcherConfig reads
         // both keys and pushes them into the live OkHttp dispatcher, so
         // the next outbound LLM call uses the new cap.
-        if (key.equals("dispatcher.llm.maxRequestsPerHost")
-                || key.equals("dispatcher.llm.maxRequests")) {
+        if (logicalKey.equals("dispatcher.llm.maxRequestsPerHost")
+                || logicalKey.equals("dispatcher.llm.maxRequests")) {
             HttpFactories.applyDispatcherConfig();
         }
 
         // Per-logger level overrides apply live: the next log statement on the
         // affected logger uses the new level. The override is layered on top of
         // the file config, so it wins. See LoggerLevelService.
-        if (key.startsWith(LoggerLevelService.PREFIX)) {
-            LoggerLevelService.apply(key.substring(LoggerLevelService.PREFIX.length()), value);
+        if (logicalKey.startsWith(LoggerLevelService.PREFIX)) {
+            LoggerLevelService.apply(logicalKey.substring(LoggerLevelService.PREFIX.length()), value);
         }
 
         // Convenience linkage: when the operator first sets the Ollama Cloud
@@ -315,11 +398,12 @@ public class ConfigService {
         // the LLM key don't drag the search key along, preserving the
         // "set once, owned by you" model that operators expect from
         // independent settings.
-        if (key.equals("provider.ollama-cloud.apiKey") && value != null && !value.isBlank()) {
-            String existingSearchKey = get("search.ollama.apiKey");
+        if (logicalKey.equals("provider.ollama-cloud.apiKey") && value != null && !value.isBlank()) {
+            var searchApiKey = siblingStorageKey(key, "search.ollama.apiKey");
+            String existingSearchKey = get(searchApiKey);
             if (existingSearchKey == null || existingSearchKey.isBlank()) {
-                set("search.ollama.apiKey", value);
-                set("search.ollama.enabled", "true");
+                set(searchApiKey, value);
+                set(siblingStorageKey(key, "search.ollama.enabled"), "true");
                 EventLogger.info("config",
                         "Mirrored ollama-cloud LLM apiKey into search.ollama.apiKey "
                                 + "and enabled web search (search key was empty)");
@@ -379,23 +463,24 @@ public class ConfigService {
      */
     public static void deleteWithSideEffects(String key) {
         delete(key);
-        if (key.startsWith(PROVIDER_KEY_PREFIX)) {
+        var logicalKey = logicalKeyForStorage(key);
+        if (logicalKey.startsWith(PROVIDER_KEY_PREFIX)) {
             AgentService.syncEnabledStates();
         }
         // JCLAW-930: see setWithSideEffects — clearing a vector key changes the
         // effective setting just as writing one does, so the store must rebuild too.
-        if (key.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
+        if (logicalKey.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
             MemoryStoreFactory.reset();
         }
         // JCLAW-172: see setWithSideEffects for the rationale — only the
         // loadtest mock still triggers a tool re-registration on toggle.
-        if (key.equals("provider.loadtest-mock.enabled")) {
+        if (logicalKey.equals("provider.loadtest-mock.enabled")) {
             ToolRegistrationJob.registerAll();
         }
         // Deleting a logger override reverts that logger to its inherited level
         // (root → its captured file baseline). See LoggerLevelService.
-        if (key.startsWith(LoggerLevelService.PREFIX)) {
-            LoggerLevelService.revert(key.substring(LoggerLevelService.PREFIX.length()));
+        if (logicalKey.startsWith(LoggerLevelService.PREFIX)) {
+            LoggerLevelService.revert(logicalKey.substring(LoggerLevelService.PREFIX.length()));
         }
     }
 

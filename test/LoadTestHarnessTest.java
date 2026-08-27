@@ -173,8 +173,10 @@ class LoadTestHarnessTest extends UnitTest {
 
         assertEquals(40, contentFrames(body), "at 200 tok/s each token gets its own frame");
         // The biased form averaged 4ms of a nominal 5ms spacing — ~156ms across 39 gaps.
-        // Upper bound is loose because a slow host only ever runs late.
-        assertTrue(elapsedMs >= 170 && elapsedMs < 600,
+        // A slow host only ever runs late, so keep this to the lower-bound
+        // property that catches the previous too-fast cadence without making the
+        // suite depend on scheduler headroom.
+        assertTrue(elapsedMs >= 170,
                 "expected ~200ms of simulated generation, got " + elapsedMs + "ms");
     }
 

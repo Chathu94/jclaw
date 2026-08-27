@@ -11,6 +11,7 @@ import models.AgentBinding;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AccessControlService;
 import services.AgentService;
 import services.BindingService;
 import utils.ApiResponses;
@@ -45,6 +46,7 @@ public class ApiBindingsController extends Controller {
                 .createQuery("SELECT b FROM AgentBinding b JOIN FETCH b.agent", AgentBinding.class)
                 .getResultList();
         var result = bindings.stream()
+                .filter(b -> AccessControlService.canReadAgent(b.agent))
                 .map(BindingView::of)
                 .toList();
         renderJSON(gson.toJson(result));
@@ -61,7 +63,7 @@ public class ApiBindingsController extends Controller {
         }
 
         var agentId = requiredLong(body, KEY_AGENT_ID);
-        var agent = AgentService.findById(agentId);
+        var agent = AgentService.findReadableById(agentId);
         if (agent == null) {
             notFound();
             throw ApiResponses.unreachable();
@@ -94,7 +96,7 @@ public class ApiBindingsController extends Controller {
         }
 
         if (body.has(KEY_AGENT_ID)) {
-            var agent = AgentService.findById(requiredLong(body, KEY_AGENT_ID));
+            var agent = AgentService.findReadableById(requiredLong(body, KEY_AGENT_ID));
             if (agent == null) {
                 notFound();
                 throw ApiResponses.unreachable();

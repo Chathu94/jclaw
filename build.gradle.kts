@@ -28,7 +28,9 @@ spotless {
 }
 
 play1 {
-    val playRoot = file(providers.environmentVariable("PLAY1_HOME").getOrElse("/opt/play1"))
+    val defaultPlayRoot = file("/opt/play1").takeIf { it.exists() }
+        ?: file("${System.getProperty("user.home")}/.local/share/jclaw-toolchain/play1")
+    val playRoot = file(providers.environmentVariable("PLAY1_HOME").orElse(defaultPlayRoot.absolutePath).get())
     frameworkPath.set(playRoot)
 
     // Pinned framework version range. Bump when migrating to a new minor

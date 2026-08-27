@@ -156,6 +156,34 @@ class ApiBindingsControllerTest extends FunctionalTest {
                 "expected agentName alpha: " + body);
     }
 
+    @Test
+    void tenantUserCannotListOrCreateBindingForAnotherUsersAgent() {
+        login();
+        var adminAgentId = seedAgent("admin-alpha");
+        seedBinding(adminAgentId, "slack", "ADMIN", 0);
+
+        var tenantId = idOf(POST("/api/access/tenants", "application/json",
+                "{\"slug\":\"bindingco\",\"name\":\"Binding Co\"}"));
+        var teamId = idOf(POST("/api/access/teams", "application/json",
+                "{\"tenantId\":%d,\"slug\":\"support\",\"name\":\"Support\"}".formatted(tenantId)));
+        assertIsOk(POST("/api/access/users", "application/json",
+                ("{\"username\":\"binding-user\",\"displayName\":\"Binding User\",\"tenantId\":%d,"
+                        + "\"teamId\":%d,\"role\":\"USER\",\"password\":\"binding-password-123\"}")
+                        .formatted(tenantId, teamId)));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\":\"binding-user\",\"password\":\"binding-password-123\"}"));
+
+        var listBody = getContent(GET("/api/bindings"));
+        assertFalse(listBody.contains("ADMIN"), listBody);
+        assertFalse(listBody.contains("admin-alpha"), listBody);
+
+        var create = POST("/api/bindings", "application/json",
+                "{\"agentId\":%d,\"channelType\":\"slack\",\"peerId\":\"USER\"}".formatted(adminAgentId));
+        assertEquals(404, create.status.intValue());
+    }
+
     // ==========================================================
     // POST /api/bindings (create)
     // ==========================================================
@@ -415,5 +443,9 @@ class ApiBindingsControllerTest extends FunctionalTest {
 
         assertEquals("high", resolvedAgentName(
                 () -> AgentBinding.findByChannel("web")));
+    }
+
+    private static long idOf(play.mvc.Http.Response response) {
+        return com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject().get("id").getAsLong();
     }
 }

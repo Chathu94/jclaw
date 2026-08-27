@@ -13,7 +13,6 @@ import utils.GsonHolder;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,11 +53,17 @@ public final class ProviderRegistry {
     private static final AtomicBoolean refreshing = new AtomicBoolean(false);
 
     public static LlmProvider get(String name) {
+        if (!ConfigService.currentConfigScopeIsGlobal()) {
+            return buildProviders(ConfigService.configMapForCurrentScope()).get(name);
+        }
         refreshIfNeeded();
         return cache.get(name);
     }
 
     public static List<LlmProvider> listAll() {
+        if (!ConfigService.currentConfigScopeIsGlobal()) {
+            return new ArrayList<>(buildProviders(ConfigService.configMapForCurrentScope()).values());
+        }
         refreshIfNeeded();
         return new ArrayList<>(cache.values());
     }
@@ -114,12 +119,16 @@ public final class ProviderRegistry {
     }
 
     private static void refreshInner() {
-        // Snapshot all config in one DB roundtrip — no lock held during IO,
-        // so concurrent get() calls are not blocked by the DB read.
-        var allConfigs = ConfigService.listAll();
-        var configMap = new HashMap<String, String>();
-        for (var c : allConfigs) configMap.put(c.key, c.value);
+        var newCache = buildProviders(ConfigService.configMapForGlobalScope());
 
+        // Only hold the lock for the atomic pointer swap
+        synchronized (refreshLock) {
+            cache = Collections.unmodifiableMap(newCache);
+            lastRefresh = System.currentTimeMillis();
+        }
+    }
+
+    private static LinkedHashMap<String, LlmProvider> buildProviders(Map<String, String> configMap) {
         // Sort provider names so ordering is stable regardless of the source
         // HashMap's bucket layout: getPrimary()/getSecondary() must not shift when
         // an unrelated config key resizes the map and reshuffles key iteration.
@@ -145,19 +154,14 @@ public final class ProviderRegistry {
             var config = buildProviderConfig(name, configMap);
             if (config != null) newCache.put(name, LlmProvider.forConfig(config));
         }
-
-        // Only hold the lock for the atomic pointer swap
-        synchronized (refreshLock) {
-            cache = Collections.unmodifiableMap(newCache);
-            lastRefresh = System.currentTimeMillis();
-        }
+        return newCache;
     }
 
     /**
      * Assemble a {@link ProviderConfig} for {@code name} from {@code configMap},
      * or return {@code null} when required credentials are missing.
      */
-    private static ProviderConfig buildProviderConfig(String name, HashMap<String, String> configMap) {
+    private static ProviderConfig buildProviderConfig(String name, Map<String, String> configMap) {
         var baseUrl = configMap.get(CONFIG_KEY_PREFIX + name + ".baseUrl");
         var apiKey = configMap.get(CONFIG_KEY_PREFIX + name + ".apiKey");
         if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) return null;

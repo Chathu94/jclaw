@@ -1,14 +1,16 @@
 import { describe, it, expect } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { readBody } from 'h3'
 import Index from '~/pages/index.vue'
 import Agents from '~/pages/agents/[[name]].vue'
 import Settings from '~/pages/settings.vue'
 import Logs from '~/pages/logs.vue'
 import Conversations from '~/pages/conversations/index.vue'
+import Access from '~/pages/access.vue'
 
 // Register mock API endpoints
-function setupMockApi() {
+function setupMockApi(usersHandler: () => unknown = defaultAccessUsers) {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'test', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: false, providerConfigured: true },
   ])
@@ -47,6 +49,48 @@ function setupMockApi() {
     { name: 'exec', description: 'Execute shell', system: false, enabled: true },
     { name: 'web_fetch', description: 'Fetch URLs', system: false, enabled: true },
   ])
+  registerEndpoint('/api/access/tenants', () => [
+    { id: 1, slug: 'default', name: 'Default', enabled: true },
+  ])
+  registerEndpoint('/api/access/teams', () => [
+    { id: 1, tenantId: 1, tenantSlug: 'default', slug: 'core', name: 'Core', enabled: true },
+  ])
+  registerEndpoint('/api/access/users', usersHandler)
+}
+
+function defaultAccessUsers() {
+  return [
+    {
+      id: 1,
+      username: 'admin',
+      displayName: 'Admin',
+      role: 'ALL_ADMIN',
+      tenantId: 1,
+      tenantSlug: 'default',
+      teamId: 1,
+      teamSlug: 'core',
+      enabled: true,
+      approved: true,
+      passwordSet: true,
+      approvedByUserId: null,
+      approvedAt: '2026-04-07T10:00:00Z',
+    },
+    {
+      id: 2,
+      username: 'tenant-admin',
+      displayName: 'Tenant Admin',
+      role: 'TENANT_ADMIN',
+      tenantId: 1,
+      tenantSlug: 'default',
+      teamId: 1,
+      teamSlug: 'core',
+      enabled: true,
+      approved: false,
+      passwordSet: false,
+      approvedByUserId: null,
+      approvedAt: null,
+    },
+  ]
 }
 
 describe('Dashboard page', () => {
@@ -155,6 +199,117 @@ describe('Settings page', () => {
     await flushPromises()
 
     expect(component.text()).not.toContain('Add Entry')
+  })
+})
+
+describe('Access page', () => {
+  it('renders hierarchy management and pending approvals', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Access)
+    await flushPromises()
+
+    expect(component.text()).toContain('Access')
+    expect(component.text()).toContain('Tenants')
+    expect(component.text()).toContain('Teams')
+    expect(component.text()).toContain('Users')
+    expect(component.text()).toContain('Pending admin approval')
+    expect(component.text()).toContain('Tenant Admin')
+  })
+
+  it('requires matching confirmed passwords before resetting a user password', async () => {
+    setupMockApi()
+    let postCount = 0
+    registerEndpoint('/api/access/users/2/password', {
+      method: 'POST',
+      handler: async (event) => {
+        postCount++
+        await readBody(event)
+        return {}
+      },
+    })
+    const component = await mountSuspended(Access)
+    await flushPromises()
+
+    await component.find('button[aria-label="Set password for tenant-admin"]').trigger('click')
+    await flushPromises()
+    const dialogInputs = Array.from(document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[type="password"]'))
+    expect(dialogInputs).toHaveLength(2)
+    const [passwordInput, confirmPasswordInput] = dialogInputs as [HTMLInputElement, HTMLInputElement]
+    passwordInput.value = 'tenant-admin-new-password'
+    passwordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    confirmPasswordInput.value = 'different-password'
+    confirmPasswordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector<HTMLFormElement>('[role="dialog"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushPromises()
+
+    expect(document.body.textContent).toContain('Passwords do not match.')
+    expect(postCount).toBe(0)
+    document.querySelector<HTMLButtonElement>('[role="dialog"] button[type="button"]')?.click()
+    await flushPromises()
+  })
+
+  it('posts the confirmed reset password and closes the modal', async () => {
+    let body: Record<string, unknown> | null = null
+    setupMockApi(() => {
+      return [
+        {
+          id: 1,
+          username: 'admin',
+          displayName: 'Admin',
+          role: 'ALL_ADMIN',
+          tenantId: 1,
+          tenantSlug: 'default',
+          teamId: 1,
+          teamSlug: 'core',
+          enabled: true,
+          approved: true,
+          passwordSet: true,
+          approvedByUserId: null,
+          approvedAt: '2026-04-07T10:00:00Z',
+        },
+        {
+          id: 2,
+          username: 'tenant-admin',
+          displayName: 'Tenant Admin',
+          role: 'TENANT_ADMIN',
+          tenantId: 1,
+          tenantSlug: 'default',
+          teamId: 1,
+          teamSlug: 'core',
+          enabled: true,
+          approved: false,
+          passwordSet: false,
+          approvedByUserId: null,
+          approvedAt: null,
+        },
+      ]
+    })
+    registerEndpoint('/api/access/users/2/password', {
+      method: 'POST',
+      handler: async (event) => {
+        body = await readBody(event) as Record<string, unknown>
+        return { ok: true }
+      },
+    })
+    const component = await mountSuspended(Access)
+    await flushPromises()
+
+    await component.find('button[aria-label="Set password for tenant-admin"]').trigger('click')
+    await flushPromises()
+    const dialogInputs = Array.from(document.querySelectorAll<HTMLInputElement>('[role="dialog"] input[type="password"]'))
+    expect(dialogInputs).toHaveLength(2)
+    const [passwordInput, confirmPasswordInput] = dialogInputs as [HTMLInputElement, HTMLInputElement]
+    passwordInput.value = 'tenant-admin-new-password'
+    passwordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    confirmPasswordInput.value = 'tenant-admin-new-password'
+    confirmPasswordInput.dispatchEvent(new Event('input', { bubbles: true }))
+    document.querySelector<HTMLFormElement>('[role="dialog"] form')?.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    for (let i = 0; i < 6; i++) {
+      await flushPromises()
+    }
+
+    expect(body).toEqual({ password: 'tenant-admin-new-password' })
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
   })
 })
 

@@ -12,6 +12,7 @@ import {
   HomeIcon,
   LinkIcon,
   MoonIcon,
+  ShieldCheckIcon,
   SunIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
@@ -40,6 +41,7 @@ const navItems = [
   { label: 'Agents', to: '/agents', icon: BotMessageSquare, keywords: 'bot ai assistant' },
   { label: 'Skills', to: '/skills', icon: BoltIcon, keywords: 'capability plugin' },
   { label: 'Tools', to: '/tools', icon: WrenchScrewdriverIcon, keywords: 'function action' },
+  { label: 'Access', to: '/access', icon: ShieldCheckIcon, keywords: 'tenant team user admin approval' },
   { label: 'Settings', to: '/settings', icon: Cog6ToothIcon, keywords: 'config provider api' },
   { label: 'Logs', to: '/logs', icon: Bars3Icon, keywords: 'events audit activity' },
 ]

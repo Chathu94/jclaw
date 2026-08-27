@@ -47,21 +47,24 @@ public final class SidecarCapabilityProbe {
         this.logLabel = logLabel;
     }
 
-    /** Snapshot for the Settings UI. Reports UNAVAILABLE when {@code uv} (the sidecar prerequisite) is absent. */
+    /** Snapshot for the Settings UI. Reports the last result of this probe instance. */
     public Snapshot snapshot() {
         var uv = UvProbe.lastResult();
-        // Force one probe if the cache is still on the UNRUN sentinel (mirrors the controller state path).
-        if (!uv.available() && uv.reason() != null && uv.reason().startsWith("uv probe has not run")) {
-            uv = UvProbe.probe();
-        }
-        var st = uv.available() ? state : State.UNAVAILABLE;
-        return new Snapshot(uv.available(), uv.reason(), st, capability, error);
+        return new Snapshot(uv.available(), uv.reason(), state, capability, error);
     }
 
     /** Kick off a background probe if one isn't already running. Idempotent — concurrent calls from the
      *  polling UI collapse onto the single in-flight probe. */
     public void probe() {
-        if (!UvProbe.isAvailable()) return; // snapshot() then reports UNAVAILABLE
+        if (!UvProbe.isAvailable()) {
+            synchronized (lock) {
+                if (state == State.PROBING) return;
+                capability = null;
+                error = UvProbe.lastResult().reason();
+                state = State.UNAVAILABLE;
+            }
+            return;
+        }
         synchronized (lock) {
             if (state == State.PROBING) return;
             state = State.PROBING;

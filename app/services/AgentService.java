@@ -6,6 +6,7 @@ import mcp.McpAllowlist;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Config;
+import models.UserAccount;
 import play.db.jpa.JPA;
 
 import java.nio.file.Path;
@@ -127,6 +128,19 @@ public class AgentService {
     public static Agent create(String name, String modelProvider, String modelId,
                                 String thinkingMode, String description,
                                 boolean createWorkspace, Agent parentAgent) {
+        return create(name, modelProvider, modelId, thinkingMode, description, createWorkspace, parentAgent, null);
+    }
+
+    public static Agent createForOwner(String name, String modelProvider, String modelId,
+                                       String thinkingMode, String description,
+                                       UserAccount ownerUser) {
+        return create(name, modelProvider, modelId, thinkingMode, description, true, null, ownerUser);
+    }
+
+    private static Agent create(String name, String modelProvider, String modelId,
+                                String thinkingMode, String description,
+                                boolean createWorkspace, Agent parentAgent,
+                                UserAccount ownerUser) {
         var agent = new Agent();
         agent.parentAgent = parentAgent;
         agent.name = name;
@@ -142,6 +156,15 @@ public class AgentService {
         // JCLAW-465: content compression defaults on for the main agent, off for
         // custom agents (same main-vs-custom split as the jclaw_api tool below).
         agent.compressionEnabled = agent.isMain();
+        if (parentAgent != null) {
+            AccessControlService.inheritScope(agent, parentAgent);
+        } else if (ownerUser != null) {
+            agent.tenant = ownerUser.tenant;
+            agent.team = ownerUser.primaryTeam;
+            agent.ownerUser = ownerUser;
+        } else {
+            AccessControlService.stampNewAgent(agent);
+        }
         agent.save();
 
         if (createWorkspace) {
@@ -376,12 +399,22 @@ public class AgentService {
         return Agent.findAll();
     }
 
+    public static List<Agent> listReadable() {
+        return AccessControlService.filterReadableAgents(listAll());
+    }
+
     public static List<Agent> listEnabled() {
         return Agent.findEnabled();
     }
 
     public static Agent findById(Long id) {
         return Agent.findById(id);
+    }
+
+    public static Agent findReadableById(Long id) {
+        var agent = findById(id);
+        if (!AccessControlService.canReadAgent(agent)) return null;
+        return agent;
     }
 
     public static Agent findByName(String name) {

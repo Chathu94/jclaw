@@ -105,6 +105,15 @@ class JClawApiToolTest extends UnitTest {
     }
 
     @Test
+    void blocksAccessControlPath() {
+        var result = tool.execute(
+                "{\"method\":\"POST\",\"path\":\"/api/access/users/2/password\"," +
+                "\"body\":{\"password\":\"new-password-123\"}}", null);
+        assertTrue(result.contains("/api/access/"),
+                "access-control user/password/admin endpoints must be blocked; got: " + result);
+    }
+
+    @Test
     void blocksWebhookPath() {
         var result = tool.execute(
                 "{\"method\":\"POST\",\"path\":\"/api/webhooks/telegram/x/y\"}", null);
@@ -269,6 +278,7 @@ class JClawApiToolTest extends UnitTest {
         var out = tool.execute("{\"action\":\"discover\"}", null);
         assertFalse(out.contains("/api/chat"), "deny-floored /api/chat leaked: " + out);
         assertFalse(out.contains("/api/auth"), "deny-floored /api/auth leaked: " + out);
+        assertFalse(out.contains("/api/access"), "deny-floored /api/access leaked: " + out);
         assertFalse(out.contains("/api/tailscale"), "deny-floored /api/tailscale leaked: " + out);
         assertFalse(out.contains("/api/logs"), "deny-floored /api/logs leaked: " + out);
         assertFalse(out.contains("ANY /api/"), "404 catch-all (@ChatHidden) leaked into discover: " + out);

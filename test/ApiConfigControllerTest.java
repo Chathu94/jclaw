@@ -108,6 +108,94 @@ class ApiConfigControllerTest extends FunctionalTest {
     }
 
     @Test
+    void tenantUserConfigIsScopedAwayFromAdminConfig() {
+        login();
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"ui.theme\",\"value\":\"admin-dark\"}"));
+
+        var tenantId = idOf(POST("/api/access/tenants", "application/json",
+                "{\"slug\":\"settingsco\",\"name\":\"Settings Co\"}"));
+        var teamId = idOf(POST("/api/access/teams", "application/json",
+                "{\"tenantId\":%d,\"slug\":\"support\",\"name\":\"Support\"}".formatted(tenantId)));
+        assertIsOk(POST("/api/access/users", "application/json",
+                ("{\"username\":\"settings-user\",\"displayName\":\"Settings User\",\"tenantId\":%d,"
+                        + "\"teamId\":%d,\"role\":\"USER\",\"password\":\"settings-password-123\"}")
+                        .formatted(tenantId, teamId)));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\":\"settings-user\",\"password\":\"settings-password-123\"}"));
+        var userInitial = GET("/api/config/ui.theme");
+        assertIsOk(userInitial);
+        assertTrue(getContent(userInitial).contains("\"value\":\"admin-dark\""), getContent(userInitial));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"ui.theme\",\"value\":\"user-light\"}"));
+
+        var userGet = GET("/api/config/ui.theme");
+        assertIsOk(userGet);
+        var userBody = getContent(userGet);
+        assertTrue(userBody.contains("\"key\":\"ui.theme\""), userBody);
+        assertTrue(userBody.contains("\"value\":\"user-light\""), userBody);
+        assertFalse(userBody.contains("admin-dark"), userBody);
+
+        var userList = GET("/api/config");
+        assertIsOk(userList);
+        assertTrue(getContent(userList).contains("\"value\":\"user-light\""), getContent(userList));
+        assertFalse(getContent(userList).contains("admin-dark"), getContent(userList));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        login();
+        var adminGet = GET("/api/config/ui.theme");
+        assertIsOk(adminGet);
+        var adminBody = getContent(adminGet);
+        assertTrue(adminBody.contains("\"value\":\"admin-dark\""), adminBody);
+        assertFalse(adminBody.contains("user-light"), adminBody);
+    }
+
+    @Test
+    void tenantUserProviderSettingsAndModelsAreScopedAwayFromAdminProviderSettings() {
+        login();
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.baseUrl\",\"value\":\"http://admin-provider.test\"}"));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.apiKey\",\"value\":\"sk-admin\"}"));
+        assertIsOk(POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"admin-model\",\"name\":\"Admin Model\"}"));
+
+        var tenantId = idOf(POST("/api/access/tenants", "application/json",
+                "{\"slug\":\"providerco\",\"name\":\"Provider Co\"}"));
+        var teamId = idOf(POST("/api/access/teams", "application/json",
+                "{\"tenantId\":%d,\"slug\":\"support\",\"name\":\"Support\"}".formatted(tenantId)));
+        assertIsOk(POST("/api/access/users", "application/json",
+                ("{\"username\":\"provider-user\",\"displayName\":\"Provider User\",\"tenantId\":%d,"
+                        + "\"teamId\":%d,\"role\":\"USER\",\"password\":\"provider-password-123\"}")
+                        .formatted(tenantId, teamId)));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\":\"provider-user\",\"password\":\"provider-password-123\"}"));
+        var userInitialModels = GET("/api/providers/test-provider/models");
+        assertIsOk(userInitialModels);
+        assertTrue(getContent(userInitialModels).contains("admin-model"), getContent(userInitialModels));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.baseUrl\",\"value\":\"http://user-provider.test\"}"));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.test-provider.apiKey\",\"value\":\"sk-user\"}"));
+        assertIsOk(POST("/api/providers/test-provider/models", "application/json",
+                "{\"id\":\"user-model\",\"name\":\"User Model\"}"));
+
+        var userModels = getContent(GET("/api/providers/test-provider/models"));
+        assertTrue(userModels.contains("admin-model"), userModels);
+        assertTrue(userModels.contains("user-model"), userModels);
+
+        POST("/api/auth/logout", "application/json", "{}");
+        login();
+        var adminModels = getContent(GET("/api/providers/test-provider/models"));
+        assertTrue(adminModels.contains("admin-model"), adminModels);
+        assertFalse(adminModels.contains("user-model"), adminModels);
+    }
+
+    @Test
     void deleteRejectsReservedKeyPrefix() {
         login();
         assertEquals(409, DELETE("/api/config/auth.internal.foo").status.intValue());
@@ -120,5 +208,9 @@ class ApiConfigControllerTest extends FunctionalTest {
         var resp = DELETE("/api/config/never.set.this");
         assertIsOk(resp);
         assertTrue(getContent(resp).contains("\"status\":\"ok\""));
+    }
+
+    private static long idOf(play.mvc.Http.Response response) {
+        return com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject().get("id").getAsLong();
     }
 }

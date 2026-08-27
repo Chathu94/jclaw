@@ -55,7 +55,9 @@ public final class ChannelStatusService {
             // Telegram: per-binding source of truth. The polling runner
             // iterates TelegramBinding rows; ChannelConfig is never
             // consulted on the Telegram path.
-            if (TelegramBinding.count(ENABLED_TRUE) > 0) {
+            List<TelegramBinding> telegramBindings = TelegramBinding.find(ENABLED_TRUE).fetch();
+            if (telegramBindings.stream().anyMatch(b ->
+                    b.agent != null && AgentService.findReadableById(b.agent.id) != null)) {
                 active.add("telegram");
             }
 
@@ -67,8 +69,9 @@ public final class ChannelStatusService {
             // row, no code change here.
             List<ChannelConfig> configs = ChannelConfig.find(ENABLED_TRUE).fetch();
             for (var c : configs) {
-                if (c.channelType != null && !c.channelType.isBlank()) {
-                    active.add(c.channelType);
+                if (c.channelType != null && !c.channelType.isBlank()
+                        && ConfigService.belongsToCurrentConfigScope(c.channelType)) {
+                    active.add(ConfigService.displayKeyForCurrentScope(c.channelType));
                 }
             }
 

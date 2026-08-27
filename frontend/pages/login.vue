@@ -4,6 +4,7 @@ import { EyeIcon, EyeSlashIcon } from '@heroicons/vue/24/outline'
 definePageMeta({ layout: false })
 
 const { login } = useAuth()
+const username = ref('admin')
 const password = ref('')
 const showPassword = ref(false)
 const error = ref('')
@@ -29,16 +30,13 @@ onMounted(() => {
 async function handleLogin() {
   error.value = ''
   loading.value = true
-  // Username is hardcoded to "admin" — JClaw is single-admin, the
-  // frontend doesn't surface the username-override path (conf still has
-  // jclaw.admin.username for operators who absolutely need it, but
-  // changing it breaks this login form; documented trade-off for UX).
-  const success = await login('admin', password.value)
+  const success = await login(username.value, password.value)
   loading.value = false
   if (success) navigateTo('/')
-  else error.value = 'Invalid password'
+  else error.value = 'Invalid username or password'
 }
 
+const usernameId = useId()
 const passwordId = useId()
 </script>
 
@@ -88,7 +86,7 @@ const passwordId = useId()
           Welcome back
         </h1>
         <p class="mt-1 text-sm text-fg-muted">
-          Sign in with your password.
+          Sign in to your tenant workspace.
         </p>
       </div>
 
@@ -96,24 +94,24 @@ const passwordId = useId()
         class="space-y-6"
         @submit.prevent="handleLogin"
       >
-        <!--
-          Hidden username input — JClaw is single-admin so the real username
-          is always "admin" (see handleLogin). Password managers and Chrome's
-          autofill heuristics pair credentials by looking for a sibling
-          username field; without one, they save/restore the password under
-          a guessed label. sr-only keeps the visual design unchanged.
-        -->
-        <input
-          id="login-username"
-          type="text"
-          name="username"
-          value="admin"
-          autocomplete="username"
-          readonly
-          tabindex="-1"
-          aria-label="Username (admin)"
-          class="sr-only"
+        <label
+          :for="usernameId"
+          class="block"
         >
+          <span class="block text-sm font-medium text-fg-strong mb-2">Username</span>
+          <input
+            :id="usernameId"
+            v-model="username"
+            type="text"
+            name="username"
+            autocomplete="username"
+            class="w-full h-9 px-4 rounded-[26px] text-sm text-fg-strong
+                   bg-[#dfe7e3]/30 border border-[#dfe7e3]
+                   dark:bg-fg-muted/10 dark:border-border
+                   focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
+                   transition-colors"
+          >
+        </label>
         <label
           :for="passwordId"
           class="block"

@@ -93,7 +93,7 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     @Operation(summary = "List an agent's tools and their enabled state")
     public static void listForAgent(Long id) {
-        Agent agent = AgentService.findById(id);
+        Agent agent = AgentService.findReadableById(id);
         if (agent == null) notFound();
 
         // Ask the agent loop what it will actually do rather than re-deriving the
@@ -144,7 +144,7 @@ public class ApiToolsController extends Controller {
     public static void updateForAgent(Long id, String name) {
         requireOperator();
 
-        Agent agent = AgentService.findById(id);
+        Agent agent = AgentService.findReadableById(id);
         if (agent == null) {
             notFound();
             throw ApiResponses.unreachable();
@@ -216,7 +216,7 @@ public class ApiToolsController extends Controller {
     public static void updateGroupForAgent(Long id, String group) {
         requireOperator();
 
-        Agent agent = AgentService.findById(id);
+        Agent agent = AgentService.findReadableById(id);
         if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();

@@ -111,4 +111,46 @@ class ApiChannelsControllerTest extends FunctionalTest {
         assertTrue(getContent(resp).contains("\"enabled\":false"),
                 "re-PUT must flip enabled: " + getContent(resp));
     }
+
+    @Test
+    void tenantUserChannelSettingsAreScopedAwayFromAdminChannelSettings() {
+        login();
+        assertIsOk(PUT("/api/channels/slack", "application/json",
+                "{\"config\":{\"chatId\":\"admin-room\"},\"enabled\":true}"));
+
+        var tenantId = idOf(POST("/api/access/tenants", "application/json",
+                "{\"slug\":\"channelco\",\"name\":\"Channel Co\"}"));
+        var teamId = idOf(POST("/api/access/teams", "application/json",
+                "{\"tenantId\":%d,\"slug\":\"support\",\"name\":\"Support\"}".formatted(tenantId)));
+        assertIsOk(POST("/api/access/users", "application/json",
+                ("{\"username\":\"channel-user\",\"displayName\":\"Channel User\",\"tenantId\":%d,"
+                        + "\"teamId\":%d,\"role\":\"USER\",\"password\":\"channel-password-123\"}")
+                        .formatted(tenantId, teamId)));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\":\"channel-user\",\"password\":\"channel-password-123\"}"));
+        assertEquals(404, GET("/api/channels/slack").status.intValue());
+        assertIsOk(PUT("/api/channels/slack", "application/json",
+                "{\"config\":{\"chatId\":\"user-room\"},\"enabled\":false}"));
+
+        var userBody = getContent(GET("/api/channels/slack"));
+        assertTrue(userBody.contains("\"channelType\":\"slack\""), userBody);
+        assertTrue(userBody.contains("user-room"), userBody);
+        assertFalse(userBody.contains("admin-room"), userBody);
+
+        var userList = getContent(GET("/api/channels"));
+        assertTrue(userList.contains("user-room"), userList);
+        assertFalse(userList.contains("admin-room"), userList);
+
+        POST("/api/auth/logout", "application/json", "{}");
+        login();
+        var adminBody = getContent(GET("/api/channels/slack"));
+        assertTrue(adminBody.contains("admin-room"), adminBody);
+        assertFalse(adminBody.contains("user-room"), adminBody);
+    }
+
+    private static long idOf(play.mvc.Http.Response response) {
+        return com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject().get("id").getAsLong();
+    }
 }

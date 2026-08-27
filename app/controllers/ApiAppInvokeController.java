@@ -203,7 +203,7 @@ public class ApiAppInvokeController extends Controller {
         }
         var agentIdStr = readAgentId(manifest, slug); // throws 4xx if manifest unreadable / no agent
         var agentId = parseAgentId(agentIdStr, slug);  // throws 400 if non-numeric
-        var agent = Tx.run(() -> AgentService.findById(agentId));
+        var agent = Tx.run(() -> AgentService.findReadableById(agentId));
         if (agent == null) {
             ApiResponses.error(400, "unknown_agent",
                     APP_PREFIX + slug + "' designates an agent that no longer exists");

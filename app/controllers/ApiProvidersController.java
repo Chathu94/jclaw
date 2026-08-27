@@ -117,8 +117,8 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     @Operation(summary = "Discover a provider's available models from its live API")
     public static void discoverModels(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
-        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
+        var baseUrl = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        var apiKey = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
 
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
@@ -148,7 +148,7 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ReachableResponse.class)))
     @Operation(summary = "Check whether a provider's endpoint is reachable right now")
     public static void reachable(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        var baseUrl = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             renderJSON(gson.toJson(new ReachableResponse(name, false, 0, "not configured")));
         }
@@ -173,11 +173,11 @@ public class ApiProvidersController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ProviderModelsResponse.class)))
     @Operation(summary = "List a provider's video-capable models from its live API")
     public static void videoModels(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        var baseUrl = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Provider '%s' has no base URL configured".formatted(name));
         }
-        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
+        var apiKey = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
         // Page-load read (Settings video-model dropdown) — cached; the explicit
         // POST /discover-models refresh still hits the provider live.
         var result = ModelDiscoveryService.discoverCached(name, baseUrl, apiKey == null ? "" : apiKey);
@@ -220,7 +220,7 @@ public class ApiProvidersController extends Controller {
     @Operation(summary = "List a provider's configured models (id + display name)")
     public static void models(String name) {
         requireConfiguredProvider(name);
-        var arr = parseModelsArray(ConfigService.get(modelsKey(name)));
+        var arr = parseModelsArray(ConfigService.getForCurrentScope(modelsKey(name)));
         var refs = new ArrayList<ModelRef>();
         for (var el : arr) {
             if (!el.isJsonObject()) continue;
@@ -258,7 +258,7 @@ public class ApiProvidersController extends Controller {
         var id = body.get("id").getAsString().trim();
 
         var key = modelsKey(name);
-        var models = parseModelsArray(ConfigService.get(key));
+        var models = parseModelsArray(ConfigService.getForCurrentScope(key));
         for (var el : models) {
             if (el.isJsonObject() && id.equals(JsonArgs.optString(el.getAsJsonObject(), "id", ""))) {
                 ApiResponses.error(409, ApiResponses.CONFLICT, "Model '%s' already exists for provider '%s'".formatted(id, name));
@@ -271,7 +271,7 @@ public class ApiProvidersController extends Controller {
                 : deriveName(id);
 
         models.add(buildModelObject(body, id, displayName));
-        ConfigService.setWithSideEffects(key, gson.toJson(models));
+        ConfigService.setWithSideEffects(ConfigService.storageKeyForCurrentScope(key), gson.toJson(models));
 
         renderJSON(gson.toJson(new AddModelResponse(name, new ModelRef(id, displayName), models.size())));
     }
@@ -311,8 +311,8 @@ public class ApiProvidersController extends Controller {
     @Operation(summary = "List a provider's models unfiltered, for the embedding picker")
     public static void embeddingModels(String name) {
         requireConfiguredProvider(name);
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
-        var apiKey = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
+        var baseUrl = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        var apiKey = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + API_KEY_SUFFIX);
         var refs = ModelDiscoveryService.listAllModelIds(Strings.trimTrailingSlash(baseUrl), apiKey).stream()
                 .map(id -> new ModelRef(id, deriveName(id)))
                 .toList();
@@ -433,7 +433,7 @@ public class ApiProvidersController extends Controller {
 
     /** 404s unless {@code name} is a configured provider (has a base URL). */
     private static void requireConfiguredProvider(String name) {
-        var baseUrl = ConfigService.get(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
+        var baseUrl = ConfigService.getForCurrentScope(PROVIDER_CONFIG_PREFIX + name + BASE_URL_SUFFIX);
         if (baseUrl == null || baseUrl.isBlank()) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, "Provider '%s' is not configured".formatted(name));
         }

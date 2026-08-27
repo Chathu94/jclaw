@@ -19,6 +19,7 @@ import models.Agent;
 import models.Memory;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.MemoryService;
@@ -128,13 +129,18 @@ public class ApiMemoryController extends Controller {
      * that ran but hit nothing — so callers short-circuit to zero rows/count
      * rather than issue a query that would return everything.
      */
-    private record ResolvedQuery(JpqlFilter filter, List<Long> ftsIds, boolean empty) {}
+    private record ResolvedQuery(JpqlFilter filter, List<Long> ftsIds,
+                                 List<Long> allowedAgentIds, boolean empty) {}
 
     private static ResolvedQuery resolveQuery(String q, String agent, String category, String importance) {
+        var allowedAgentIds = AgentService.listReadable().stream().map(a -> a.id).toList();
+        if (allowedAgentIds.isEmpty()) return new ResolvedQuery(null, null, null, true);
         Long agentIdFilter = null;
         if (agent != null && !agent.isBlank()) {
             agentIdFilter = agentIdForName(agent.strip());
-            if (agentIdFilter == null) return new ResolvedQuery(null, null, true);
+            if (agentIdFilter == null || !allowedAgentIds.contains(agentIdFilter)) {
+                return new ResolvedQuery(null, null, null, true);
+            }
         }
         var filter = new JpqlFilter()
                 .eq("m.agent.id", agentIdFilter)
@@ -142,8 +148,10 @@ public class ApiMemoryController extends Controller {
         applyImportance(filter, importance);
 
         var ftsResult = resolveFtsIds(filter, q);
-        if (ftsResult.isPresent() && ftsResult.get().isEmpty()) return new ResolvedQuery(null, null, true);
-        return new ResolvedQuery(filter, ftsResult.orElse(null), false);
+        if (ftsResult.isPresent() && ftsResult.get().isEmpty()) {
+            return new ResolvedQuery(null, null, null, true);
+        }
+        return new ResolvedQuery(filter, ftsResult.orElse(null), allowedAgentIds, false);
     }
 
     /**
@@ -157,6 +165,7 @@ public class ApiMemoryController extends Controller {
                 .where(whereClause(r.filter(), r.ftsIds() != null, status))
                 .positionalParams(r.filter().paramList())
                 .namedParam("fts", r.ftsIds())
+                .namedParam("allowedAgentIds", r.allowedAgentIds())
                 .orderBy(orderByClause(sort, dir));
     }
 
@@ -199,6 +208,8 @@ public class ApiMemoryController extends Controller {
      *  when nothing narrows. */
     private static String whereClause(JpqlFilter filter, boolean hasFts, String status) {
         var where = filter.toWhereClause();
+        where = where.isEmpty() ? "m.agent.id IN (:allowedAgentIds)"
+                : where + " AND m.agent.id IN (:allowedAgentIds)";
         if (hasFts) {
             where = where.isEmpty() ? "m.id IN (:fts)" : where + " AND m.id IN (:fts)";
         }
@@ -241,7 +252,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Adjust a memory's importance and/or category")
     public static void update(Long memoryId) {
         Memory memory = MemoryService.findById(memoryId);
-        if (memory == null) {
+        if (memory == null || AgentService.findReadableById(memory.agent.id) == null) {
             notFound();
             throw ApiResponses.unreachable();
         }
@@ -442,7 +453,7 @@ public class ApiMemoryController extends Controller {
         if (agentId.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
         }
-        Agent agent = Agent.findById(Long.valueOf(agentId));
+        Agent agent = AgentService.findReadableById(Long.valueOf(agentId));
         if (agent == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
         }
@@ -493,7 +504,7 @@ public class ApiMemoryController extends Controller {
         if (agentId.isBlank()) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "agentId is required");
         }
-        if (Agent.findById(Long.valueOf(agentId)) == null) {
+        if (AgentService.findReadableById(Long.valueOf(agentId)) == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
         }
 
@@ -556,7 +567,7 @@ public class ApiMemoryController extends Controller {
 
     /** 404s unless {@code agentId} names an existing agent. */
     private static void requireAgentById(Long agentId) {
-        if (agentId == null || Agent.<Agent>findById(agentId) == null) {
+        if (agentId == null || AgentService.findReadableById(agentId) == null) {
             ApiResponses.error(404, ApiResponses.NOT_FOUND, NO_SUCH_AGENT + agentId);
         }
     }
@@ -598,7 +609,7 @@ public class ApiMemoryController extends Controller {
     @Operation(summary = "Delete a memory")
     public static void delete(Long memoryId) {
         Memory memory = MemoryService.findById(memoryId);
-        if (memory == null) {
+        if (memory == null || AgentService.findReadableById(memory.agent.id) == null) {
             notFound();
             throw ApiResponses.unreachable();
         }
@@ -631,7 +642,7 @@ public class ApiMemoryController extends Controller {
         if (body.has("ids")) {
             for (var elem : body.getAsJsonArray("ids")) {
                 Memory m = MemoryService.findById(elem.getAsLong());
-                if (m != null) {
+                if (m != null && AgentService.findReadableById(m.agent.id) != null) {
                     m.deleteWithLineage();
                     deleted++;
                 }
@@ -699,14 +710,15 @@ public class ApiMemoryController extends Controller {
 
     /** Map of agent id (as string) to current name, for resolving the display label. */
     private static Map<String, String> agentNamesById() {
-        return Agent.<Agent>findAll().stream()
+        return AgentService.listReadable().stream()
                 .collect(Collectors.toMap(a -> String.valueOf(a.id), a -> a.name));
     }
 
     /** Resolve an agent name to its immutable id, or null when unknown. */
     private static Long agentIdForName(String name) {
         Agent a = Agent.find("name = ?1", name).first();
-        return a == null ? null : a.id;
+        if (a == null || !services.AccessControlService.canReadAgent(a)) return null;
+        return a.id;
     }
 
     private static String normalizeCategory(String c) {

@@ -6,6 +6,7 @@ import models.Agent;
 import models.ToolApprovalGrant;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.AgentService;
 import services.Tx;
 import utils.ApiResponses;
 
@@ -58,7 +59,7 @@ public class ApiToolApprovalsController extends Controller {
     }
 
     private static Agent requireAgent(Long id) {
-        var agent = (Agent) Agent.findById(id);
+        var agent = AgentService.findReadableById(id);
         if (agent == null) notFound();
         return agent;
     }
@@ -113,6 +114,7 @@ public class ApiToolApprovalsController extends Controller {
             var byAgent = new java.util.LinkedHashMap<Long, AgentGrantsView>();
             var total = 0;
             for (var g : ToolApprovalGrant.findAllGrants()) {
+                if (AgentService.findReadableById(g.agent.id) == null) continue;
                 total++;
                 var entry = byAgent.computeIfAbsent(g.agent.id,
                         _ -> new AgentGrantsView(g.agent.id, g.agent.name, new ArrayList<>()));

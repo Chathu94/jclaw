@@ -82,6 +82,12 @@ public class AuthCheck extends Controller {
             response.status = 401;
             renderJSON("{\"error\":\"Authentication required\",\"code\":\"credentials_changed\"}");
         }
+        if (!ApiAuthController.userCredentialVersionMatches(
+                session.get("username"), session.get(ApiAuthController.SESSION_USER_CREDENTIAL_VERSION))) {
+            session.clear();
+            response.status = 401;
+            renderJSON("{\"error\":\"Authentication required\",\"code\":\"credentials_changed\"}");
+        }
 
     }
 
@@ -98,7 +104,9 @@ public class AuthCheck extends Controller {
      */
     private static void requireProvisionedInstance() {
         var hash = ConfigService.get(ApiAuthController.PASSWORD_HASH_KEY);
-        if (hash == null || hash.isBlank()) {
+        var hasUserPassword = Tx.run(() ->
+                models.UserAccount.<models.UserAccount>count("passwordHash IS NOT NULL AND passwordHash <> ''") > 0);
+        if ((hash == null || hash.isBlank()) && !hasUserPassword) {
             session.clear();
             response.status = 401;
             renderJSON("{\"error\":\"Authentication required\",\"code\":\"password_unset\"}");

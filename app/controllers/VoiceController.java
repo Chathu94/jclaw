@@ -624,7 +624,7 @@ public class VoiceController extends WebSocketController {
     private static Agent resolveAgent(JsonObject msg) {
         if (!msg.has(KEY_AGENT_ID) || msg.get(KEY_AGENT_ID).isJsonNull()) return null;
         var agentId = msg.get(KEY_AGENT_ID).getAsLong();
-        return Tx.run(() -> AgentService.findById(agentId));
+        return Tx.run(() -> AgentService.findReadableById(agentId));
     }
 
     /**
