@@ -457,7 +457,7 @@ dependencies {
     // OkHttp 5.x JVM artifact (the bare `okhttp` artifact is Gradle-Metadata
     // only and Play 1.x's Ivy didn't understand it; under Gradle Metadata is
     // native, but we keep the jvm-suffixed coord to mirror the python config).
-    implementation("com.squareup.okhttp3:okhttp-jvm:5.4.0")
+    implementation("com.squareup.okhttp3:okhttp-jvm:5.5.0")
 
     // JCLAW-185: SSE + MockWebServer 5.x (plain POMs, no -jvm suffix).
     implementation("com.squareup.okhttp3:okhttp-sse:5.4.0")
