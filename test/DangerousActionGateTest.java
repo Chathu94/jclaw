@@ -296,7 +296,7 @@ class DangerousActionGateTest extends UnitTest {
         // Default off-channel policy is "allow" — but that permissive default exists
         // only for the operator's own web UI. An untrusted WhatsApp peer has no
         // interactive approval surface and no authenticated caller, so a dangerous
-        // tool must fail closed rather than reach ShellExecTool's /bin/sh -c ungated.
+        // tool must fail closed rather than reach ShellExecTool's host shell ungated.
         var agent = unboundAgent("gate-wa-default");
         var convId = whatsappConvId(agent);
 

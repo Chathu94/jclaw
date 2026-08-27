@@ -30,7 +30,8 @@ public class TesseractProbeJob extends Job<Void> {
             Logger.warn("OCR: %s. OCR-dependent inputs (image-only PDFs, plain images, "
                     + "scanned documents) will return empty text. Install with: "
                     + "brew install tesseract (macOS), apt-get install tesseract-ocr "
-                    + "(Debian/Ubuntu), or the equivalent for your platform.", r.reason());
+                    + "(Debian/Ubuntu), or winget install --id UB-Mannheim.TesseractOCR "
+                    + "(Windows).", r.reason());
         }
     }
 }

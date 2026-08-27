@@ -44,9 +44,10 @@ curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
 irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
 ```
 
-> On Windows the bundle runs through **Git Bash** or **WSL** (the launcher is a
-> POSIX shell script). The installer prefers Git Bash; if only WSL is present it
-> launches there; if neither is found it installs and prints how to run it.
+> On Windows the bundle runs through **Git Bash** or **WSL2**. The installer
+> prefers Git Bash so Windows Java, Tesseract, ffmpeg, Node/MCP commands and local
+> tools remain directly usable; WSL2 is the alternative when Linux sandboxing is
+> required. See the [Windows guide](docs/windows.md) for the support matrix.
 
 Once running, manage it with `jclaw status`, `jclaw stop`, `jclaw restart` from
 any new shell — the installer puts the `jclaw` command on your `PATH` (via
@@ -75,8 +76,11 @@ precompiled classes, and the prebuilt SPA.
 | `JCLAW_HOME` | `~/.jclaw` | Install directory |
 | `JCLAW_VERSION` | `latest` | Pin a release tag, e.g. `v0.14.7` |
 | `JCLAW_PORT` | `9000` | Port reported on launch |
+| `JCLAW_BIN_DIR` | `~/.local/bin` | Launcher directory (including the Windows `jclaw.cmd`) |
 | `JCLAW_NO_START` | — | Set to `1` to install without starting |
 | `JCLAW_BUNDLE_URL` | — | Install from a specific bundle URL (including `file://`) instead of GitHub Releases |
+| `JCLAW_INSTALL_TESSERACT` | — | Windows: set to `1` to install optional Tesseract OCR with winget/Chocolatey |
+| `TESSERACT_PATH` | — | Tesseract executable or install directory when it is outside `PATH` |
 
 ```bash
 # Pin a version and install without auto-starting:
@@ -200,6 +204,10 @@ Additional language packs install separately. The default is English
 (`eng`); install `tesseract-ocr-fra`, `tesseract-ocr-jpn`, etc. for other
 languages, then update `ocr.tesseract.languages` in `conf/application.conf`
 (e.g. `eng+fra+jpn`).
+
+JClaw also checks `ocr.tesseract.path`, `TESSERACT_PATH`, and the standard UB
+Mannheim/Scoop Windows install directories. The resolved executable is shown in
+**Settings → OCR**, which makes a service-account `PATH` mismatch visible.
 
 **Local Ollama** — required only if you want to bind agents to the
 `ollama-local` LLM provider for self-hosted inference. JClaw seeds
@@ -343,6 +351,10 @@ Most rebuilds reuse cached apt + JDK + Node layers and only re-download what cha
 - **`docker rmi` to clean up** — `docker rmi jclaw-devcontainer:latest` (or the container image name your IDE assigns) removes the cached image. The next "Reopen in Container" rebuilds from scratch.
 
 ### Development
+
+On Windows, run the launcher from Git Bash (`./jclaw.sh …`) or prefix it from
+PowerShell (`bash ./jclaw.sh …`). The full source setup, tool notes, and WSL2
+sandbox boundary are in the [Windows guide](docs/windows.md).
 
 ```bash
 # Start both backend and frontend in dev mode

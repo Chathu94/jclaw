@@ -313,7 +313,7 @@ export interface ConfigResponse {
 
 /**
  * One OCR backend in the GET /api/ocr/status response.
- * `available` is the runtime probe (binary on PATH); `enabled` is the user
+ * `available` is the runtime probe (PATH, configured path, or platform default); `enabled` is the user
  * toggle in the Config DB. The Settings page renders the toggle as
  * uninteractive when `available=false`, so a host without the binary
  * installed cannot have the backend turned on by accident.
@@ -325,6 +325,7 @@ export interface OcrBackend {
   enabled: boolean
   version: string | null
   reason: string | null
+  executable: string | null
   configKey: string
   description: string
   installHint: string

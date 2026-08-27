@@ -21,9 +21,13 @@
     JCLAW_HOME        install directory        (default: %USERPROFILE%\.jclaw)
     JCLAW_VERSION     release tag, or "latest"  (default: latest)
     JCLAW_PORT        port to report on launch  (default: 9000)
+    JCLAW_BIN_DIR     launcher directory         (default: %USERPROFILE%\.local\bin)
+    JCLAW_BUNDLE_URL  override bundle source     (URL or local file path)
     JCLAW_NO_START    set to 1 to install only, not start
     JCLAW_INSTALL_JRE set to 1 to download the Zulu JRE without prompting
     JCLAW_NO_JRE      set to 1 to never auto-install a JRE (fail if Java is missing)
+    JCLAW_INSTALL_TESSERACT set to 1 to install Tesseract OCR with winget/choco
+    TESSERACT_PATH    tesseract.exe or its directory when installed outside PATH
     JCLAW_NO_RC_EDIT  set to 1 to generate completion scripts but not edit your shell rc
     JCLAW_FORCE_REINSTALL  replace an existing install from scratch, DISCARDING its
                       database, workspace and credentials. Without it, an existing
@@ -40,9 +44,13 @@ $Repo      = 'tsukhani/jclaw'
 $JclawHome = if ($env:JCLAW_HOME)    { $env:JCLAW_HOME }    else { Join-Path $env:USERPROFILE '.jclaw' }
 $Version   = if ($env:JCLAW_VERSION) { $env:JCLAW_VERSION } else { 'latest' }
 $Port      = if ($env:JCLAW_PORT)    { $env:JCLAW_PORT }    else { '9000' }
-$NoStart   = [bool]$env:JCLAW_NO_START
-$NoJre      = [bool]$env:JCLAW_NO_JRE
-$InstallJre = [bool]$env:JCLAW_INSTALL_JRE
+$BinDir    = if ($env:JCLAW_BIN_DIR) { $env:JCLAW_BIN_DIR } else { Join-Path $env:USERPROFILE '.local\bin' }
+$BundleUrl = $env:JCLAW_BUNDLE_URL
+$NoStart   = $env:JCLAW_NO_START -match '^(?i:1|true|yes|on)$'
+$NoJre      = $env:JCLAW_NO_JRE -match '^(?i:1|true|yes|on)$'
+$InstallJre = $env:JCLAW_INSTALL_JRE -match '^(?i:1|true|yes|on)$'
+$InstallTesseract = $env:JCLAW_INSTALL_TESSERACT -match '^(?i:1|true|yes|on)$'
+$ForceReinstall = $env:JCLAW_FORCE_REINSTALL -match '^(?i:1|true|yes|on)$'
 $Asset     = 'jclaw-bundle.zip'
 $MinJava   = 25
 $AppDir    = Join-Path $JclawHome 'jclaw'   # bundle zip extracts under a jclaw\ prefix
@@ -190,6 +198,37 @@ function Test-Wsl {
     try { wsl.exe -l -q *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
 }
 
+function Find-Tesseract {
+    if ($env:TESSERACT_PATH) {
+        $candidate = if (Test-Path $env:TESSERACT_PATH -PathType Container) {
+            Join-Path $env:TESSERACT_PATH 'tesseract.exe'
+        } else { $env:TESSERACT_PATH }
+        if (Test-Path $candidate -PathType Leaf) { return (Resolve-Path $candidate).Path }
+    }
+    $command = Get-Command tesseract.exe -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+    $candidates = @()
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Tesseract-OCR\tesseract.exe' }
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'Tesseract-OCR\tesseract.exe' }
+    if ($env:LOCALAPPDATA) { $candidates += Join-Path $env:LOCALAPPDATA 'Programs\Tesseract-OCR\tesseract.exe' }
+    if ($env:USERPROFILE) { $candidates += Join-Path $env:USERPROFILE 'scoop\apps\tesseract\current\tesseract.exe' }
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path $candidate -PathType Leaf)) { return $candidate }
+    }
+    return $null
+}
+
+function Install-Tesseract {
+    if (Get-Command winget.exe -ErrorAction SilentlyContinue) {
+        & winget.exe install --id UB-Mannheim.TesseractOCR --exact --accept-package-agreements --accept-source-agreements
+    } elseif (Get-Command choco.exe -ErrorAction SilentlyContinue) {
+        & choco.exe install tesseract -y
+    } else {
+        throw 'neither winget nor Chocolatey is available; install Tesseract manually or set TESSERACT_PATH.'
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Tesseract installer exited $LASTEXITCODE" }
+}
+
 # Record the version installed and the checksum of conf/application.conf *as
 # shipped*. `jclaw.sh upgrade` compares the live conf against this to tell an
 # operator's edits from an untouched default: matching means it can safely
@@ -213,6 +252,7 @@ function Write-Manifest {
 }
 
 function Resolve-Url {
+    if ($BundleUrl) { return $BundleUrl }
     if ($Version -eq 'latest') {
         return "https://github.com/$Repo/releases/latest/download/$Asset"
     }
@@ -226,6 +266,8 @@ Banner
 # Pick how we'll run JClaw, and therefore which Java to validate.
 $gitBash = Find-GitBash
 $useWsl  = if ($gitBash) { $false } else { Test-Wsl }
+$tesseractReady = $false
+$tesseractLocation = $null
 
 Step 'Checking prerequisites'
 if ($useWsl) {
@@ -249,6 +291,28 @@ if ($useWsl) {
     if (-not $gitBash) { Substep 'Neither Git Bash nor WSL found - will install, then print run instructions.' }
 }
 
+if ($useWsl) {
+    wsl.exe bash -lc 'command -v tesseract >/dev/null 2>&1'
+    $tesseractReady = ($LASTEXITCODE -eq 0)
+    if ($tesseractReady) { Substep 'Tesseract OCR detected (in WSL)' }
+    else { Warn 'Tesseract OCR is not installed in WSL; run: sudo apt-get install tesseract-ocr' }
+} else {
+    $tesseractLocation = Find-Tesseract
+    if (-not $tesseractLocation -and $InstallTesseract) {
+        Step 'Installing Tesseract OCR'
+        try { Install-Tesseract; $tesseractLocation = Find-Tesseract }
+        catch { Warn "Tesseract install failed: $($_.Exception.Message)" }
+    }
+    if ($tesseractLocation) {
+        $env:TESSERACT_PATH = Split-Path $tesseractLocation
+        $tesseractReady = $true
+        Substep "Tesseract OCR detected at $tesseractLocation"
+    } else {
+        Warn 'Tesseract OCR not detected. Install with: winget install --id UB-Mannheim.TesseractOCR'
+        Substep 'Or re-run with JCLAW_INSTALL_TESSERACT=1; JClaw still installs without OCR.'
+    }
+}
+
 # Re-running the installer over an existing install is the obvious way to
 # update, so it has to be the safe one. The block below replaces $AppDir
 # wholesale and the release archive ships no data\, workspace\, logs\,
@@ -256,7 +320,7 @@ if ($useWsl) {
 # "delete the database, the agent workspace and the session-signing secret".
 # jclaw.sh upgrade carries all of that across, backs the database up first, and
 # rolls back a release that fails to start.
-if ((Test-Path (Join-Path $AppDir 'jclaw.sh')) -and -not $env:JCLAW_FORCE_REINSTALL) {
+if ((Test-Path (Join-Path $AppDir 'jclaw.sh')) -and -not $ForceReinstall) {
     if (-not ($gitBash -or $useWsl)) {
         Die "an install already exists at $AppDir, but neither Git Bash nor WSL is available to upgrade it. Install one, then re-run."
     }
@@ -273,7 +337,7 @@ if ((Test-Path (Join-Path $AppDir 'jclaw.sh')) -and -not $env:JCLAW_FORCE_REINST
     if ($LASTEXITCODE -ne 0) { Die "upgrade exited $LASTEXITCODE" }
     exit 0
 }
-if ((Test-Path $AppDir) -and $env:JCLAW_FORCE_REINSTALL) {
+if ((Test-Path $AppDir) -and $ForceReinstall) {
     Warn "JCLAW_FORCE_REINSTALL is set - $AppDir will be replaced from scratch."
     Warn 'Its database, workspace, credentials and installed apps will be lost.'
 }
@@ -287,7 +351,13 @@ $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("jclaw-install-" + [System.G
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $zip = Join-Path $tmp $Asset
 try {
-    Invoke-WebRequest -Uri $url -OutFile $zip
+    if (Test-Path -LiteralPath $url -PathType Leaf) {
+        Copy-Item -LiteralPath $url -Destination $zip
+    } elseif ($url -like 'file://*') {
+        Copy-Item -LiteralPath ([Uri]$url).LocalPath -Destination $zip
+    } else {
+        Invoke-WebRequest -Uri $url -OutFile $zip
+    }
 } catch {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     Die "download failed: $($_.Exception.Message)"
@@ -386,7 +456,6 @@ function ConvertTo-PosixPath($p) {
 # sufficient: install.sh runs `jclaw.sh shim` (line ~455) and this must too —
 # write_shim's only caller is that subcommand, so without it the PATH entry points
 # at an empty directory (JCLAW-1105 follow-up).
-$BinDir      = Join-Path $env:USERPROFILE '.local\bin'
 $pathChanged = $false
 $pathOk      = $false
 if ($gitBash -or $useWsl) {
@@ -438,6 +507,9 @@ if ($started) {
     Write-Host '  Open       ' -NoNewline; Write-Host "http://localhost:$Port" -ForegroundColor Cyan
 }
 Write-Host "  Installed  $AppDir" -ForegroundColor DarkGray
+Write-Host '  OCR        ' -NoNewline
+if ($tesseractReady) { Write-Host 'Tesseract ready' -ForegroundColor Green }
+else { Write-Host 'optional; not installed' -ForegroundColor Yellow }
 if ($pathOk) {
     Write-Host '  Command    ' -NoNewline; Write-Host 'jclaw start | stop | status' -ForegroundColor Cyan
     if ($pathChanged) {

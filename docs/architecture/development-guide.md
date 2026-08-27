@@ -12,6 +12,7 @@ How to set up, run, test, and iterate on jclaw locally.
 | pnpm | (pinned) | Exact version + `+sha512` hash live in `frontend/package.json`'s `packageManager` field; managed via corepack. |
 | Python | 3.10+ (optional) | Only for the local image/video generation sidecars (`sidecar/`); not needed for the `play` CLI. |
 | Tesseract | optional | OCR for the `documents` tool (image / scanned-PDF text). |
+| Git Bash or WSL2 | Windows only | Runs the Play/JClaw POSIX launchers. Git Bash keeps Windows-native Java and tools available; WSL2 enables the Linux ACP sandbox. |
 
 > Fastest path: use the **Dev Container** (`.devcontainer/`, Ubuntu 26.04 + Zulu 25 + Node 24 + the Play fork). "Reopen in Container" runs `./jclaw.sh setup` for you.
 
@@ -23,7 +24,12 @@ cd jclaw
 ./jclaw.sh setup            # wires git hooks, installs frontend deps, generates .env, verifies remotes
 ```
 
-`./jclaw.sh setup` is the one-time per-clone bootstrap (idempotent). The launcher installs Play deps (via the gradle `org.playframework.play1` plugin from `/opt/play1`) and frontend deps on first run. Manual frontend install: `cd frontend && pnpm install --frozen-lockfile`.
+`./jclaw.sh setup` is the one-time per-clone bootstrap (idempotent). The launcher installs Play deps (via the gradle `org.playframework.play1` plugin from `PLAY1_HOME`, default `/opt/play1`) and frontend deps on first run. Manual frontend install: `cd frontend && pnpm install --frozen-lockfile`.
+
+On Windows PowerShell, invoke the same bootstrap as `bash ./jclaw.sh setup`.
+Git for Windows supplies Bash and the Git hooks run through it. See the
+[Windows guide](../windows.md) for native tool resolution, Tesseract, WSL2, and
+the features that are platform-specific.
 
 ## Run locally
 
@@ -69,6 +75,9 @@ cd frontend && pnpm test:e2e
 cd frontend && pnpm test:e2e:ui        # headed + UI mode
 cd frontend && pnpm test:e2e:headed    # slow-mo, single worker
 ```
+
+The package scripts avoid POSIX-only `NAME=value command` syntax, so the
+frontend commands above run unchanged from PowerShell, cmd.exe, Git Bash, or WSL.
 
 Test DB: `%test.db.url=jdbc:h2:mem:play;MODE=MYSQL;LOCK_MODE=0` (set in `conf/application.conf`). Each test run boots a fresh in-memory DB.
 

@@ -32,10 +32,10 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // Auth bootstrap — global-setup.ts writes this file once per run.
     storageState: './tests/e2e/.auth/admin.json',
-    // PWSLOWMO=500 ./pnpm test:e2e --headed slows each action so a human can
-    // follow along. Default 0 keeps headless runs at full speed.
+    // Headed runs slow each action so a human can follow along. PWSLOWMO can
+    // override the default without requiring POSIX env-assignment syntax.
     launchOptions: {
-      slowMo: Number(process.env.PWSLOWMO) || 0,
+      slowMo: Number(process.env.PWSLOWMO) || (process.argv.includes('--headed') ? 500 : 0),
     },
   },
 

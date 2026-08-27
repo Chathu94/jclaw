@@ -49,6 +49,17 @@ Or use the one-line installer (downloads the latest bundle, installs to `~/.jcla
 curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/install.sh | sh
 ```
 
+Windows PowerShell uses the sibling installer:
+
+```powershell
+irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
+```
+
+It writes a `jclaw.cmd` launcher and adds its directory to the user `PATH`.
+The bundle lifecycle runs through Git Bash (preferred) or WSL2; see the
+[Windows guide](../windows.md). Docker Desktop is also supported and uses the
+same Compose file and persisted directories shown below.
+
 Custom port: `./jclaw.sh --backend-port 8080 start`.
 
 ## Docker (preferred in prod)

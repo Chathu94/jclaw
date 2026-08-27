@@ -2279,6 +2279,17 @@ do_setup() {
     echo "    Node:     $(node -v)"
     echo "    Play:     $(command -v play)"
     echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
+    if command -v tesseract >/dev/null 2>&1; then
+        echo "    OCR:      $(tesseract --version 2>&1 | head -1)"
+    else
+        echo "    OCR:      optional tesseract not found"
+        if [[ "$IS_WINDOWS" == 1 ]]; then
+            echo "              runtime also checks standard Windows install locations"
+            echo "              winget install --id UB-Mannheim.TesseractOCR"
+        else
+            echo "              brew install tesseract (macOS) or apt-get install tesseract-ocr (Debian/Ubuntu)"
+        fi
+    fi
 
     echo ""
     echo "==> Wiring git hooks (.githooks/)..."
@@ -2311,17 +2322,16 @@ do_setup() {
     # install files and ~42 generated skill manifests respectively. Tracking
     # them caused massive diffs every time BMAD upgraded between minor
     # versions (e.g. 6.2.2 → 6.5.0 deleted/moved hundreds of files), so we
-    # let setup regenerate them instead. Quick-update is the lightest action
-    # that keeps existing module settings AND re-registers the IDE; -y skips
-    # the prompts that would otherwise hang in non-interactive contexts;
-    # --directory pins it to this clone (otherwise it asks).
+    # let setup regenerate them instead. Update keeps existing module settings
+    # and re-registers the IDE; -y skips prompts that would otherwise hang in
+    # non-interactive contexts; --directory pins it to this clone.
     if ! command -v npx &>/dev/null; then
         echo "    Warning: npx not on PATH. Install Node.js to enable BMAD."
         echo "             Then re-run: ${INVOKE} setup"
     else
         npx bmad-method install \
             --directory "$SCRIPT_DIR" \
-            --action quick-update \
+            --action update \
             --tools claude-code \
             -y 2>&1 | tail -5
     fi

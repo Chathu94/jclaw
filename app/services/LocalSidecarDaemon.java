@@ -5,6 +5,7 @@ import okhttp3.Request;
 import play.Logger;
 import play.Play;
 import utils.HttpFactories;
+import utils.PlatformProcess;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -283,7 +284,7 @@ public final class LocalSidecarDaemon {
 
         Process proc;
         try {
-            var pb = new ProcessBuilder(cmd).directory(sidecarDir);
+            var pb = new ProcessBuilder(PlatformProcess.command(cmd)).directory(sidecarDir);
             // JCLAW-641: the sidecar's subprocess ceilings derive from the
             // JVM's timeout knob (minus a margin so the sidecar errors
             // before the JVM's socket gives up). Sidecars without the

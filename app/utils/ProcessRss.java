@@ -60,6 +60,7 @@ public final class ProcessRss {
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("linux")) return fromProcStatus();
         if (os.contains("mac")) return fromPs();
+        if (os.contains("windows")) return fromWindowsPowerShell();
         return null;
     }
 
@@ -101,6 +102,40 @@ public final class ProcessRss {
             return null;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    /** PowerShell exposes the process working set directly and without locale-dependent tasklist parsing. */
+    private static Long fromWindowsPowerShell() {
+        var command = "(Get-Process -Id %d).WorkingSet64"
+                .formatted(ProcessHandle.current().pid());
+        var pb = new ProcessBuilder("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive",
+                "-Command", command);
+        pb.redirectError(ProcessBuilder.Redirect.DISCARD);
+        try {
+            var p = pb.start();
+            if (!p.waitFor(2, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return null;
+            }
+            if (p.exitValue() != 0) return null;
+            return parseWindowsWorkingSet(
+                    new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException _) {
+            return null;
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    public static Long parseWindowsWorkingSet(String output) {
+        if (output == null || output.isBlank()) return null;
+        try {
+            var bytes = Long.parseLong(output.strip());
+            return bytes > 0 ? bytes : null;
+        } catch (NumberFormatException _) {
             return null;
         }
     }

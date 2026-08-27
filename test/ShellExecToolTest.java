@@ -89,6 +89,18 @@ class ShellExecToolTest extends UnitTest {
     }
 
     @Test
+    void windowsPathMatchesByBasenameOnEveryHost() {
+        ConfigService.set("shell.allowlist", "tool.exe");
+        assertNull(tool.validateAllowlist("C:\\Tools\\tool.exe --version"));
+    }
+
+    @Test
+    void quotedWindowsPathWithSpacesIsExtractedAsOneCommandToken() {
+        ConfigService.set("shell.allowlist", "tool.exe");
+        assertNull(tool.validateAllowlist("\"C:\\Program Files\\Tools\\tool.exe\" --version"));
+    }
+
+    @Test
     void explicitPathInAllowlistStillMatches() {
         // Operators who want strict path-scoped allowlists (list an exact relative
         // path) keep working — exact-token match is checked alongside basename.
@@ -375,7 +387,7 @@ class ShellExecToolTest extends UnitTest {
     // ==================== Shell-composition posture (JCLAW-146) ====================
     //
     // These tests pin the documented posture: the allowlist validates only the
-    // first token, and the command is executed via /bin/sh -c so shell
+    // first token, and the command is executed through the host shell so shell
     // composition/metacharacters ARE allowed by design. See the class-level
     // JavaDoc on ShellExecTool for the rationale. If any of these tests fail,
     // somebody has attempted to harden the allowlist into per-token gating —

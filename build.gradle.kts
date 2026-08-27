@@ -28,7 +28,7 @@ spotless {
 }
 
 play1 {
-    val playRoot = file("/opt/play1")
+    val playRoot = file(providers.environmentVariable("PLAY1_HOME").getOrElse("/opt/play1"))
     frameworkPath.set(playRoot)
 
     // Pinned framework version range. Bump when migrating to a new minor
@@ -45,8 +45,8 @@ play1 {
     // the repo root so both Dockerfiles can read it (avoids a stale parse
     // of this Gradle file from inside Docker, which silently broke when
     // build.gradle.kts switched to the dynamic `installed` variable). To
-    // bump play1: edit .play-version AND ensure /opt/play1 is on the
-    // matching release.
+    // bump play1: edit .play-version AND ensure PLAY1_HOME (default /opt/play1)
+    // is on the matching release.
     val declaredFile = rootProject.file(".play-version")
     require(declaredFile.isFile) {
         "Missing $declaredFile — expected a single line with the pinned play1 version (e.g. 1.13.7)."

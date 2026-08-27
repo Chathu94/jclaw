@@ -11,6 +11,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.PlatformProcess;
 import utils.SubprocessEnv;
 import utils.WorkspacePathGuard;
 
@@ -37,7 +38,8 @@ import java.util.stream.Collectors;
  * <h2>Security posture (JCLAW-146)</h2>
  *
  * <p>This tool is <strong>not</strong> a sandbox. It invokes commands via
- * {@code /bin/sh -c}, which means the full shell grammar is available:
+ * the host shell ({@code /bin/sh} on Unix, Git Bash or PowerShell on Windows),
+ * which means the full shell grammar is available:
  * composition ({@code ;}, {@code &&}, {@code ||}), pipes ({@code |}), command
  * substitution ({@code $(...)}, backticks), redirection ({@code > < >>}),
  * subshells ({@code (cmd)}), and variable expansion. Only the <em>first token</em>
@@ -375,23 +377,28 @@ public class ShellExecTool implements ToolRegistry.Tool {
     /**
      * Extract the final path segment of a command token: {@code "./a/b/wacli"}
      * → {@code "wacli"}, {@code "/usr/bin/grep"} → {@code "grep"}, plain
-     * {@code "ls"} → {@code "ls"}. Returns an empty string for tokens that
-     * resolve to no filename (e.g. {@code "/"}). Defensive against malformed
-     * input: any exception from {@code Path.of} (invalid path syntax on the
-     * platform) is treated as "no basename," forcing the exact-token check.
+     * {@code "ls"} → {@code "ls"}. Both path separators are recognized so a
+     * Windows path is validated correctly even when tests run on Unix. Returns
+     * an empty string for tokens that resolve to no filename (e.g. {@code "/"}).
      */
     static String commandBasename(String token) {
         if (token == null || token.isEmpty()) return "";
-        try {
-            var name = Path.of(token).getFileName();
-            return name == null ? "" : name.toString();
-        } catch (Exception _) {
-            return "";
-        }
+        var normalized = token.replace('\\', '/');
+        var slash = normalized.lastIndexOf('/');
+        return slash == normalized.length() - 1 ? "" : normalized.substring(slash + 1);
     }
 
     static String extractFirstToken(String command) {
         var trimmed = command.strip();
+        if (trimmed.isEmpty()) return "";
+        var quote = trimmed.charAt(0);
+        if (quote == '\'' || quote == '"') {
+            for (int i = 1; i < trimmed.length(); i++) {
+                if (trimmed.charAt(i) == quote && trimmed.charAt(i - 1) != '\\') {
+                    return trimmed.substring(1, i);
+                }
+            }
+        }
         var idx = -1;
         for (int i = 0; i < trimmed.length(); i++) {
             if (Character.isWhitespace(trimmed.charAt(i))) {
@@ -515,7 +522,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     private static Process startProcess(String command, Path workdir, Map<String, String> env)
             throws IOException {
-        var pb = new ProcessBuilder("/bin/sh", "-c", command);
+        var pb = new ProcessBuilder(PlatformProcess.shellCommand(command));
         pb.directory(workdir.toFile());
         pb.redirectErrorStream(true);
         pb.environment().clear();
