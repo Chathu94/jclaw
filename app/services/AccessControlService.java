@@ -161,13 +161,13 @@ public class AccessControlService {
     }
 
     /**
-     * Seed a user's private config namespace once from the current global defaults.
-     * Generic settings stay value-for-value, while main-agent defaults are copied to
-     * the user's personal default agent keyspace. Later edits remain independent.
+     * Seed missing values in a user's private config namespace from the current
+     * global defaults. Generic settings stay value-for-value, while main-agent
+     * defaults are copied to the user's personal default agent keyspace. Existing
+     * scoped values remain independent and are never overwritten.
      */
     private static void ensureInitialUserConfig(UserAccount user, String personalAgentName) {
         var marker = ConfigService.storageKeyForUser(user, CONFIG_SEEDED_KEY);
-        if (Config.findByKey(marker) != null) return;
 
         for (var config : ConfigService.configMapForGlobalScope().entrySet()) {
             var key = templateKeyForUser(config.getKey(), personalAgentName);
@@ -177,7 +177,7 @@ public class AccessControlService {
                 ConfigService.set(scopedKey, config.getValue());
             }
         }
-        ConfigService.set(marker, "true");
+        if (Config.findByKey(marker) == null) ConfigService.set(marker, "true");
     }
 
     private static String templateKeyForUser(String key, String personalAgentName) {

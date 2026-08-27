@@ -160,6 +160,42 @@ class ApiAccessControllerTest extends FunctionalTest {
     }
 
     @Test
+    void tenantUserBackfillsMissingConfigDefaultsAfterInitialSeed() {
+        login();
+        var tenantId = idOf(POST("/api/access/tenants", "application/json",
+                "{\"slug\":\"backfillco\",\"name\":\"Backfill Co\"}"));
+        var teamId = idOf(POST("/api/access/teams", "application/json",
+                "{\"tenantId\":%d,\"slug\":\"ops\",\"name\":\"Ops\"}".formatted(tenantId)));
+        var userResp = POST("/api/access/users", "application/json",
+                ("{\"username\":\"hank\",\"displayName\":\"Hank\",\"tenantId\":%d,"
+                        + "\"teamId\":%d,\"role\":\"USER\",\"password\":\"hank-password-123\"}")
+                        .formatted(tenantId, teamId));
+        assertIsOk(userResp);
+        var userId = idOf(userResp);
+        var userPrefix = "user." + userId + ".";
+        var personalAgent = "user-" + userId + "-main";
+        assertEquals("true", ConfigService.get(userPrefix + "auth.initialConfigSeeded"));
+
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"provider.later-provider.baseUrl\",\"value\":\"http://later-provider.test\"}"));
+        assertIsOk(POST("/api/providers/later-provider/models", "application/json",
+                "{\"id\":\"later-model\",\"name\":\"Later Model\"}"));
+        assertIsOk(POST("/api/config", "application/json",
+                "{\"key\":\"agent.main.queue.mode\",\"value\":\"dispatch\"}"));
+
+        POST("/api/auth/logout", "application/json", "{}");
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\":\"hank\",\"password\":\"hank-password-123\"}"));
+
+        assertEquals("http://later-provider.test",
+                ConfigService.get(userPrefix + "provider.later-provider.baseUrl"));
+        assertNotNull(ConfigService.get(userPrefix + "provider.later-provider.models"));
+        assertEquals("dispatch",
+                ConfigService.get(userPrefix + "agent." + personalAgent + ".queue.mode"));
+        assertNull(ConfigService.get(userPrefix + "agent.main.queue.mode"));
+    }
+
+    @Test
     void tenantUserCannotChatThroughBootstrapMainAgentById() {
         var mainAgentId = commitInFreshTx(() ->
                 AgentService.create(Agent.MAIN_AGENT_NAME, "openrouter", "gpt-4.1").id);
